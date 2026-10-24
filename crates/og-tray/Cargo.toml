@@ -1,0 +1,19 @@
+[package]
+name = "og-tray"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "AudioGridderPluginTray"
+path = "src/main.rs"
+
+[dependencies]
+og-common = { path = "../og-common" }
+og-goodlookinui = { path = "../og-goodlookinui" }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }

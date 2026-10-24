@@ -1,0 +1,34 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/og-common",
+    "crates/og-dsp",
+    "crates/og-goodlookinui",
+    "crates/og-hosting",
+    "crates/og-screen",
+    "crates/og-client",
+    "crates/og-server",
+    "crates/og-plugin",
+    "crates/og-tray",
+]
+
+[workspace.package]
+version = "1.2.1"
+edition = "2021"
+license = "MIT"
+authors = ["Marcos Deida", "Andreas Pohl (Original AudioGridder Concept & Architecture)"]
+repository = "https://github.com/MistaMin/OpenGridder"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rmp-serde = "1.3"
+libc = "0.2"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+log = "0.4"
+env_logger = "0.11"
+image = { version = "0.25", default-features = false, features = ["png"] }
+libloading = "0.8"
+base64 = "0.22"
+dirs = "5.0"
