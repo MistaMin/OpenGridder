@@ -12,7 +12,7 @@ use og_common::message::{
     ExchangePayload, HandshakeRequest, HandshakeResponse, KeyPayload, MessageFactory,
     MessageType, MidiEvent, MousePayload, OversamplingPayload, ParameterValuePayload, PositionInfo,
     PresetPayload, RawMessage, ScreenBoundsPayload, AG_PROTOCOL_VERSION, HANDSHAKE_FLAGS_LOCAL_MODE,
-    HANDSHAKE_FLAGS_SANDBOX_ENABLED,
+    HANDSHAKE_FLAGS_SANDBOX_ENABLED, HANDSHAKE_FLAG_STATE_ACK, HANDSHAKE_RESP_FLAG_STATE_ACK,
 };
 use og_common::server_plugin::{PluginLayout, PluginParameter, ServerPlugin};
 use parking_lot::Mutex;
@@ -71,6 +71,7 @@ pub struct Client {
     plugins: Mutex<Vec<ServerPlugin>>,
     ready: AtomicBool,
     sandbox_enabled: AtomicBool,
+    state_ack: AtomicBool,
     latency_samples: AtomicI32,
     server_cpu_load: AtomicU32,
 }
@@ -92,6 +93,7 @@ impl Client {
             plugins: Mutex::new(Vec::new()),
             ready: AtomicBool::new(false),
             sandbox_enabled: AtomicBool::new(false),
+            state_ack: AtomicBool::new(false),
             latency_samples: AtomicI32::new(0),
             server_cpu_load: AtomicU32::new(0),
         }
@@ -144,7 +146,7 @@ impl Client {
         let _ = master.set_read_timeout(Some(timeout));
         let _ = master.set_write_timeout(Some(timeout));
 
-        let mut flags = 0u8;
+        let mut flags = HANDSHAKE_FLAG_STATE_ACK;
         if cfg.local_mode {
             flags |= HANDSHAKE_FLAGS_LOCAL_MODE;
         }
@@ -175,6 +177,7 @@ impl Client {
             ));
         }
 
+        self.state_ack.store(resp.is_flag(HANDSHAKE_RESP_FLAG_STATE_ACK), Ordering::Relaxed);
         self.sandbox_enabled.store(
             resp.is_flag(HANDSHAKE_FLAGS_SANDBOX_ENABLED),
             Ordering::Relaxed,
@@ -205,6 +208,13 @@ impl Client {
         let screen_sock = TcpStream::connect_timeout(&worker_addr, timeout)
             .map_err(|e| format!("worker screen connect failed: {}", e))?;
         let _ = screen_sock.set_nodelay(true);
+
+        // Native adapters perform IO on a worker which must be able to stop.
+        // Bound stalled peer reads/writes on every stream, including worker ports.
+        for socket in [&cmd_out, &cmd_in, &audio_sock, &screen_sock] {
+            socket.set_read_timeout(Some(timeout)).map_err(|e| e.to_string())?;
+            socket.set_write_timeout(Some(timeout)).map_err(|e| e.to_string())?;
+        }
 
         // Receive initial PluginList message on cmdOut
         let msg = MessageFactory::get_next_message(&mut cmd_out, None)
@@ -389,7 +399,16 @@ impl Client {
             .map_err(|e| e.to_string())?;
         RawMessage::new(MessageType::PluginSettings, settings.to_vec())
             .send(sock)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        if self.state_ack.load(Ordering::Relaxed) {
+            let reply = MessageFactory::get_next_message(sock, None).map_err(|e| e.to_string())?;
+            if reply.msg_type_enum() != MessageType::Result { return Err("Unexpected state restore acknowledgement".into()); }
+            let result: serde_json::Value = serde_json::from_slice(&reply.payload).map_err(|e| e.to_string())?;
+            if result.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+                return Err(result.get("error").and_then(|v| v.as_str()).unwrap_or("State restore failed").into());
+            }
+        }
+        Ok(())
     }
 
     /// Bypass plugin `idx` (`MessageType::BypassPlugin`).

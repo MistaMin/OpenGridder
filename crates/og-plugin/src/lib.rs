@@ -4,6 +4,8 @@
 pub mod editor;
 pub mod plugin_formats;
 pub mod processor;
+pub mod native;
+mod spsc;
 
 pub use editor::PluginEditor;
 pub use processor::{
@@ -26,11 +28,12 @@ mod tests {
         let server = Server::new(srv_cfg);
 
         let test_plugin = ServerPlugin {
+            module_path: String::new(),
             name: "Marcos Saturator".to_string(),
             company: "MistaMin DSP".to_string(),
-            id: "VST3-marcos-sat".to_string(),
+            id: "OpenGridder:Gain".to_string(),
             id_deprecated: "Marcos Saturator".to_string(),
-            plugin_type: "VST3".to_string(),
+            plugin_type: "OpenGridder".to_string(),
             category: "Fx".to_string(),
             version: "1.2.1".to_string(),
             is_instrument: false,

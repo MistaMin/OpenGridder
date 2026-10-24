@@ -1,8 +1,8 @@
 //! macOS AudioUnit (`AudioToolbox` + `CoreFoundation`) native C FFI scanner and host.
 //! Zero JUCE dependency.
 
-use crate::{HostedPlugin, HostedPluginInstance};
-use og_common::server_plugin::{PluginLayout, PluginParameter, ServerPlugin};
+use crate::HostedPlugin;
+use og_common::server_plugin::{PluginLayout, ServerPlugin};
 
 #[cfg(target_os = "macos")]
 #[link(name = "AudioToolbox", kind = "framework")]
@@ -52,7 +52,13 @@ fn fourcc_to_string(code: u32) -> String {
     let bytes = code.to_be_bytes();
     bytes
         .iter()
-        .map(|&b| if (32..=126).contains(&b) { b as char } else { '?' })
+        .map(|&b| {
+            if (32..=126).contains(&b) {
+                b as char
+            } else {
+                '?'
+            }
+        })
         .collect()
 }
 
@@ -129,10 +135,11 @@ pub fn scan_audiounits() -> Vec<ServerPlugin> {
                     fourcc_to_string(desc.component_sub_type),
                     fourcc_to_string(desc.component_manufacturer)
                 );
-                let unique_id = ((desc.component_sub_type as i64) << 32)
-                    | (desc.component_manufacturer as i64);
+                let unique_id =
+                    ((desc.component_sub_type as i64) << 32) | (desc.component_manufacturer as i64);
 
                 results.push(ServerPlugin {
+                    module_path: String::new(),
                     name: name.clone(),
                     company,
                     id: id.clone(),
@@ -145,36 +152,7 @@ pub fn scan_audiounits() -> Vec<ServerPlugin> {
                     num_input_ch: if is_instrument { 0 } else { 2 },
                     num_output_ch: 2,
                     presets: vec!["Default".to_string()],
-                    parameters: vec![
-                        PluginParameter {
-                            idx: 0,
-                            name: "Bypass".to_string(),
-                            default_value: 0.0,
-                            current_value: 0.0,
-                            category: 0,
-                            label: String::new(),
-                            num_steps: 2,
-                            is_boolean: true,
-                            is_discrete: true,
-                            is_meta: false,
-                            is_orient_inv: false,
-                            all_value_strings: vec!["Off".to_string(), "On".to_string()],
-                        },
-                        PluginParameter {
-                            idx: 1,
-                            name: "Output Gain".to_string(),
-                            default_value: 0.5,
-                            current_value: 0.5,
-                            category: 0,
-                            label: "dB".to_string(),
-                            num_steps: 0x7fffffff,
-                            is_boolean: false,
-                            is_discrete: false,
-                            is_meta: false,
-                            is_orient_inv: false,
-                            all_value_strings: Vec::new(),
-                        },
-                    ],
+                    parameters: Vec::new(),
                     layouts: vec![PluginLayout {
                         inputs: if is_instrument {
                             vec![]
@@ -183,7 +161,7 @@ pub fn scan_audiounits() -> Vec<ServerPlugin> {
                         },
                         outputs: vec!["Stereo".to_string()],
                     }],
-                    has_editor: true,
+                    has_editor: false,
                     scoped_id: format!("AudioUnit:{}", id),
                 });
             }
@@ -193,5 +171,13 @@ pub fn scan_audiounits() -> Vec<ServerPlugin> {
 }
 
 pub fn instantiate_audiounit(desc: &ServerPlugin) -> Result<Box<dyn HostedPlugin>, String> {
-    Ok(Box::new(HostedPluginInstance::new(desc.clone())))
+    #[cfg(target_os = "macos")]
+    {
+        Ok(Box::new(crate::au_native::AudioUnitPlugin::new(desc)?))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = desc;
+        Err("Audio Units are only supported on macOS".into())
+    }
 }

@@ -10,7 +10,7 @@ use crate::screen_worker::ScreenWorker;
 use og_common::message::{
     send_json_message, AddPluginResult, CpuLoadPayload, ExchangePayload, HandshakeRequest,
     MessageFactory, MessageType, OversamplingPayload, ParameterValuePayload, PresetPayload,
-    RawMessage,
+    RawMessage, HANDSHAKE_FLAG_STATE_ACK,
 };
 use og_common::server_plugin::ServerPlugin;
 use og_hosting::PluginFormatManager;
@@ -73,8 +73,13 @@ impl Worker {
         }
 
         // 2. Spawn AudioWorker and ScreenWorker
-        let mut audio_worker =
-            AudioWorker::spawn(audio_stream, self.chain.clone(), self.running.clone());
+        let mut audio_worker = AudioWorker::spawn(
+            audio_stream,
+            self.chain.clone(),
+            self.running.clone(),
+            self.handshake.samples_per_block as usize,
+            self.handshake.channels_out as usize,
+        );
         let mut screen_worker = ScreenWorker::spawn(
             screen_stream,
             self.chain.clone(),
@@ -109,8 +114,7 @@ impl Worker {
             MessageType::Quit => return false,
 
             MessageType::AddPlugin => {
-                let req: serde_json::Value =
-                    serde_json::from_str(msg.as_str()).unwrap_or_default();
+                let req: serde_json::Value = serde_json::from_str(msg.as_str()).unwrap_or_default();
                 let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 let layout = req
                     .get("layout")
@@ -128,24 +132,21 @@ impl Worker {
                     .find(|p| p.id == id || p.scoped_id == id || p.id_deprecated == id)
                     .cloned();
 
-                let desc = maybe_desc.unwrap_or_else(|| ServerPlugin {
-                    name: id.to_string(),
-                    company: "OpenGridder".to_string(),
-                    id: id.to_string(),
-                    id_deprecated: id.to_string(),
-                    plugin_type: "VST3".to_string(),
-                    category: "Fx".to_string(),
-                    version: "1.2.1".to_string(),
-                    is_instrument: false,
-                    unique_id: 1,
-                    num_input_ch: self.handshake.channels_in,
-                    num_output_ch: self.handshake.channels_out,
-                    presets: vec!["Default".to_string()],
-                    parameters: og_hosting::vst3::default_plugin_parameters(),
-                    layouts: Vec::new(),
-                    has_editor: true,
-                    scoped_id: format!("VST3:{}", id),
-                });
+                let Some(mut desc) = maybe_desc else {
+                    let res = AddPluginResult {
+                        ok: false,
+                        latency_samples: self.chain.latency_samples(),
+                        disabled_sidechain: false,
+                        err: format!("Plugin is not in the server catalog: {id}"),
+                    };
+                    let _ = send_json_message(cmd_stream, MessageType::AddPluginResult, &res);
+                    return true;
+                };
+                // Negotiate the client channel count before native plugin initialization.
+                if layout != "Multi-Mono" {
+                    desc.num_input_ch = self.handshake.channels_in;
+                    desc.num_output_ch = self.handshake.channels_out;
+                }
 
                 match Processor::new(
                     &self.format_mgr,
@@ -188,11 +189,9 @@ impl Worker {
                             .send(cmd_stream);
                         let _ = RawMessage::from_str(MessageType::PluginLayouts, &layouts_json)
                             .send(cmd_stream);
-                        let _ = RawMessage::new(
-                            MessageType::Latency,
-                            total_lat.to_le_bytes().to_vec(),
-                        )
-                        .send(cmd_stream);
+                        let _ =
+                            RawMessage::new(MessageType::Latency, total_lat.to_le_bytes().to_vec())
+                                .send(cmd_stream);
                     }
                     Err(err) => {
                         let res = AddPluginResult {
@@ -243,15 +242,28 @@ impl Worker {
             }
 
             MessageType::SetPluginSettings => {
-                if msg.payload.len() >= 4 {
-                    let idx = i32::from_le_bytes(msg.payload[0..4].try_into().unwrap());
-                    if let Ok(settings_msg) = MessageFactory::get_next_message(cmd_stream, None) {
-                        if idx >= 0 {
-                            if let Some(proc) = self.chain.get_processor(idx as usize) {
-                                let _ = proc.lock().set_state_information(&settings_msg.payload);
-                            }
-                        }
-                    }
+                if msg.payload.len() < 4 {
+                    return false;
+                }
+                let idx = i32::from_le_bytes(msg.payload[0..4].try_into().unwrap());
+                let Ok(settings_msg) = MessageFactory::get_next_message(cmd_stream, None) else {
+                    return false;
+                };
+                let result = if settings_msg.msg_type_enum() != MessageType::PluginSettings {
+                    Err("Expected plugin state data".to_string())
+                } else if idx < 0 {
+                    Err("Invalid plugin index".to_string())
+                } else if let Some(proc) = self.chain.get_processor(idx as usize) {
+                    proc.lock().set_state_information(&settings_msg.payload)
+                } else {
+                    Err("Plugin index is not loaded".to_string())
+                };
+                if let Err(error) = &result {
+                    log::warn!("State restore failed: {error}");
+                }
+                if self.handshake.flags & HANDSHAKE_FLAG_STATE_ACK != 0 {
+                    let response = serde_json::json!({"ok": result.is_ok(), "error": result.err().unwrap_or_default()});
+                    let _ = send_json_message(cmd_stream, MessageType::Result, &response);
                 }
             }
 
@@ -333,8 +345,7 @@ impl Worker {
                 if let Some(req) = ParameterValuePayload::from_bytes(&msg.payload) {
                     if req.idx >= 0 && req.param_idx >= 0 {
                         if let Some(proc) = self.chain.get_processor(req.idx as usize) {
-                            proc.lock()
-                                .set_parameter(req.param_idx as usize, req.value);
+                            proc.lock().set_parameter(req.param_idx as usize, req.value);
                         }
                     }
                 }
@@ -362,9 +373,11 @@ impl Worker {
             }
 
             MessageType::CpuLoad => {
-                let cpu = CpuLoadPayload { val: 3.5 };
-                let _ = RawMessage::new(MessageType::CpuLoad, cpu.to_bytes().to_vec())
-                    .send(cmd_stream);
+                let cpu = CpuLoadPayload {
+                    val: self.chain.cpu_load(),
+                };
+                let _ =
+                    RawMessage::new(MessageType::CpuLoad, cpu.to_bytes().to_vec()).send(cmd_stream);
             }
 
             MessageType::ScreenCaptureArea

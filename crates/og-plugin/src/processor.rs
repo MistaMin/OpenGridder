@@ -93,18 +93,18 @@ impl LoadedPlugin {
             }
         }
         serde_json::json!([
-            self.id,                             // 0: DATA_IDX::ID
-            self.name,                           // 1: DATA_IDX::NAME
-            self.settings_base64,                // 2: DATA_IDX::SETTINGS
-            serde_json::Value::Null,             // 3: DATA_IDX::PRESETS (deprecated)
-            jparams,                             // 4: DATA_IDX::PARAMS
-            self.bypassed,                       // 5: DATA_IDX::BYPASSED
-            self.layout,                         // 6: DATA_IDX::LAYOUT
-            self.mono_channels.to_u64(),         // 7: DATA_IDX::MONO_CHANNELS
-            self.latency,                        // 8: DATA_IDX::LATENCY
-            self.id_deprecated,                  // 9: DATA_IDX::ID_DEPRECATED
-            self.disabled_sidechain,             // 10: DATA_IDX::DISABLED_SIDECHAIN
-            self.oversampling_factor             // 11: DATA_IDX::OVERSAMPLING_FACTOR
+            self.id,                     // 0: DATA_IDX::ID
+            self.name,                   // 1: DATA_IDX::NAME
+            self.settings_base64,        // 2: DATA_IDX::SETTINGS
+            serde_json::Value::Null,     // 3: DATA_IDX::PRESETS (deprecated)
+            jparams,                     // 4: DATA_IDX::PARAMS
+            self.bypassed,               // 5: DATA_IDX::BYPASSED
+            self.layout,                 // 6: DATA_IDX::LAYOUT
+            self.mono_channels.to_u64(), // 7: DATA_IDX::MONO_CHANNELS
+            self.latency,                // 8: DATA_IDX::LATENCY
+            self.id_deprecated,          // 9: DATA_IDX::ID_DEPRECATED
+            self.disabled_sidechain,     // 10: DATA_IDX::DISABLED_SIDECHAIN
+            self.oversampling_factor     // 11: DATA_IDX::OVERSAMPLING_FACTOR
         ])
     }
 
@@ -282,54 +282,52 @@ impl PluginProcessor {
         cfg.port = port;
         self.client.set_config(cfg);
         self.client.connect()?;
-        self.sync_remote_plugins();
+        if let Err(error) = self.sync_remote_plugins() {
+            self.client.disconnect();
+            return Err(error);
+        }
         Ok(())
     }
 
     /// Re-synchronize all loaded plugins with the server upon connection or state restore,
     /// including resending `set_plugin_oversampling` when `oversampling_factor > 1`
     /// (matching `PluginProcessor.cpp` lines 404-406 in commit `559863f`).
-    pub fn sync_remote_plugins(&mut self) {
+    pub fn sync_remote_plugins(&mut self) -> Result<(), String> {
         if !self.client.is_ready() {
-            return;
+            return Ok(());
         }
         for (idx, lp) in self.loaded_plugins.iter_mut().enumerate() {
-            if let Ok((res, params, layouts, presets)) =
+            lp.ok = false;
+            let (res, params, layouts, presets) =
                 self.client
-                    .add_plugin(&lp.id, &lp.layout, lp.mono_channels.to_u64())
-            {
-                lp.ok = res.ok;
-                lp.latency = res.latency_samples;
-                lp.disabled_sidechain = res.disabled_sidechain;
-                lp.layouts = layouts;
-                lp.presets = presets;
-                for p in params {
-                    lp.params.entry(p.idx).or_insert(p);
-                }
-
-                if !lp.settings_base64.is_empty() {
-                    if let Ok(bytes) = BASE64.decode(&lp.settings_base64) {
-                        let _ = self.client.set_plugin_settings(idx as i32, &bytes);
-                    }
-                }
-                if lp.bypassed {
-                    let _ = self.client.bypass_plugin(idx as i32);
-                }
-                if lp.oversampling_factor > 1 {
-                    let _ = self
-                        .client
-                        .set_plugin_oversampling(idx as i32, lp.oversampling_factor);
-                }
+                    .add_plugin(&lp.id, &lp.layout, lp.mono_channels.to_u64())?;
+            lp.latency = res.latency_samples;
+            lp.disabled_sidechain = res.disabled_sidechain;
+            lp.layouts = layouts;
+            lp.presets = presets;
+            for p in params {
+                lp.params.entry(p.idx).or_insert(p);
             }
+            if lp.oversampling_factor > 1 {
+                self.client
+                    .set_plugin_oversampling(idx as i32, lp.oversampling_factor)?;
+            }
+            if !lp.settings_base64.is_empty() {
+                let bytes = BASE64
+                    .decode(&lp.settings_base64)
+                    .map_err(|e| format!("Invalid saved plugin state: {e}"))?;
+                self.client.set_plugin_settings(idx as i32, &bytes)?;
+            }
+            if lp.bypassed {
+                self.client.bypass_plugin(idx as i32)?;
+            }
+            lp.ok = true;
         }
         self.latency_samples = self.client.latency_samples();
+        Ok(())
     }
 
-    pub fn load_plugin(
-        &mut self,
-        plugin: &ServerPlugin,
-        layout: &str,
-    ) -> Result<usize, String> {
+    pub fn load_plugin(&mut self, plugin: &ServerPlugin, layout: &str) -> Result<usize, String> {
         let mut lp = LoadedPlugin::new(&plugin.id, &plugin.name);
         lp.id_deprecated = plugin.id_deprecated.clone();
         lp.layout = layout.to_string();
@@ -483,6 +481,11 @@ impl PluginProcessor {
         if let Some(srv) = j.get("activeServer").and_then(|v| v.as_str()) {
             self.active_server = srv.to_string();
         }
+        if self.client.is_ready() {
+            for index in (0..self.loaded_plugins.len()).rev() {
+                self.client.del_plugin(index as i32)?;
+            }
+        }
         self.loaded_plugins.clear();
         if let Some(arr) = j.get("loadedPlugins").and_then(|v| v.as_array()) {
             for item in arr {
@@ -491,7 +494,7 @@ impl PluginProcessor {
                 }
             }
         }
-        self.sync_remote_plugins();
+        self.sync_remote_plugins()?;
         Ok(())
     }
 

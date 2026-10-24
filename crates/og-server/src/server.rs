@@ -11,7 +11,7 @@ use crate::worker::Worker;
 use og_common::defaults::{get_config_file_name, ConfigFileKind, DEFAULT_SERVER_PORT};
 use og_common::message::{
     read_value, write_value, HandshakeRequest, HandshakeResponse, AG_PROTOCOL_VERSION,
-    HANDSHAKE_FLAGS_SANDBOX_ENABLED,
+    HANDSHAKE_FLAGS_SANDBOX_ENABLED, HANDSHAKE_FLAG_STATE_ACK, HANDSHAKE_RESP_FLAG_STATE_ACK,
 };
 use og_common::server_plugin::ServerPlugin;
 use og_common::utils::{json_load_from_file, json_save_to_file};
@@ -87,6 +87,8 @@ pub struct Server {
     running: Arc<AtomicBool>,
     bound_port: Mutex<u16>,
     accept_handle: Mutex<Option<JoinHandle<()>>>,
+    worker_executable: Option<PathBuf>,
+    children: Arc<Mutex<Vec<std::process::Child>>>,
 }
 
 impl Default for Server {
@@ -114,7 +116,13 @@ impl Server {
             running: Arc::new(AtomicBool::new(false)),
             bound_port: Mutex::new(DEFAULT_SERVER_PORT),
             accept_handle: Mutex::new(None),
+            worker_executable: None,
+            children: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    pub fn set_worker_executable(&mut self, executable: PathBuf) {
+        self.worker_executable = Some(executable);
     }
 
     pub fn config(&self) -> ServerConfig {
@@ -164,6 +172,15 @@ impl Server {
         guard.len()
     }
 
+    /// Current isolated chain processes, for diagnostics and lifecycle monitoring.
+    pub fn worker_process_ids(&self) -> Vec<u32> {
+        self.children
+            .lock()
+            .iter()
+            .map(std::process::Child::id)
+            .collect()
+    }
+
     pub fn bound_port(&self) -> u16 {
         *self.bound_port.lock()
     }
@@ -171,12 +188,20 @@ impl Server {
     /// Start listening on `host:port` (pass `port = 0` for OS-assigned ephemeral port in tests).
     pub fn start(&self, host: &str, port: u16) -> Result<u16, String> {
         self.stop();
+        let mode = SandboxMode::from_i32(self.config.lock().sandbox_mode);
+        if mode == SandboxMode::Plugin {
+            return Err(
+                "Per-plugin process isolation is not implemented; use chain isolation".into(),
+            );
+        }
+        if mode == SandboxMode::Chain && (self.worker_executable.is_none() || !cfg!(unix)) {
+            return Err(
+                "Chain isolation requires the standalone worker executable on a Unix host".into(),
+            );
+        }
         let listener = TcpListener::bind((host, port))
             .map_err(|e| format!("failed to bind {}:{}: {}", host, port, e))?;
-        let actual_port = listener
-            .local_addr()
-            .map_err(|e| e.to_string())?
-            .port();
+        let actual_port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let _ = listener.set_nonblocking(true);
 
         *self.bound_port.lock() = actual_port;
@@ -187,11 +212,22 @@ impl Server {
         let known = self.known_plugins.clone();
         let recents = self.recents.clone();
         let cfg = self.config.lock().clone();
+        let executable = self.worker_executable.clone();
+        let children = self.children.clone();
 
         let handle = thread::Builder::new()
             .name("OG-ServerAccept".to_string())
             .spawn(move || {
                 while run_flag.load(Ordering::Relaxed) {
+                    children.lock().retain_mut(|child| match child.try_wait() {
+                        Ok(Some(status)) => {
+                            if !status.success() {
+                                log::warn!("Plugin chain worker {} exited: {status}", child.id());
+                            }
+                            false
+                        }
+                        _ => true,
+                    });
                     match listener.accept() {
                         Ok((master_stream, _peer)) => {
                             let _ = master_stream.set_nonblocking(false);
@@ -203,6 +239,8 @@ impl Server {
                                 known.clone(),
                                 recents.clone(),
                                 cfg.clone(),
+                                executable.as_deref(),
+                                children.clone(),
                             );
                         }
                         Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -225,7 +263,12 @@ impl Server {
         known: Arc<Mutex<Vec<ServerPlugin>>>,
         recents: Arc<Mutex<Vec<ServerPlugin>>>,
         cfg: ServerConfig,
+        executable: Option<&std::path::Path>,
+        children: Arc<Mutex<Vec<std::process::Child>>>,
     ) {
+        let timeout = Some(Duration::from_secs(5));
+        let _ = master_stream.set_read_timeout(timeout);
+        let _ = master_stream.set_write_timeout(timeout);
         let Ok(req_bytes) = read_value::<_, { HandshakeRequest::SIZE }>(&mut master_stream) else {
             return;
         };
@@ -233,31 +276,81 @@ impl Server {
             return;
         };
 
-        let local_port = listener.local_addr().map(|a| a.port()).unwrap_or(DEFAULT_SERVER_PORT);
+        if req.version != AG_PROTOCOL_VERSION
+            || !(1..=32).contains(&req.channels_in)
+            || !(1..=32).contains(&req.channels_out)
+            || req.channels_in != req.channels_out
+            || req.channels_sc != 0
+            || !(1..=8192).contains(&req.samples_per_block)
+            || !req.sample_rate.is_finite()
+            || !(8000.0..=192000.0).contains(&req.sample_rate)
+        {
+            return;
+        }
+        // Give every session its own port so concurrent clients cannot interleave
+        // their command/audio sockets on the global accept queue.
+        let Ok(address) = listener.local_addr() else {
+            return;
+        };
+        let Ok(worker_listener) = TcpListener::bind((address.ip(), 0)) else {
+            return;
+        };
+        let _ = worker_listener.set_nonblocking(true);
+        let Ok(worker_address) = worker_listener.local_addr() else {
+            return;
+        };
+        let local_port = worker_address.port();
+        let peer = master_stream.peer_addr().ok().map(|a| a.ip());
         let mut resp = HandshakeResponse {
             version: AG_PROTOCOL_VERSION,
             flags: 0,
             port: local_port as i32,
             unused: [0; 6],
         };
-        if SandboxMode::from_i32(cfg.sandbox_mode) != SandboxMode::None {
+        if SandboxMode::from_i32(cfg.sandbox_mode) == SandboxMode::Chain && executable.is_some() {
             resp.set_flag(HANDSHAKE_FLAGS_SANDBOX_ENABLED);
         }
 
+        if req.flags & HANDSHAKE_FLAG_STATE_ACK != 0 {
+            resp.set_flag(HANDSHAKE_RESP_FLAG_STATE_ACK);
+        }
         if write_value(&mut master_stream, &resp.to_bytes()).is_err() {
             return;
         }
 
-        // Accept the 3 remaining worker connections (`cmdIn`, `audio`, `screen`)
-        let Some(cmd_in_stream) = Self::accept_blocking(listener) else {
+        drop(master_stream);
+        let mut connections = Vec::new();
+        for _ in 0..4 {
+            let Some(stream) = Self::accept_blocking(&worker_listener) else {
+                return;
+            };
+            if stream.peer_addr().ok().map(|a| a.ip()) != peer {
+                return;
+            }
+            let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+            connections.push(stream);
+        }
+        let Ok([master_stream, cmd_in_stream, audio_stream, screen_stream]) =
+            <Vec<TcpStream> as TryInto<[TcpStream; 4]>>::try_into(connections)
+        else {
             return;
         };
-        let Some(audio_stream) = Self::accept_blocking(listener) else {
+        #[cfg(unix)]
+        if SandboxMode::from_i32(cfg.sandbox_mode) == SandboxMode::Chain {
+            if let Some(executable) = executable {
+                match crate::isolation::spawn(
+                    executable,
+                    [master_stream, cmd_in_stream, audio_stream, screen_stream],
+                    req,
+                    known.lock().clone(),
+                    cfg.screen_diff_detection,
+                ) {
+                    Ok(child) => children.lock().push(child),
+                    Err(error) => log::error!("{error}"),
+                }
+            }
             return;
-        };
-        let Some(screen_stream) = Self::accept_blocking(listener) else {
-            return;
-        };
+        }
 
         thread::Builder::new()
             .name("OG-Worker".to_string())
@@ -296,6 +389,10 @@ impl Server {
         self.running.store(false, Ordering::SeqCst);
         if let Some(h) = self.accept_handle.lock().take() {
             let _ = h.join();
+        }
+        for mut child in self.children.lock().drain(..) {
+            let _ = child.kill();
+            let _ = child.wait();
         }
     }
 }

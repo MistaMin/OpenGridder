@@ -48,7 +48,13 @@ impl Processor {
 
         let mut plugins = Vec::with_capacity(num_slots);
         for _ in 0..num_slots {
-            let instance = format_mgr.create_plugin_instance(desc, sample_rate, max_block_size)?;
+            let mut slot_desc = desc.clone();
+            if is_mono {
+                slot_desc.num_input_ch = 1;
+                slot_desc.num_output_ch = 1;
+            }
+            let instance =
+                format_mgr.create_plugin_instance(&slot_desc, sample_rate, max_block_size)?;
             plugins.push(instance);
         }
 
@@ -69,7 +75,7 @@ impl Processor {
             extra_out_channels: 0,
             last_known_latency: 0,
         };
-        proc.prepare_to_play(sample_rate, max_block_size);
+        proc.try_prepare_to_play(sample_rate, max_block_size)?;
         Ok(proc)
     }
 
@@ -90,6 +96,18 @@ impl Processor {
     }
 
     pub fn prepare_to_play(&mut self, sample_rate: f64, max_block_size: usize) {
+        if let Err(error) = self.try_prepare_to_play(sample_rate, max_block_size) {
+            log::error!("{}: {error}", self.id);
+            self.prepared = false;
+            self.suspend_processing(true);
+        }
+    }
+
+    fn try_prepare_to_play(
+        &mut self,
+        sample_rate: f64,
+        max_block_size: usize,
+    ) -> Result<(), String> {
         self.sample_rate = sample_rate;
         self.max_block_size = max_block_size.max(64);
         let factor = self.oversamplers.factor.as_usize();
@@ -103,13 +121,12 @@ impl Processor {
         self.oversamplers.factor = OversamplingFactor::from_factor(factor as i32);
 
         for plugin in &mut self.plugins {
-            plugin.prepare_to_play(
-                sample_rate * (factor as f64),
-                self.max_block_size * factor,
-            );
+            plugin
+                .try_prepare_to_play(sample_rate * (factor as f64), self.max_block_size * factor)?;
         }
         self.prepared = true;
         self.update_bypass_buffers();
+        Ok(())
     }
 
     pub fn release_resources(&mut self) {
@@ -139,10 +156,15 @@ impl Processor {
             }
             self.oversamplers.reset();
             for plugin in &mut self.plugins {
-                plugin.prepare_to_play(
+                if let Err(error) = plugin.try_prepare_to_play(
                     self.sample_rate * (f_usize as f64),
                     self.max_block_size * f_usize,
-                );
+                ) {
+                    log::error!("{} oversampling setup failed: {error}", self.id);
+                    self.prepared = false;
+                    self.suspended = true;
+                    break;
+                }
                 if !self.suspended {
                     plugin.suspend_processing(false);
                 }
@@ -163,7 +185,9 @@ impl Processor {
             .first()
             .map(|p| p.latency_samples())
             .unwrap_or(0);
-        base_lat + self.oversamplers.latency_samples()
+        // Plugin latency is measured at its processing rate, which grows with oversampling.
+        let factor = self.oversamplers.factor.as_usize() as i32;
+        base_lat.max(0).saturating_add(factor - 1) / factor + self.oversamplers.latency_samples()
     }
 
     pub fn set_plugin_latency_samples(&mut self, lat: i32) {
@@ -228,6 +252,12 @@ impl Processor {
         midi: &mut Vec<MidiEvent>,
         pos: &PositionInfo,
     ) {
+        if !self.prepared {
+            for channel in buffer {
+                channel.fill(0.0);
+            }
+            return;
+        }
         let num_samples = buffer.first().map(|c| c.len()).unwrap_or(0);
         self.update_bypass_buffers();
         if self.suspended {
@@ -276,6 +306,12 @@ impl Processor {
         midi: &mut Vec<MidiEvent>,
         pos: &PositionInfo,
     ) {
+        if !self.prepared {
+            for channel in buffer {
+                channel.fill(0.0);
+            }
+            return;
+        }
         let num_samples = buffer.first().map(|c| c.len()).unwrap_or(0);
         self.update_bypass_buffers();
         if self.suspended {

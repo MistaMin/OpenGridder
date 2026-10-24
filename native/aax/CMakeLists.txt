@@ -1,0 +1,30 @@
+cmake_minimum_required(VERSION 3.22)
+project(OpenGridderAAX LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(AAX_SDK_ROOT "" CACHE PATH "Externally supplied AAX SDK (never copied into this repository)")
+set(OPENGRIDDER_RUST_LIBRARY "" CACHE FILEPATH "Architecture-matched Rust libog_plugin.a")
+if(NOT EXISTS "${AAX_SDK_ROOT}/Interfaces/AAX.h")
+  message(FATAL_ERROR "Set AAX_SDK_ROOT to an installed licensed AAX SDK")
+endif()
+if(NOT EXISTS "${OPENGRIDDER_RUST_LIBRARY}")
+  message(FATAL_ERROR "Build Rust og-plugin staticlib and set OPENGRIDDER_RUST_LIBRARY")
+endif()
+file(GLOB AAX_LIBRARY_SOURCES CONFIGURE_DEPENDS "${AAX_SDK_ROOT}/Libs/AAXLibrary/source/*.cpp")
+add_library(opengridder_aax_sdk STATIC ${AAX_LIBRARY_SOURCES})
+target_include_directories(opengridder_aax_sdk PUBLIC
+  "${AAX_SDK_ROOT}/Interfaces" "${AAX_SDK_ROOT}/Interfaces/ACF"
+  "${AAX_SDK_ROOT}/Libs/AAXLibrary/include")
+target_compile_definitions(opengridder_aax_sdk PUBLIC MAC_VERSION=1 _LIBCPP_ENABLE_CXX17_REMOVED_AUTO_PTR)
+target_compile_options(opengridder_aax_sdk PUBLIC -include TargetConditionals.h)
+add_library(OpenGridder MODULE OpenGridder.cpp "${AAX_SDK_ROOT}/Interfaces/AAX_Exports.cpp")
+target_include_directories(OpenGridder PRIVATE ../include)
+target_link_libraries(OpenGridder PRIVATE opengridder_aax_sdk "${OPENGRIDDER_RUST_LIBRARY}"
+  "-framework Foundation" "-framework CoreFoundation" "-framework AudioToolbox"
+  "-framework AppKit" "-framework Security" "-framework SystemConfiguration" iconv resolv)
+set(BUNDLE_DIR "${CMAKE_BINARY_DIR}/OpenGridder.aaxplugin")
+set_target_properties(OpenGridder PROPERTIES PREFIX "" SUFFIX ""
+  LIBRARY_OUTPUT_DIRECTORY "${BUNDLE_DIR}/Contents/MacOS")
+file(MAKE_DIRECTORY "${BUNDLE_DIR}/Contents/Resources")
+configure_file(Info.plist.in "${BUNDLE_DIR}/Contents/Info.plist" @ONLY)
+file(WRITE "${BUNDLE_DIR}/Contents/PkgInfo" "TDMwPTul")

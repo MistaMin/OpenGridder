@@ -1,0 +1,68 @@
+name: Prepare macOS AAX preview
+on:
+  workflow_dispatch:
+    inputs:
+      notarize:
+        description: Submit compiled installer and disk image to Apple notarization
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: opengridder-aax-signing
+  cancel-in-progress: false
+jobs:
+  configuration:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report signing runner configuration
+        env:
+          READY: ${{ vars.OPENGRIDDER_AAX_RELEASE_READY }}
+        run: |
+          if [ "$READY" = true ]; then
+            echo 'Using the configured private SDK/signing runner.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Release build skipped: configure the private opengridder-aax-release runner and SDK variables, then set OPENGRIDDER_AAX_RELEASE_READY=true. See Docs/Release.md.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+  aax:
+    needs: configuration
+    if: vars.OPENGRIDDER_AAX_RELEASE_READY == 'true' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, macOS, ARM64, opengridder-aax-release]
+    timeout-minutes: 60
+    env:
+      AAX_SDK_ROOT: ${{ vars.OPENGRIDDER_AAX_SDK_ROOT }}
+      OPENGRIDDER_VST3_SDK: ${{ vars.OPENGRIDDER_VST3_SDK }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          clean: true
+      - name: Configure pinned tools
+        run: |
+          echo "$HOME/.rustup/toolchains/1.98.0-aarch64-apple-darwin/bin" >> "$GITHUB_PATH"
+          test -d "$AAX_SDK_ROOT/Interfaces"
+          test -d "$OPENGRIDDER_VST3_SDK/pluginterfaces"
+      - name: Test and build universal binaries
+        run: |
+          cargo test --workspace --locked
+          bash scripts/build-server-macos.sh
+          bash scripts/build-aax-macos.sh
+      - name: PACE and Apple sign AAX
+        run: bash scripts/sign-aax-macos.sh
+      - name: Exercise actual compiled client and server
+        run: |
+          python3 scripts/smoke-aax.py target/aax-pace-signed/OpenGridder.aaxplugin
+          python3 scripts/smoke-system.py target/server-universal/OpenGridderServer target/aax-pace-signed/OpenGridder.aaxplugin
+          /usr/bin/arch -x86_64 /usr/bin/python3 scripts/smoke-aax.py target/aax-pace-signed/OpenGridder.aaxplugin
+          /usr/bin/arch -x86_64 /usr/bin/python3 scripts/smoke-system.py target/server-universal/OpenGridderServer target/aax-pace-signed/OpenGridder.aaxplugin
+      - name: Prepare signed preview installer
+        run: bash scripts/package-aax-macos.sh
+      - name: Submit to Apple and staple accepted tickets
+        if: inputs.notarize
+        run: bash scripts/notarize-aax-release-macos.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: OpenGridder-AAX-preview-macos
+          path: dist/1.2.1-preview.1/
+          if-no-files-found: error
+          retention-days: 14

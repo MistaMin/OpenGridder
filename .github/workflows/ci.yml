@@ -1,0 +1,84 @@
+name: Rust core and native AU tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: core-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  RUST_TOOLCHAIN: 1.98.0
+  CARGO_PROFILE_RELEASE_STRIP: none
+jobs:
+  core:
+    name: Core tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            architecture: linux-x86_64
+          - os: macos-15
+            architecture: macos-arm64
+          - os: macos-15-intel
+            architecture: macos-x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --no-self-update
+          rustup default "$RUST_TOOLCHAIN"
+      - name: Workspace tests
+        run: cargo test --workspace --locked
+      - name: Legacy MIT bridge primitive tests
+        run: cargo test --lib --manifest-path native/legacy/bridge-core/Cargo.toml
+      - name: Build SDK-free server
+        if: runner.os == 'macOS'
+        run: cargo build --release --locked -p og-server
+      - name: Stage AU-only development server
+        if: runner.os == 'macOS'
+        env:
+          OG_CI_ARCH: ${{ matrix.architecture }}
+        run: |
+          python3 scripts/stage-server.py --binary target/release/AudioGridderServer --output "target/ci-server-$OG_CI_ARCH" --capabilities au-only
+          tar -czf "target/OpenGridder-server-dev-$OG_CI_ARCH.tar.gz" -C "target/ci-server-$OG_CI_ARCH" .
+          {
+            echo '### Development server artifact'
+            echo 'AU hosting enabled. VST3 hosting requires the separate external-SDK build.'
+            echo 'No AAX, RTAS or TDM plugin is implied by this artifact.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload development server
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: OpenGridder-server-dev-${{ matrix.architecture }}
+          path: target/OpenGridder-server-dev-${{ matrix.architecture }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+  legacy-core:
+    name: i386 Rust bridge archive (not a dpm plugin)
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install last-generation 32-bit Apple Rust target
+        run: rustup toolchain install 1.41.1-x86_64-apple-darwin --profile minimal --force-non-host --target i686-apple-darwin --no-self-update
+      - name: Build and inspect i386 archive
+        run: |
+          bash scripts/build-legacy-bridge-macos.sh
+          echo 'This archive contains SDK-neutral queue/PCM primitives. It is not an RTAS/TDM .dpm.' > target/legacy-core-i686/README.txt
+          tar -czf target/OpenGridder-legacy-bridge-i386.tar.gz -C target/legacy-core-i686 .
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: OpenGridder-legacy-bridge-i386
+          path: target/OpenGridder-legacy-bridge-i386.tar.gz
+          if-no-files-found: error
+          retention-days: 14

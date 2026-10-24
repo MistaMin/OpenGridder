@@ -45,6 +45,9 @@ impl std::fmt::Display for MessageError {
 
 pub const HANDSHAKE_FLAG_NO_PLUGINLIST_FILTER: u8 = 1;
 pub const HANDSHAKE_FLAGS_LOCAL_MODE: u8 = 2;
+/// OpenGridder extension, negotiated so legacy peers keep their original framing.
+pub const HANDSHAKE_FLAG_STATE_ACK: u8 = 4;
+pub const HANDSHAKE_RESP_FLAG_STATE_ACK: u32 = 1 << 8;
 pub const HANDSHAKE_RESP_FLAG_SANDBOX_ENABLED: u32 = 1;
 pub const HANDSHAKE_FLAGS_SANDBOX_ENABLED: u32 = HANDSHAKE_RESP_FLAG_SANDBOX_ENABLED;
 pub const HANDSHAKE_RESP_FLAG_LOCAL_MODE: u32 = 2;
@@ -112,7 +115,10 @@ impl HandshakeRequest {
 
     pub fn from_bytes(buf: &[u8]) -> Result<Self, MessageError> {
         if buf.len() < Self::WIRE_SIZE {
-            return Err(MessageError::new(ErrorCode::Size, "HandshakeRequest too short"));
+            return Err(MessageError::new(
+                ErrorCode::Size,
+                "HandshakeRequest too short",
+            ));
         }
         Ok(Self {
             version: i32::from_le_bytes(buf[0..4].try_into().unwrap()),
@@ -145,16 +151,28 @@ impl HandshakeRequest {
 
     pub fn from_json(j: &Value) -> Self {
         Self {
-            version: j.get("version").and_then(|v| v.as_i64()).unwrap_or(AG_PROTOCOL_VERSION as i64) as i32,
+            version: j
+                .get("version")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(AG_PROTOCOL_VERSION as i64) as i32,
             channels_in: j.get("channelsIn").and_then(|v| v.as_i64()).unwrap_or(2) as i32,
             channels_out: j.get("channelsOut").and_then(|v| v.as_i64()).unwrap_or(2) as i32,
             channels_sc: j.get("channelsSC").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
             sample_rate: j.get("rate").and_then(|v| v.as_f64()).unwrap_or(48000.0),
-            samples_per_block: j.get("samplesPerBlock").and_then(|v| v.as_i64()).unwrap_or(512) as i32,
-            double_precision: j.get("doublePrecision").and_then(|v| v.as_bool()).unwrap_or(false),
+            samples_per_block: j
+                .get("samplesPerBlock")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(512) as i32,
+            double_precision: j
+                .get("doublePrecision")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
             client_id: j.get("clientId").and_then(|v| v.as_u64()).unwrap_or(0),
             flags: j.get("flags").and_then(|v| v.as_u64()).unwrap_or(0) as u8,
-            active_channels: j.get("activeChannels").and_then(|v| v.as_u64()).unwrap_or(0),
+            active_channels: j
+                .get("activeChannels")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
         }
     }
 }
@@ -190,7 +208,10 @@ impl HandshakeResponse {
 
     pub fn from_bytes(buf: &[u8]) -> Result<Self, MessageError> {
         if buf.len() < Self::WIRE_SIZE {
-            return Err(MessageError::new(ErrorCode::Size, "HandshakeResponse too short"));
+            return Err(MessageError::new(
+                ErrorCode::Size,
+                "HandshakeResponse too short",
+            ));
         }
         Ok(Self {
             version: i32::from_le_bytes(buf[0..4].try_into().unwrap()),
@@ -300,7 +321,10 @@ impl AudioRequestHeader {
 
     pub fn from_bytes(buf: &[u8]) -> Result<Self, MessageError> {
         if buf.len() < Self::WIRE_SIZE {
-            return Err(MessageError::new(ErrorCode::Size, "AudioRequestHeader too short"));
+            return Err(MessageError::new(
+                ErrorCode::Size,
+                "AudioRequestHeader too short",
+            ));
         }
         let mut trace_id = [0u8; 16];
         trace_id.copy_from_slice(&buf[21..37]);
@@ -339,7 +363,10 @@ impl AudioResponseHeader {
 
     pub fn from_bytes(buf: &[u8]) -> Result<Self, MessageError> {
         if buf.len() < Self::WIRE_SIZE {
-            return Err(MessageError::new(ErrorCode::Size, "AudioResponseHeader too short"));
+            return Err(MessageError::new(
+                ErrorCode::Size,
+                "AudioResponseHeader too short",
+            ));
         }
         Ok(Self {
             channels: i32::from_le_bytes(buf[0..4].try_into().unwrap()),
@@ -356,6 +383,7 @@ pub struct AudioMessage {
     pub req_header: AudioRequestHeader,
     pub res_header: AudioResponseHeader,
     pub pos_info: PositionInfo,
+    wire: Vec<u8>,
 }
 
 impl AudioMessage {
@@ -377,28 +405,52 @@ impl AudioMessage {
     ) -> Result<(), MessageError> {
         let channels = audio.len() as i32;
         let samples = audio.first().map(|c| c.len()).unwrap_or(0) as i32;
+        validate_audio_shape(audio.len() as i32, samples, midi.len() as i32)?;
+        if audio.iter().any(|ch| ch.len() != samples as usize) {
+            return Err(MessageError::new(
+                ErrorCode::Size,
+                "Unequal audio channel lengths",
+            ));
+        }
+        self.wire.clear();
         self.req_header = AudioRequestHeader {
             channels,
             samples,
-            channels_requested: if channels_requested > -1 { channels_requested } else { channels },
-            samples_requested: if samples_requested > -1 { samples_requested } else { samples },
+            channels_requested: if channels_requested > -1 {
+                channels_requested
+            } else {
+                channels
+            },
+            samples_requested: if samples_requested > -1 {
+                samples_requested
+            } else {
+                samples
+            },
             num_midi_events: midi.len() as i32,
             is_double: false,
             trace_id: [0; 16],
         };
-        stream
+        validate_audio_shape(
+            self.req_header.channels_requested,
+            self.req_header.samples_requested,
+            self.req_header.num_midi_events,
+        )?;
+        (&mut self.wire)
             .write_all(&self.req_header.to_bytes())
             .map_err(|e| MessageError::new(ErrorCode::Syscall, e.to_string()))?;
         for chan in audio {
             for &sample in chan {
-                stream
+                (&mut self.wire)
                     .write_all(&sample.to_le_bytes())
                     .map_err(|e| MessageError::new(ErrorCode::Syscall, e.to_string()))?;
             }
         }
-        write_midi_events(stream, midi)?;
-        stream
+        write_midi_events(&mut self.wire, midi)?;
+        (&mut self.wire)
             .write_all(&pos_info.to_bytes())
+            .map_err(|e| MessageError::new(ErrorCode::Syscall, e.to_string()))?;
+        stream
+            .write_all(&self.wire)
             .map_err(|e| MessageError::new(ErrorCode::Syscall, e.to_string()))?;
         Ok(())
     }
@@ -414,28 +466,52 @@ impl AudioMessage {
     ) -> Result<(), MessageError> {
         let channels = audio.len() as i32;
         let samples = audio.first().map(|c| c.len()).unwrap_or(0) as i32;
+        validate_audio_shape(audio.len() as i32, samples, midi.len() as i32)?;
+        if audio.iter().any(|ch| ch.len() != samples as usize) {
+            return Err(MessageError::new(
+                ErrorCode::Size,
+                "Unequal audio channel lengths",
+            ));
+        }
+        self.wire.clear();
         self.req_header = AudioRequestHeader {
             channels,
             samples,
-            channels_requested: if channels_requested > -1 { channels_requested } else { channels },
-            samples_requested: if samples_requested > -1 { samples_requested } else { samples },
+            channels_requested: if channels_requested > -1 {
+                channels_requested
+            } else {
+                channels
+            },
+            samples_requested: if samples_requested > -1 {
+                samples_requested
+            } else {
+                samples
+            },
             num_midi_events: midi.len() as i32,
             is_double: true,
             trace_id: [0; 16],
         };
-        stream
+        validate_audio_shape(
+            self.req_header.channels_requested,
+            self.req_header.samples_requested,
+            self.req_header.num_midi_events,
+        )?;
+        (&mut self.wire)
             .write_all(&self.req_header.to_bytes())
             .map_err(|e| MessageError::new(ErrorCode::Syscall, e.to_string()))?;
         for chan in audio {
             for &sample in chan {
-                stream
+                (&mut self.wire)
                     .write_all(&sample.to_le_bytes())
                     .map_err(|e| MessageError::new(ErrorCode::Syscall, e.to_string()))?;
             }
         }
-        write_midi_events(stream, midi)?;
-        stream
+        write_midi_events(&mut self.wire, midi)?;
+        (&mut self.wire)
             .write_all(&pos_info.to_bytes())
+            .map_err(|e| MessageError::new(ErrorCode::Syscall, e.to_string()))?;
+        stream
+            .write_all(&self.wire)
             .map_err(|e| MessageError::new(ErrorCode::Syscall, e.to_string()))?;
         Ok(())
     }
@@ -454,8 +530,26 @@ impl AudioMessage {
             .map_err(|e| MessageError::new(ErrorCode::Data, format!("request header: {e}")))?;
         self.req_header = AudioRequestHeader::from_bytes(&hdr_bytes)?;
 
-        let total_ch = self.req_header.channels.max(self.req_header.channels_requested).max(0) as usize;
-        let total_smp = self.req_header.samples.max(self.req_header.samples_requested).max(0) as usize;
+        validate_audio_shape(
+            self.req_header.channels,
+            self.req_header.samples,
+            self.req_header.num_midi_events,
+        )?;
+        validate_audio_shape(
+            self.req_header.channels_requested,
+            self.req_header.samples_requested,
+            self.req_header.num_midi_events,
+        )?;
+        let total_ch = self
+            .req_header
+            .channels
+            .max(self.req_header.channels_requested)
+            .max(0) as usize;
+        let total_smp = self
+            .req_header
+            .samples
+            .max(self.req_header.samples_requested)
+            .max(0) as usize;
         let incoming_ch = self.req_header.channels.max(0) as usize;
         let incoming_smp = self.req_header.samples.max(0) as usize;
 
@@ -467,9 +561,9 @@ impl AudioMessage {
             }
             let mut raw = vec![0u8; incoming_smp * 8];
             for ch in 0..incoming_ch {
-                stream
-                    .read_exact(&mut raw)
-                    .map_err(|e| MessageError::new(ErrorCode::Data, format!("audio data f64: {e}")))?;
+                stream.read_exact(&mut raw).map_err(|e| {
+                    MessageError::new(ErrorCode::Data, format!("audio data f64: {e}"))
+                })?;
                 for (i, chunk) in raw.chunks_exact(8).enumerate() {
                     buffer_d[ch][i] = f64::from_le_bytes(chunk.try_into().unwrap());
                 }
@@ -482,9 +576,9 @@ impl AudioMessage {
             }
             let mut raw = vec![0u8; incoming_smp * 4];
             for ch in 0..incoming_ch {
-                stream
-                    .read_exact(&mut raw)
-                    .map_err(|e| MessageError::new(ErrorCode::Data, format!("audio data f32: {e}")))?;
+                stream.read_exact(&mut raw).map_err(|e| {
+                    MessageError::new(ErrorCode::Data, format!("audio data f32: {e}"))
+                })?;
                 for (i, chunk) in raw.chunks_exact(4).enumerate() {
                     buffer_f[ch][i] = f32::from_le_bytes(chunk.try_into().unwrap());
                 }
@@ -510,23 +604,34 @@ impl AudioMessage {
     ) -> Result<(), MessageError> {
         let ch_count = channels_to_send.min(audio.len());
         let samples = audio.first().map(|c| c.len()).unwrap_or(0) as i32;
+        validate_audio_shape(audio.len() as i32, samples, midi.len() as i32)?;
+        if audio.iter().any(|ch| ch.len() != samples as usize) {
+            return Err(MessageError::new(
+                ErrorCode::Size,
+                "Unequal audio channel lengths",
+            ));
+        }
+        self.wire.clear();
         self.res_header = AudioResponseHeader {
             channels: ch_count as i32,
             samples,
             num_midi_events: midi.len() as i32,
             latency_samples,
         };
-        stream
+        (&mut self.wire)
             .write_all(&self.res_header.to_bytes())
             .map_err(|e| MessageError::new(ErrorCode::Syscall, e.to_string()))?;
         for ch in 0..ch_count {
             for &sample in &audio[ch] {
-                stream
+                (&mut self.wire)
                     .write_all(&sample.to_le_bytes())
                     .map_err(|e| MessageError::new(ErrorCode::Syscall, e.to_string()))?;
             }
         }
-        write_midi_events(stream, midi)?;
+        write_midi_events(&mut self.wire, midi)?;
+        stream
+            .write_all(&self.wire)
+            .map_err(|e| MessageError::new(ErrorCode::Syscall, e.to_string()))?;
         Ok(())
     }
 
@@ -540,23 +645,34 @@ impl AudioMessage {
     ) -> Result<(), MessageError> {
         let ch_count = channels_to_send.min(audio.len());
         let samples = audio.first().map(|c| c.len()).unwrap_or(0) as i32;
+        validate_audio_shape(audio.len() as i32, samples, midi.len() as i32)?;
+        if audio.iter().any(|ch| ch.len() != samples as usize) {
+            return Err(MessageError::new(
+                ErrorCode::Size,
+                "Unequal audio channel lengths",
+            ));
+        }
+        self.wire.clear();
         self.res_header = AudioResponseHeader {
             channels: ch_count as i32,
             samples,
             num_midi_events: midi.len() as i32,
             latency_samples,
         };
-        stream
+        (&mut self.wire)
             .write_all(&self.res_header.to_bytes())
             .map_err(|e| MessageError::new(ErrorCode::Syscall, e.to_string()))?;
         for ch in 0..ch_count {
             for &sample in &audio[ch] {
-                stream
+                (&mut self.wire)
                     .write_all(&sample.to_le_bytes())
                     .map_err(|e| MessageError::new(ErrorCode::Syscall, e.to_string()))?;
             }
         }
-        write_midi_events(stream, midi)?;
+        write_midi_events(&mut self.wire, midi)?;
+        stream
+            .write_all(&self.wire)
+            .map_err(|e| MessageError::new(ErrorCode::Syscall, e.to_string()))?;
         Ok(())
     }
 
@@ -571,6 +687,11 @@ impl AudioMessage {
             .read_exact(&mut hdr_bytes)
             .map_err(|e| MessageError::new(ErrorCode::Data, format!("response header: {e}")))?;
         self.res_header = AudioResponseHeader::from_bytes(&hdr_bytes)?;
+        validate_audio_shape(
+            self.res_header.channels,
+            self.res_header.samples,
+            self.res_header.num_midi_events,
+        )?;
         let ch_count = self.res_header.channels.max(0) as usize;
         let samples = self.res_header.samples.max(0) as usize;
 
@@ -600,6 +721,11 @@ impl AudioMessage {
             .read_exact(&mut hdr_bytes)
             .map_err(|e| MessageError::new(ErrorCode::Data, format!("response header: {e}")))?;
         self.res_header = AudioResponseHeader::from_bytes(&hdr_bytes)?;
+        validate_audio_shape(
+            self.res_header.channels,
+            self.res_header.samples,
+            self.res_header.num_midi_events,
+        )?;
         let ch_count = self.res_header.channels.max(0) as usize;
         let samples = self.res_header.samples.max(0) as usize;
 
@@ -619,8 +745,29 @@ impl AudioMessage {
     }
 }
 
+fn validate_audio_shape(channels: i32, samples: i32, events: i32) -> Result<(), MessageError> {
+    if !(0..=32).contains(&channels)
+        || !(0..=32768).contains(&samples)
+        || !(0..=4096).contains(&events)
+    {
+        return Err(MessageError::new(
+            ErrorCode::Size,
+            "Audio message exceeds channel/frame/MIDI limits",
+        ));
+    }
+    Ok(())
+}
+
 fn write_midi_events<W: Write>(stream: &mut W, midi: &[MidiEvent]) -> Result<(), MessageError> {
+    let mut total_bytes = 0usize;
     for ev in midi {
+        total_bytes = total_bytes.saturating_add(ev.data.len());
+        if ev.sample_number < 0 || ev.data.len() > 65536 || total_bytes > 1024 * 1024 {
+            return Err(MessageError::new(
+                ErrorCode::Size,
+                "Invalid MIDI event size/offset",
+            ));
+        }
         let size = ev.data.len() as i32;
         stream
             .write_all(&ev.sample_number.to_le_bytes())
@@ -636,6 +783,10 @@ fn write_midi_events<W: Write>(stream: &mut W, midi: &[MidiEvent]) -> Result<(),
 }
 
 fn read_midi_events<R: Read>(stream: &mut R, count: usize) -> Result<Vec<MidiEvent>, MessageError> {
+    if count > 4096 {
+        return Err(MessageError::new(ErrorCode::Size, "Too many MIDI events"));
+    }
+    let mut total_bytes = 0usize;
     let mut events = Vec::with_capacity(count);
     for _ in 0..count {
         let mut hdr = [0u8; 8];
@@ -643,14 +794,28 @@ fn read_midi_events<R: Read>(stream: &mut R, count: usize) -> Result<Vec<MidiEve
             .read_exact(&mut hdr)
             .map_err(|e| MessageError::new(ErrorCode::Data, format!("midi header: {e}")))?;
         let sample_number = i32::from_le_bytes(hdr[0..4].try_into().unwrap());
-        let size = i32::from_le_bytes(hdr[4..8].try_into().unwrap()).max(0) as usize;
+        let declared_size = i32::from_le_bytes(hdr[4..8].try_into().unwrap());
+        if !(0..=65536).contains(&declared_size) || sample_number < 0 {
+            return Err(MessageError::new(
+                ErrorCode::Size,
+                "Invalid MIDI event size/offset",
+            ));
+        }
+        let size = declared_size as usize;
+        total_bytes += size;
+        if total_bytes > 1024 * 1024 {
+            return Err(MessageError::new(ErrorCode::Size, "MIDI payload too large"));
+        }
         let mut data = vec![0u8; size];
         if size > 0 {
             stream
                 .read_exact(&mut data)
                 .map_err(|e| MessageError::new(ErrorCode::Data, format!("midi data: {e}")))?;
         }
-        events.push(MidiEvent { sample_number, data });
+        events.push(MidiEvent {
+            sample_number,
+            data,
+        });
     }
     Ok(events)
 }
@@ -1025,7 +1190,14 @@ impl RawMessage {
         let scale = f64::from_le_bytes(self.payload[16..24].try_into().unwrap());
         let size = u64::from_le_bytes(self.payload[24..32].try_into().unwrap()) as usize;
         let end = (32 + size).min(self.payload.len());
-        Some((width, height, width_padded, height_padded, scale, &self.payload[32..end]))
+        Some((
+            width,
+            height,
+            width_padded,
+            height_padded,
+            scale,
+            &self.payload[32..end],
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1055,7 +1227,10 @@ impl RawMessage {
 
     pub fn send<W: Write>(&self, stream: &mut W) -> Result<(), MessageError> {
         if self.payload.len() > MAX_MESSAGE_SIZE {
-            return Err(MessageError::new(ErrorCode::Size, "max message size exceeded"));
+            return Err(MessageError::new(
+                ErrorCode::Size,
+                "max message size exceeded",
+            ));
         }
         let mut hdr = [0u8; 8];
         hdr[0..4].copy_from_slice(&self.msg_type.to_le_bytes());
@@ -1073,9 +1248,12 @@ impl RawMessage {
 
     pub fn read<R: Read>(stream: &mut R) -> Result<Self, MessageError> {
         let mut hdr = [0u8; 8];
-        stream
-            .read_exact(&mut hdr)
-            .map_err(|e| MessageError::new(ErrorCode::Data, format!("failed to read message header: {e}")))?;
+        stream.read_exact(&mut hdr).map_err(|e| {
+            MessageError::new(
+                ErrorCode::Data,
+                format!("failed to read message header: {e}"),
+            )
+        })?;
         let msg_type = i32::from_le_bytes(hdr[0..4].try_into().unwrap());
         let size = i32::from_le_bytes(hdr[4..8].try_into().unwrap());
         if size < 0 || (size as usize) > MAX_MESSAGE_SIZE {
@@ -1086,9 +1264,9 @@ impl RawMessage {
         }
         let mut payload = vec![0u8; size as usize];
         if size > 0 {
-            stream
-                .read_exact(&mut payload)
-                .map_err(|e| MessageError::new(ErrorCode::Data, format!("failed to read message body: {e}")))?;
+            stream.read_exact(&mut payload).map_err(|e| {
+                MessageError::new(ErrorCode::Data, format!("failed to read message body: {e}"))
+            })?;
         }
         Ok(Self { msg_type, payload })
     }
@@ -1168,7 +1346,10 @@ impl MessageFactory {
     }
 }
 
-pub fn write_value<W: Write, const N: usize>(stream: &mut W, bytes: &[u8; N]) -> std::io::Result<()> {
+pub fn write_value<W: Write, const N: usize>(
+    stream: &mut W,
+    bytes: &[u8; N],
+) -> std::io::Result<()> {
     stream.write_all(bytes)
 }
 
@@ -1183,8 +1364,8 @@ pub fn send_json_message<W: Write, T: Serialize>(
     msg_type: MessageType,
     data: &T,
 ) -> Result<(), MessageError> {
-    let json_bytes = serde_json::to_vec(data)
-        .map_err(|e| MessageError::new(ErrorCode::Data, e.to_string()))?;
+    let json_bytes =
+        serde_json::to_vec(data).map_err(|e| MessageError::new(ErrorCode::Data, e.to_string()))?;
     RawMessage::new(msg_type, json_bytes).send(stream)
 }
 
@@ -1466,10 +1647,118 @@ impl PluginTrayMessage {
         let raw = RawMessage::read(stream)?;
         let jm = JsonMessage::deserialize(&raw.payload)
             .map_err(|e| MessageError::new(ErrorCode::Data, e))?;
-        let mt = PluginTrayMessageType::from_u16(jm.msg_type).unwrap_or(PluginTrayMessageType::Status);
+        let mt =
+            PluginTrayMessageType::from_u16(jm.msg_type).unwrap_or(PluginTrayMessageType::Status);
         Ok(Self {
             msg_type: mt,
             data: jm.data,
         })
+    }
+}
+
+#[cfg(test)]
+mod audio_transport_limits_tests {
+    use super::*;
+    #[derive(Default)]
+    struct CountWrites {
+        calls: usize,
+        bytes: Vec<u8>,
+    }
+    impl Write for CountWrites {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.calls += 1;
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    #[test]
+    fn audio_blocks_are_single_writes_and_preserve_wire_data() {
+        let mut message = AudioMessage::new();
+        let mut stream = CountWrites::default();
+        let audio = vec![vec![0.25f32; 64], vec![-0.5; 64]];
+        message
+            .send_to_server_f32(&mut stream, &audio, &[], &PositionInfo::default(), 2, 64)
+            .unwrap();
+        assert_eq!(stream.calls, 1);
+        let (mut single, mut double, mut midi, mut position) =
+            (Vec::new(), Vec::new(), Vec::new(), PositionInfo::default());
+        message
+            .read_from_client(
+                &mut std::io::Cursor::new(&stream.bytes),
+                &mut single,
+                &mut double,
+                &mut midi,
+                &mut position,
+            )
+            .unwrap();
+        assert_eq!(single, audio);
+        let mut stream = CountWrites::default();
+        let audio = vec![vec![0.125f64; 127], vec![-0.25; 127]];
+        message
+            .send_to_client_f64(&mut stream, &audio, &[], 18, 2)
+            .unwrap();
+        assert_eq!(stream.calls, 1);
+        let mut decoded = Vec::new();
+        message
+            .read_from_server_f64(
+                &mut std::io::Cursor::new(&stream.bytes),
+                &mut decoded,
+                &mut midi,
+            )
+            .unwrap();
+        assert_eq!(decoded, audio);
+        assert_eq!(message.res_header.latency_samples, 18);
+    }
+    #[test]
+    fn oversized_audio_and_midi_are_rejected_before_allocation() {
+        let mut message = AudioMessage::new();
+        let header = AudioRequestHeader {
+            channels: i32::MAX,
+            samples: i32::MAX,
+            ..Default::default()
+        };
+        let (mut single, mut double, mut midi, mut position) =
+            (Vec::new(), Vec::new(), Vec::new(), PositionInfo::default());
+        assert!(message
+            .read_from_client(
+                &mut std::io::Cursor::new(header.to_bytes()),
+                &mut single,
+                &mut double,
+                &mut midi,
+                &mut position
+            )
+            .is_err());
+        assert!(single.is_empty() && double.is_empty());
+        let response = AudioResponseHeader {
+            channels: 2,
+            samples: -1,
+            ..Default::default()
+        };
+        assert!(message
+            .read_from_server_f32(
+                &mut std::io::Cursor::new(response.to_bytes()),
+                &mut single,
+                &mut midi
+            )
+            .is_err());
+        let mut stream = CountWrites::default();
+        assert!(message
+            .send_to_server_f32(
+                &mut stream,
+                &[vec![0.0; 64], vec![0.0; 63]],
+                &[],
+                &position,
+                2,
+                64
+            )
+            .is_err());
+        assert_eq!(stream.calls, 0);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.extend_from_slice(&i32::MAX.to_le_bytes());
+        assert!(read_midi_events(&mut std::io::Cursor::new(bytes), 1).is_err());
     }
 }

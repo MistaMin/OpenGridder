@@ -1,6 +1,8 @@
 //! `og-server`: Complete Rust rewrite of `AudioGridderServer` (v1.2.1-marcosfork).
 
 pub mod audio_worker;
+#[cfg(unix)]
+pub mod isolation;
 pub mod processor;
 pub mod processor_chain;
 pub mod sandbox;
@@ -32,7 +34,8 @@ mod tests {
         custom.name = "Marcos Studio Server".to_string();
         custom.id = 3;
         custom.sandbox_mode = SandboxMode::Chain as i32;
-        srv.apply_and_save_config(custom).expect("save_config should succeed");
+        srv.apply_and_save_config(custom)
+            .expect("save_config should succeed");
 
         let mut srv2 = Server::new(ServerConfig::default());
         srv2.set_config_path(tmp_cfg.clone());
@@ -47,9 +50,9 @@ mod tests {
         let desc = ServerPlugin::new(
             "TestEQ",
             "OpenGridder",
-            "VST3-testeq",
-            "VST3-testeq",
-            "VST3",
+            "OpenGridder:Gain",
+            "OpenGridder:Gain",
+            "OpenGridder",
             "EQ",
             false,
             vec!["Stereo".to_string()],
@@ -65,6 +68,13 @@ mod tests {
         proc.set_oversampling_factor(4);
         assert_eq!(proc.oversampling_factor(), 4);
         assert_eq!(proc.latency_samples(), 18);
+        proc.set_plugin_latency_samples(19);
+        assert_eq!(
+            proc.latency_samples(),
+            23,
+            "round plugin delay up from the 4x processing rate"
+        );
+        proc.set_plugin_latency_samples(0);
 
         // Invalid factor clamps back to 1x
         proc.set_oversampling_factor(99);

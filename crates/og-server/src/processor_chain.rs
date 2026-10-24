@@ -3,7 +3,7 @@
 use crate::processor::Processor;
 use og_common::message::{MidiEvent, PositionInfo};
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use std::sync::Arc;
 
 pub struct ProcessorChain {
@@ -11,6 +11,7 @@ pub struct ProcessorChain {
     sample_rate: Mutex<f64>,
     max_block_size: Mutex<usize>,
     latency_samples: AtomicI32,
+    cpu_load: AtomicU32,
 }
 
 impl Default for ProcessorChain {
@@ -26,6 +27,7 @@ impl ProcessorChain {
             sample_rate: Mutex::new(sample_rate),
             max_block_size: Mutex::new(max_block_size),
             latency_samples: AtomicI32::new(0),
+            cpu_load: AtomicU32::new(0),
         }
     }
 
@@ -107,12 +109,27 @@ impl ProcessorChain {
         self.latency_samples.load(Ordering::Relaxed)
     }
 
+    pub fn cpu_load(&self) -> f32 {
+        f32::from_bits(self.cpu_load.load(Ordering::Relaxed))
+    }
+
+    fn record_cpu_load(&self, start: std::time::Instant, frames: usize) {
+        let rate = *self.sample_rate.lock();
+        let percent = if frames > 0 {
+            (start.elapsed().as_secs_f64() * rate / frames as f64 * 100.0).min(10000.0) as f32
+        } else {
+            0.0
+        };
+        self.cpu_load.store(percent.to_bits(), Ordering::Relaxed);
+    }
+
     pub fn process_block_f32(
         &self,
         audio: &mut [Vec<f32>],
         midi: &mut Vec<MidiEvent>,
         pos: &PositionInfo,
     ) -> i32 {
+        let start = std::time::Instant::now();
         let procs: Vec<Arc<Mutex<Processor>>> = self.processors.lock().clone();
         let mut total_lat = 0;
         for proc_arc in procs {
@@ -121,6 +138,7 @@ impl ProcessorChain {
             total_lat += proc.latency_samples();
         }
         self.latency_samples.store(total_lat, Ordering::Relaxed);
+        self.record_cpu_load(start, audio.first().map_or(0, Vec::len));
         total_lat
     }
 
@@ -130,6 +148,7 @@ impl ProcessorChain {
         midi: &mut Vec<MidiEvent>,
         pos: &PositionInfo,
     ) -> i32 {
+        let start = std::time::Instant::now();
         let procs: Vec<Arc<Mutex<Processor>>> = self.processors.lock().clone();
         let mut total_lat = 0;
         for proc_arc in procs {
@@ -138,6 +157,7 @@ impl ProcessorChain {
             total_lat += proc.latency_samples();
         }
         self.latency_samples.store(total_lat, Ordering::Relaxed);
+        self.record_cpu_load(start, audio.first().map_or(0, Vec::len));
         total_lat
     }
 }

@@ -10,18 +10,24 @@ use std::thread::{self, JoinHandle};
 pub struct AudioWorker {
     running: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
+    stream: Arc<TcpStream>,
 }
 
 impl AudioWorker {
     pub fn spawn(
-        mut stream: TcpStream,
+        stream: TcpStream,
         chain: Arc<ProcessorChain>,
         running: Arc<AtomicBool>,
+        max_frames: usize,
+        channels: usize,
     ) -> Self {
         let run_flag = running.clone();
+        let stream = Arc::new(stream);
+        let audio_stream = stream.clone();
         let handle = thread::Builder::new()
             .name("OG-AudioWorker".to_string())
             .spawn(move || {
+                let mut stream = &*audio_stream;
                 let mut msg = AudioMessage::new();
                 let mut buf_f32: Vec<Vec<f32>> = Vec::new();
                 let mut buf_f64: Vec<Vec<f64>> = Vec::new();
@@ -37,6 +43,16 @@ impl AudioWorker {
                         &mut pos_info,
                     ) {
                         Ok(()) => {
+                            if msg.req_header.samples as usize > max_frames
+                                || msg.req_header.samples_requested as usize > max_frames
+                                || msg.req_header.channels as usize != channels
+                                || msg.req_header.channels_requested as usize != channels
+                            {
+                                log::warn!(
+                                    "Audio block exceeds the negotiated session configuration"
+                                );
+                                break;
+                            }
                             if msg.is_double() {
                                 let lat =
                                     chain.process_block_f64(&mut buf_f64, &mut midi, &pos_info);
@@ -68,11 +84,13 @@ impl AudioWorker {
         Self {
             running,
             handle: Some(handle),
+            stream,
         }
     }
 
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
+        let _ = self.stream.shutdown(std::net::Shutdown::Both);
         if let Some(h) = self.handle.take() {
             let _ = h.join();
         }

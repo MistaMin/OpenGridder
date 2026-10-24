@@ -69,6 +69,9 @@ pub struct ServerPlugin {
     pub has_editor: bool,
     #[serde(default)]
     pub scoped_id: String,
+    /// Native module location, supplied only by the server catalog.
+    #[serde(default)]
+    pub module_path: String,
 }
 
 fn default_two_ch() -> i32 {
@@ -110,6 +113,7 @@ impl ServerPlugin {
             })
             .collect();
         Self {
+            module_path: String::new(),
             name: name.into(),
             company: company.into(),
             id: id_str,
@@ -196,7 +200,9 @@ impl ServerPlugin {
             deprecated,
             str_val("type"),
             str_val("category"),
-            j.get("isInstrument").and_then(|v| v.as_bool()).unwrap_or(false),
+            j.get("isInstrument")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
             layouts,
         )
     }

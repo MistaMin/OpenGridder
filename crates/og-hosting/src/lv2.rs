@@ -2,7 +2,7 @@
 //! Zero JUCE dependency.
 
 use crate::vst3::default_plugin_parameters;
-use crate::{HostedPlugin, HostedPluginInstance};
+use crate::HostedPlugin;
 use og_common::server_plugin::{PluginLayout, ServerPlugin};
 use std::path::{Path, PathBuf};
 
@@ -93,6 +93,7 @@ pub fn inspect_lv2_bundle(bundle_path: &Path) -> Option<ServerPlugin> {
     }
 
     Some(ServerPlugin {
+        module_path: String::new(),
         name: stem.clone(),
         company: "LV2".to_string(),
         id: uri.clone(),
@@ -116,5 +117,5 @@ pub fn inspect_lv2_bundle(bundle_path: &Path) -> Option<ServerPlugin> {
 }
 
 pub fn instantiate_lv2(desc: &ServerPlugin) -> Result<Box<dyn HostedPlugin>, String> {
-    Ok(Box::new(HostedPluginInstance::new(desc.clone())))
+    Err(format!("LV2 hosting is not implemented: {}", desc.id))
 }

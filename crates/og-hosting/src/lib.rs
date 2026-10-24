@@ -5,8 +5,12 @@
 //! used in AudioGridder `Server/Source/Processor.hpp` and `Server/Source/Server.cpp`.
 
 pub mod au;
+#[cfg(target_os = "macos")]
+mod au_native;
 pub mod lv2;
 pub mod vst3;
+#[cfg(og_vst3_host)]
+mod vst3_native;
 
 use og_common::message::{MidiEvent, PositionInfo};
 use og_common::server_plugin::{PluginParameter, ServerPlugin};
@@ -28,10 +32,18 @@ struct SerializedPluginState {
 
 /// Trait representing a loaded plugin instance (AU, VST3, or LV2), matching the full surface area
 /// of `juce::AudioPluginInstance` used by `Processor` in `Server/Source/Processor.hpp`.
-pub trait HostedPlugin: Send + Sync {
+pub trait HostedPlugin: Send {
     fn descriptor(&self) -> &ServerPlugin;
     fn name(&self) -> &str;
     fn prepare_to_play(&mut self, sample_rate: f64, max_block_size: usize);
+    fn try_prepare_to_play(
+        &mut self,
+        sample_rate: f64,
+        max_block_size: usize,
+    ) -> Result<(), String> {
+        self.prepare_to_play(sample_rate, max_block_size);
+        Ok(())
+    }
     fn release_resources(&mut self);
     fn is_suspended(&self) -> bool;
     fn suspend_processing(&mut self, should_be_suspended: bool);
@@ -76,9 +88,8 @@ pub trait HostedPlugin: Send + Sync {
     fn render_editor_rgba(&self) -> (u32, u32, Vec<u8>);
 }
 
-/// Concrete hosted plugin instance supporting AU, VST3, and LV2 descriptors,
-/// real-time `f32`/`f64` DSP processing (with gain, wet/dry mix, soft-clip saturation for harmonic
-/// oversampling verification, and bypass), parameter automation, state serialization, and GoodLookinUI editor rendering.
+/// Built-in OpenGridder gain/mix processor for diagnostics and DSP tests.
+/// This is never used as a substitute for native AU, VST3 or LV2 hosting.
 pub struct HostedPluginInstance {
     desc: ServerPlugin,
     sample_rate: f64,
@@ -313,7 +324,12 @@ impl HostedPlugin for HostedPluginInstance {
         let state = SerializedPluginState {
             plugin_id: self.desc.id.clone(),
             current_preset: self.current_program as i32,
-            parameters: self.desc.parameters.iter().map(|p| p.current_value).collect(),
+            parameters: self
+                .desc
+                .parameters
+                .iter()
+                .map(|p| p.current_value)
+                .collect(),
         };
         serde_json::to_vec(&state).unwrap_or_default()
     }
@@ -324,8 +340,8 @@ impl HostedPlugin for HostedPluginInstance {
         }
         let state: SerializedPluginState =
             serde_json::from_slice(data).map_err(|e| format!("invalid plugin state: {}", e))?;
-        self.current_program = (state.current_preset.max(0) as usize)
-            .min(self.desc.presets.len().saturating_sub(1));
+        self.current_program =
+            (state.current_preset.max(0) as usize).min(self.desc.presets.len().saturating_sub(1));
         for (i, val) in state.parameters.into_iter().enumerate() {
             if let Some(p) = self.desc.parameters.get_mut(i) {
                 p.current_value = val.clamp(0.0, 1.0);
@@ -387,14 +403,17 @@ impl PluginFormatManager {
     pub fn scan_all(&self) -> Vec<ServerPlugin> {
         let mut all = Vec::new();
         if self.enable_au {
-            all.extend(au::scan_audiounits());
+            all.extend(
+                au::scan_audiounits()
+                    .into_iter()
+                    .filter(|p| p.id.starts_with("AudioUnit:aufx:")),
+            );
         }
         if self.enable_vst3 {
             all.extend(vst3::scan_vst3_folders(&self.vst3_folders));
         }
-        if self.enable_lv2 {
-            all.extend(lv2::scan_lv2_folders(&self.lv2_folders));
-        }
+        // LV2 discovery remains available explicitly, but unsupported formats are not advertised.
+        all.retain(|plugin| !plugin.is_instrument);
         all
     }
 
@@ -409,9 +428,17 @@ impl PluginFormatManager {
             "AudioUnit" | "AU" => au::instantiate_audiounit(desc)?,
             "VST3" => vst3::instantiate_vst3(desc)?,
             "LV2" => lv2::instantiate_lv2(desc)?,
-            _ => Box::new(HostedPluginInstance::new(desc.clone())),
+            "OpenGridder" if desc.id == "OpenGridder:Gain" => {
+                Box::new(HostedPluginInstance::new(desc.clone()))
+            }
+            other => {
+                return Err(format!(
+                    "Unsupported plugin format or identifier: {other} / {}",
+                    desc.id
+                ))
+            }
         };
-        instance.prepare_to_play(sample_rate, max_block_size);
+        instance.try_prepare_to_play(sample_rate, max_block_size)?;
         Ok(instance)
     }
 }
@@ -424,11 +451,12 @@ mod tests {
     #[test]
     fn test_host_plugin_lifecycle_and_state() {
         let desc = ServerPlugin {
+            module_path: String::new(),
             name: "TestCompressor".to_string(),
             company: "OpenGridder".to_string(),
-            id: "VST3-12345678".to_string(),
+            id: "OpenGridder:Gain".to_string(),
             id_deprecated: "TestCompressor".to_string(),
-            plugin_type: "VST3".to_string(),
+            plugin_type: "OpenGridder".to_string(),
             category: "Fx".to_string(),
             version: "1.2.1".to_string(),
             is_instrument: false,

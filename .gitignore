@@ -1,3 +1,10 @@
 /target
+/dist
+/output
+__pycache__/
+*.pyc
 .DS_Store
 *.swp
+
+/native/legacy/bridge-core/target/
+/native/legacy/bridge-core/Cargo.lock
