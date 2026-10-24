@@ -46,11 +46,24 @@ native/Intel Rust toolchains, Rosetta, CMake/Ninja, ReportLab, signing identitie
 the signing iLok and the AC_NOTARY keychain profile must already be available.
 Set repository variables OPENGRIDDER_AAX_SDK_ROOT and OPENGRIDDER_VST3_SDK to
 their paths, and OPENGRIDDER_AAX_RELEASE_READY=true only after configuring the
-runner. Without that flag the workflow reports missing configuration and skips
-the release job. No SDK is fetched by a public runner or uploaded as an artifact.
+runner. Set OPENGRIDDER_RELEASE_PYTHON when ReportLab is installed in a separate
+Python environment. Without the ready flag the configuration job fails explicitly
+and the release job is skipped. No SDK is fetched by a public runner or uploaded as an artifact.
 The workflow builds and signs only; submission to Apple is a separate explicit
 manual input, default false. It creates private Actions artifacts, not a public
 release. Do not enable untrusted pull-request execution on this signing runner.
+
+The configured runner is named OpenGridder-Mac-AAX. It runs as a macOS login
+service from the separate OpenGridder-Actions-Runner directory alongside this
+checkout. Use that directory's `./svc.sh status`, `./svc.sh stop` and
+`./svc.sh start` to manage it. The Mac must be awake and logged in, the external
+SDK volume mounted, and the signing iLok connected. Registration credentials
+stay in the runner directory and must never be committed or uploaded.
+Checkout cleanup creates a fresh build and packaging stage for each run.
+The installed LaunchAgent sets SessionCreate=false so signing uses the existing
+login security session. Preserve this setting if reinstalling the runner service;
+a separate session caused errSecInternalComponent during Apple signing.
+See the [upstream runner signing issue](https://github.com/actions/runner/issues/3407).
 
 ## Qualification pending
 
