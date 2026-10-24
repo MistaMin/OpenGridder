@@ -26,8 +26,13 @@ PACE identifies the product as OpenGridder; final Apple strict verification,
 ABI smoke checks and real AU system smoke checks pass on arm64 and Intel.
 The final Apple sealing pass is followed by PACE verification to verify both
 signature systems. See `scripts/sign-aax-macos.sh` to reproduce signing.
-Actual Pro Tools loading and notarization remain unverified. Neither bundle has
-been installed into the system plugin folder or published.
+The 1.2.1-preview.1 installer and disk image are now Apple notarized (Accepted),
+stapled and Gatekeeper verified. The installer contains this PACE-signed AAX,
+a Developer ID signed universal server, launcher, audited manual and dependency
+notices. Extracted native/Intel system smoke checks pass and the AAX executable
+hash matches the signing input. Actual Pro Tools loading remains unverified.
+Neither bundle has been installed into the system plugin folder or published.
+See [release preparation](../Docs/Release.md).
 
 ## Implemented
 
@@ -72,8 +77,8 @@ Logs/results are under `../target/aax-validation/` and `../target/`.
 
 - A separate 32-bit Rust/AAX toolchain, dependency and host test milestone for
   **Pro Tools 10 / OS X 10.8.5**. This universal 64-bit bundle does not provide it.
-- Actual Pro Tools host qualification and distribution notarization, including
-  appropriate OS/host pairs through macOS 26.
+- Actual Pro Tools host qualification, including appropriate OS/host pairs through
+  macOS 26. Distribution notarization is complete for the preview candidate.
 - Broader real-plugin hosting qualification, native editors, sidechains, instruments
   and preset/automation support. Actual AU/VST3 effect processing is now implemented;
   unknown formats/IDs return errors rather than substitute processors.
