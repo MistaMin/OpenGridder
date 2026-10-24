@@ -75,8 +75,11 @@ Logs/results are under `../target/aax-validation/` and `../target/`.
 
 ## Still required for the requested release
 
-- A separate 32-bit Rust/AAX toolchain, dependency and host test milestone for
-  **Pro Tools 10 / OS X 10.8.5**. This universal 64-bit bundle does not provide it.
+- **Pro Tools 10 / OS X 10.8.5**: the Rust 1.41 native-client i386 archive and
+  AAX adapter/required SDK i386 objects now compile. Final linkage is blocked by
+  missing i386 Apple system/framework libraries; a real archived Apple SDK and
+  matching C++ headers are required. The universal 64-bit bundle does not provide
+  PT10 support. See [legacy progress](legacy/README.md).
 - Actual Pro Tools host qualification, including appropriate OS/host pairs through
   macOS 26. Distribution notarization is complete for the preview candidate.
 - Broader real-plugin hosting qualification, native editors, sidechains, instruments
