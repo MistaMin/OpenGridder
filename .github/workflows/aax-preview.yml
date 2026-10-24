@@ -1,4 +1,4 @@
-name: Prepare macOS AAX preview
+name: Build macOS AAX alpha
 on:
   workflow_dispatch:
     inputs:
@@ -22,7 +22,8 @@ jobs:
           if [ "$READY" = true ]; then
             echo 'Using the configured private SDK/signing runner.' >> "$GITHUB_STEP_SUMMARY"
           else
-            echo 'Release build skipped: configure the private opengridder-aax-release runner and SDK variables, then set OPENGRIDDER_AAX_RELEASE_READY=true. See Docs/Release.md.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Release build unavailable: configure the private opengridder-aax-release runner and SDK variables, then set OPENGRIDDER_AAX_RELEASE_READY=true. See Docs/Release.md.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
   aax:
     needs: configuration
@@ -32,6 +33,7 @@ jobs:
     env:
       AAX_SDK_ROOT: ${{ vars.OPENGRIDDER_AAX_SDK_ROOT }}
       OPENGRIDDER_VST3_SDK: ${{ vars.OPENGRIDDER_VST3_SDK }}
+      OG_RELEASE_PYTHON: ${{ vars.OPENGRIDDER_RELEASE_PYTHON || 'python3' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -40,8 +42,11 @@ jobs:
       - name: Configure pinned tools
         run: |
           echo "$HOME/.rustup/toolchains/1.98.0-aarch64-apple-darwin/bin" >> "$GITHUB_PATH"
+          echo '/opt/homebrew/bin' >> "$GITHUB_PATH"
           test -d "$AAX_SDK_ROOT/Interfaces"
           test -d "$OPENGRIDDER_VST3_SDK/pluginterfaces"
+          "$OG_RELEASE_PYTHON" -c 'import reportlab'
+          /usr/bin/arch -x86_64 "$HOME/.rustup/toolchains/1.98.0-x86_64-apple-darwin/bin/rustc" --version
       - name: Test and build universal binaries
         run: |
           cargo test --workspace --locked
@@ -62,7 +67,7 @@ jobs:
         run: bash scripts/notarize-aax-release-macos.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: OpenGridder-AAX-preview-macos
+          name: OpenGridder-AAX-alpha-macos
           path: dist/1.2.1-preview.1/
           if-no-files-found: error
           retention-days: 14
