@@ -31,8 +31,12 @@ cmake --build "$og_build" -j "${OG_BUILD_JOBS:-4}"
 og_bundle="$og_build/OpenGridder.aaxplugin"
 lipo "$og_bundle/Contents/MacOS/OpenGridder" -verify_arch i386
 nm -g "$og_bundle/Contents/MacOS/OpenGridder" > "$og_build/symbols.txt"
-for og_symbol in ACFRegisterPlugin ACFRegisterComponent ACFGetClassFactory; do
-    rg --quiet " T _$og_symbol$" "$og_build/symbols.txt"
-done
+python3 - "$og_build/symbols.txt" <<'PY'
+from pathlib import Path
+import re,sys
+text=Path(sys.argv[1]).read_text()
+for name in ('ACFRegisterPlugin','ACFRegisterComponent','ACFGetClassFactory'):
+    if not re.search(r' T _'+name+r'$',text,re.M): raise SystemExit('Missing AAX export: '+name)
+PY
 echo "Experimental PT10 AAX bundle: $og_bundle"
 echo 'Not PACE-signed or host-qualified. No compatibility claim before actual PT10 validation.'

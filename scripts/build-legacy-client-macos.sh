@@ -72,9 +72,14 @@ PY
 cp "$og_output/build/i686-apple-darwin/release/libopengridder_legacy_client.a" "$og_output/"
 lipo "$og_output/libopengridder_legacy_client.a" -verify_arch i386
 nm -g "$og_output/libopengridder_legacy_client.a" > "$og_output/symbols.txt" 2> "$og_output/nm-warnings.txt"
-for og_symbol in create destroy process select bypass latency accept_latency status name default_latency; do
-    rg --quiet " T _og_native_$og_symbol$" "$og_output/symbols.txt"
-done
+python3 - "$og_output/symbols.txt" <<'PY'
+from pathlib import Path
+import re,sys
+text=Path(sys.argv[1]).read_text()
+for name in ('create','destroy','process','select','bypass','latency','accept_latency','status','name','default_latency'):
+    if not re.search(r' T _og_native_'+name+r'$',text,re.M):
+        raise SystemExit('Missing legacy ABI export: '+name)
+PY
 cp "$og_root/LICENSE" "$og_output/LICENSE.txt"
 cat > "$og_output/README.txt" <<'TEXT'
 OpenGridder legacy Rust client - i386 host archive, Rust 1.41.1
