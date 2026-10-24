@@ -38,6 +38,8 @@ jobs:
         run: cargo test --workspace --locked
       - name: Legacy MIT bridge primitive tests
         run: cargo test --lib --manifest-path native/legacy/bridge-core/Cargo.toml
+      - name: Legacy native client callback and protocol tests
+        run: cargo test --locked --lib --manifest-path native/legacy/client-core/Cargo.toml
       - name: Build SDK-free server
         if: runner.os == 'macOS'
         run: cargo build --release --locked -p og-server
@@ -53,6 +55,9 @@ jobs:
             echo 'AU hosting enabled. VST3 hosting requires the separate external-SDK build.'
             echo 'No AAX, RTAS or TDM plugin is implied by this artifact.'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Legacy client against the real AU server
+        if: runner.os == 'macOS'
+        run: OPENGRIDDER_TEST_SERVER="$PWD/target/release/AudioGridderServer" cargo test --locked --lib --manifest-path native/legacy/client-core/Cargo.toml -- --ignored
       - name: Upload development server
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -62,7 +67,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   legacy-core:
-    name: i386 Rust bridge archive (not a dpm plugin)
+    name: Legacy i386 host archives (not plugins)
     runs-on: macos-15-intel
     timeout-minutes: 15
     steps:
@@ -70,12 +75,26 @@ jobs:
         with:
           persist-credentials: false
       - name: Install last-generation 32-bit Apple Rust target
-        run: rustup toolchain install 1.41.1-x86_64-apple-darwin --profile minimal --force-non-host --target i686-apple-darwin --no-self-update
+        run: |
+          rustup toolchain install 1.41.1-x86_64-apple-darwin --profile minimal --force-non-host --target i686-apple-darwin --no-self-update
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --no-self-update
       - name: Build and inspect i386 archive
         run: |
           bash scripts/build-legacy-bridge-macos.sh
           echo 'This archive contains SDK-neutral queue/PCM primitives. It is not an RTAS/TDM .dpm.' > target/legacy-core-i686/README.txt
           tar -czf target/OpenGridder-legacy-bridge-i386.tar.gz -C target/legacy-core-i686 .
+      - name: Complete legacy host-client i386 archive
+        env:
+          OG_LEGACY_RUN_TESTS: '1'
+        run: |
+          bash scripts/build-legacy-client-macos.sh
+          tar -czf target/OpenGridder-legacy-client-i386.tar.gz -C target/legacy-client-i686 libopengridder_legacy_client.a README.txt LICENSE.txt Licenses SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: OpenGridder-legacy-client-i386-not-a-plugin
+          path: target/OpenGridder-legacy-client-i386.tar.gz
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: OpenGridder-legacy-bridge-i386

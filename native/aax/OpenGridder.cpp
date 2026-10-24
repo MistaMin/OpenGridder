@@ -21,6 +21,13 @@
 namespace {
 constexpr const char* kSelection = "remote_plugin";
 constexpr uint32_t kTransportLatency = 256;
+double unitValue(double value) {
+#if __cplusplus >= 201703L
+    return std::clamp(value, 0.0, 1.0);
+#else
+    return std::max(0.0, std::min(1.0, value));
+#endif
+}
 struct Instance { NativePlugin* rust; int32_t channels; };
 struct Context {
     float** input;
@@ -89,7 +96,7 @@ public:
         const auto result = AAX_CEffectParameters::UpdateParameterNormalizedValue(id, value, source);
         if (result == AAX_SUCCESS && id && std::isfinite(value)) {
             if (!std::strcmp(id, kSelection)) og_native_select(instance_.rust,
-                static_cast<uint32_t>(std::lround(std::clamp(value, 0.0, 1.0) * 128.0)));
+                static_cast<uint32_t>(std::lround(unitValue(value) * 128.0)));
             else if (!std::strcmp(id, cDefaultMasterBypassID)) og_native_bypass(instance_.rust, value >= 0.5);
         }
         return result;
@@ -106,7 +113,7 @@ public:
     AAX_Result GetParameterStringFromValue(AAX_CParamID id, double normalized, AAX_IString* text, int32_t maxLength) const override {
         if (id && text && !std::strcmp(id, kSelection)) {
             if (!std::isfinite(normalized)) return AAX_ERROR_INVALID_STRING_CONVERSION;
-            const auto index = static_cast<uint32_t>(std::lround(std::clamp(normalized, 0.0, 1.0) * 128.0));
+            const auto index = static_cast<uint32_t>(std::lround(unitValue(normalized) * 128.0));
             char name[256] = {};
             char display[288] = {};
             og_native_name(instance_.rust, index, name, sizeof(name));

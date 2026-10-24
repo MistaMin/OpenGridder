@@ -8,3 +8,4 @@ __pycache__/
 
 /native/legacy/bridge-core/target/
 /native/legacy/bridge-core/Cargo.lock
+/native/legacy/client-core/target/
