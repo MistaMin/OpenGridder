@@ -1,4 +1,7 @@
-# OpenGridder-Rust (`v1.2.1-marcosfork`)
+# OpenGridder-Rust - Alpha Software (`v1.2.1-marcosfork`)
+
+**Alpha software for evaluation.** Pro Tools host qualification, full remote
+session recall and the requested legacy compatibility are still in development.
 
 An in-development **Rust** implementation of OpenGridder, using **AudioGridder
 `v1.2.1-marcosfork`** (commit `559863f`) as a reference. The OpenGridder core is

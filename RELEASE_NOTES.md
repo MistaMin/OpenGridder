@@ -1,4 +1,4 @@
-# OpenGridder 1.2.1-preview.1 - macOS AAX evaluation candidate
+# OpenGridder 1.2.1-preview.1 - macOS AAX Alpha Software
 
 Included: universal AAX Native mono/stereo effect, universal AU/VST3 hosting
 server, launcher, manual and dependency notices. No other client formats or
@@ -9,7 +9,7 @@ The AAX uses the host's generic view with Master Bypass and Remote Plugin
 aligned dry fallback; server chains are isolated in child processes. PACE
 Signing Only is used; no OpenGridder activation codes are required.
 
-This package is a preview, not a qualified production release. Pro Tools host
+This package is alpha software for evaluation. Pro Tools host
 tests, complete remote session recall, native plugin editors, automation and
 long-duration/network qualification remain open. Pro Tools 10 and OS X 10.8.5
 are not supported by this 64-bit build; macOS 26 compatibility is unqualified.
