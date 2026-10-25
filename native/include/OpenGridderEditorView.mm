@@ -42,6 +42,7 @@ static NSFont *MonoFont(CGFloat size, NSFontWeight weight) {
 @synthesize drive = _drive;
 @synthesize outputGain = _outputGain;
 @synthesize isVuMeterMode = _isVuMeterMode;
+@synthesize isVuCalibratedMinus18 = _isVuCalibratedMinus18;
 @synthesize rackCollapsed = _rackCollapsed;
 @synthesize consoleCollapsed = _consoleCollapsed;
 @synthesize meterCollapsed = _meterCollapsed;
@@ -70,6 +71,7 @@ static NSFont *MonoFont(CGFloat size, NSFontWeight weight) {
         _peakHoldLeft = 0.0f;
         _peakHoldRight = 0.0f;
         _isVuMeterMode = YES; // Default to classic 2x-wide VU meter mode (toggleable to 1x PPM)
+        _isVuCalibratedMinus18 = YES; // Default: 0 VU = +4 dBu = -18 dBFS (toggleable to 0 VU = -3 dBFS)
         _rackCollapsed = NO;
         _consoleCollapsed = NO;
         _meterCollapsed = NO;
@@ -451,10 +453,12 @@ static void DrawStudioConsoleKnob(CGContextRef ctx,
     [valStr drawAtPoint:NSMakePoint(CGRectGetMidX(pillRect) - valSize.width * 0.5, pillRect.origin.y + 3.5) withAttributes:valAttrs];
 }
 
-static void DrawAnalogVuDial(CGContextRef ctx, CGRect dialRect, float vuLinear, float peakLinear, NSString *chLabel) {
-    // Convert linear amplitude to VU (-20 .. +3 VU, where 0 VU = 0.7079 / -3 dBFS studio calibration for visual clarity)
+static void DrawAnalogVuDial(CGContextRef ctx, CGRect dialRect, float vuLinear, float peakLinear, BOOL calMinus18, NSString *chLabel) {
+    // Convert linear amplitude to VU (-20 .. +3 VU)
+    // calMinus18 == YES: 0 VU = +4 dBu = -18 dBFS
+    // calMinus18 == NO:  0 VU = -3 dBFS
     float db = (vuLinear > 0.0001f) ? (20.0f * std::log10(vuLinear)) : -60.0f;
-    float vuVal = db + 3.0f; // 0 VU at -3 dBFS
+    float vuVal = db + (calMinus18 ? 18.0f : 3.0f);
     float normVu = 0.0f;
     if (vuVal <= -20.0f) {
         normVu = 0.0f;
@@ -580,10 +584,10 @@ static void DrawAnalogVuDial(CGContextRef ctx, CGRect dialRect, float vuLinear, 
 
     if (isWideDial) {
         NSDictionary *subAttrs = @{
-            NSFontAttributeName: MonoFont(7.5, NSFontWeightMedium),
-            NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.26 green:0.22 blue:0.16 alpha:0.68]
+            NSFontAttributeName: MonoFont(7.5, NSFontWeightBold),
+            NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.24 green:0.20 blue:0.14 alpha:0.78]
         };
-        NSString *subStr = @"0 VU = -3 dBFS";
+        NSString *subStr = calMinus18 ? @"0 VU = +4 dBu = -18 dBFS" : @"0 VU = -3 dBFS";
         NSSize subSz = [subStr sizeWithAttributes:subAttrs];
         [subStr drawAtPoint:NSMakePoint(pivotX - subSz.width * 0.5, faceRect.origin.y + 22.0) withAttributes:subAttrs];
     }
@@ -704,6 +708,7 @@ static void DrawCollapsedBankStrip(CGContextRef ctx, CGRect stripRect, NSString 
 static void DrawMasterMeteringBay(CGContextRef ctx,
                                   CGRect bayRect,
                                   BOOL isVuMode,
+                                  BOOL calMinus18,
                                   float ppmL,
                                   float ppmR,
                                   float vuL,
@@ -716,12 +721,12 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
     CGContextSetRGBStrokeColor(ctx, 0.22, 0.25, 0.29, 0.85);
     StrokeRoundedRect(ctx, bayRect, 6.0, 1.0);
 
-    // Header Row: "PPM" / "ANALOG VU METER (2X)" + [VU* | PPM] Mode Toggle + [◂] Clap-Close Button
+    // Header Row: "PPM" / "VU METER (2X)" + Calibration Toggle [-18* | -3 dB] + [VU* | PPM] Mode Toggle + [◂] Clap-Close Button
     NSDictionary *hdrAttrs = @{
         NSFontAttributeName: SysFont(9.5, NSFontWeightBold),
         NSForegroundColorAttributeName: [NSColor colorWithCalibratedWhite:0.82 alpha:1.0]
     };
-    NSString *hdrTitle = isVuMode ? @"ANALOG VU METER (2X)" : @"PPM";
+    NSString *hdrTitle = isVuMode ? @"VU METER (2X)" : @"PPM";
     [hdrTitle drawAtPoint:NSMakePoint(bayRect.origin.x + 8.0, CGRectGetMaxY(bayRect) - 20.0) withAttributes:hdrAttrs];
 
     CGRect foldBtn = CGRectMake(CGRectGetMaxX(bayRect) - 26.0, CGRectGetMaxY(bayRect) - 22.0, 20.0, 16.0);
@@ -742,14 +747,29 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
     [modeTxt drawAtPoint:NSMakePoint(CGRectGetMidX(modeBtn) - mSz.width * 0.5, modeBtn.origin.y + 2.5) withAttributes:modeAttrs];
 
     if (isVuMode) {
+        // VU Calibration Toggle Pill: [-18* | -3 dB] (0 VU = +4 dBu = -18 dBFS vs 0 VU = -3 dBFS)
+        CGRect calBtn = CGRectMake(CGRectGetMinX(modeBtn) - 70.0, CGRectGetMaxY(bayRect) - 22.0, 66.0, 16.0);
+        CGContextSetRGBFillColor(ctx, 0.13, 0.16, 0.20, 1.0);
+        FillRoundedRect(ctx, calBtn, 3.5);
+        CGContextSetRGBStrokeColor(ctx, 0.40, 0.78, 0.96, 0.85);
+        StrokeRoundedRect(ctx, calBtn, 3.5, 1.0);
+
+        NSString *calTxt = calMinus18 ? @"-18* | -3 dB" : @"-18 | -3* dB";
+        NSDictionary *calAttrs = @{
+            NSFontAttributeName: MonoFont(7.8, NSFontWeightBold),
+            NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.45 green:0.82 blue:0.98 alpha:1.0]
+        };
+        NSSize cSz = [calTxt sizeWithAttributes:calAttrs];
+        [calTxt drawAtPoint:NSMakePoint(CGRectGetMidX(calBtn) - cSz.width * 0.5, calBtn.origin.y + 2.5) withAttributes:calAttrs];
+
         // Dual Stacked 2x-Wide Classic Analog VU Meters (CH L & CH R)
         CGFloat dialW = bayRect.size.width - 16.0;
         CGFloat dialH = (bayRect.size.height - 46.0) * 0.5;
         CGRect topDial = CGRectMake(bayRect.origin.x + 8.0, bayRect.origin.y + 14.0 + dialH, dialW, dialH - 4.0);
         CGRect botDial = CGRectMake(bayRect.origin.x + 8.0, bayRect.origin.y + 8.0, dialW, dialH - 4.0);
 
-        DrawAnalogVuDial(ctx, topDial, vuL, ppmL, @"CH L");
-        DrawAnalogVuDial(ctx, botDial, vuR, ppmR, @"CH R");
+        DrawAnalogVuDial(ctx, topDial, vuL, ppmL, calMinus18, @"CH L");
+        DrawAnalogVuDial(ctx, botDial, vuR, ppmR, calMinus18, @"CH R");
     } else {
         // High-Resolution Digital Stereo PPM Bargraphs with dBFS Scale & Peak Hold
         CGFloat meterTop = CGRectGetMaxY(bayRect) - 32.0;
@@ -1168,7 +1188,7 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
         CGFloat innerW = _isVuMeterMode ? 256.0 : 128.0;
         CGFloat innerX = meterBank.origin.x + (meterBank.size.width - innerW) * 0.5;
         CGRect meterBay = CGRectMake(innerX, 44.0, innerW, bounds.size.height - 74.0);
-        DrawMasterMeteringBay(ctx, meterBay, _isVuMeterMode, _meterLeft, _meterRight, vuL, vuR, holdL, holdR);
+        DrawMasterMeteringBay(ctx, meterBay, _isVuMeterMode, _isVuCalibratedMinus18, _meterLeft, _meterRight, vuL, vuR, holdL, holdR);
     }
 
     // Footer Status Text
@@ -1417,10 +1437,23 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
         CGFloat innerW = _isVuMeterMode ? 256.0 : 128.0;
         CGFloat innerX = meterBank.origin.x + (meterBank.size.width - innerW) * 0.5;
         CGRect meterBay = CGRectMake(innerX, 44.0, innerW, bounds.size.height - 74.0);
-        CGRect meterFoldBtn = CGRectMake(CGRectGetMaxX(meterBay) - 28.0, CGRectGetMaxY(meterBay) - 22.0, 20.0, 16.0);
+        CGRect meterFoldBtn = CGRectMake(CGRectGetMaxX(meterBay) - 26.0, CGRectGetMaxY(meterBay) - 22.0, 20.0, 16.0);
         if (CGRectContainsPoint(meterFoldBtn, cp)) {
             [self setMeterCollapsed:YES];
             return;
+        }
+        CGRect modeBtn = CGRectMake(CGRectGetMinX(meterFoldBtn) - 62.0, CGRectGetMaxY(meterBay) - 22.0, 58.0, 16.0);
+        if (CGRectContainsPoint(modeBtn, cp)) {
+            [self setIsVuMeterMode:!_isVuMeterMode];
+            return;
+        }
+        if (_isVuMeterMode) {
+            CGRect calBtn = CGRectMake(CGRectGetMinX(modeBtn) - 70.0, CGRectGetMaxY(meterBay) - 22.0, 66.0, 16.0);
+            if (CGRectContainsPoint(calBtn, cp)) {
+                _isVuCalibratedMinus18 = !_isVuCalibratedMinus18;
+                [self setNeedsDisplay:YES];
+                return;
+            }
         }
         if (CGRectContainsPoint(meterBay, cp) || CGRectContainsPoint(meterBank, cp)) {
             [self setIsVuMeterMode:!_isVuMeterMode];

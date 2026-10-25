@@ -60,6 +60,7 @@ typedef CGFloat NSFontWeight;
     float _peakHoldLeft;
     float _peakHoldRight;
     BOOL _isVuMeterMode;
+    BOOL _isVuCalibratedMinus18;
     BOOL _rackCollapsed;
     BOOL _consoleCollapsed;
     BOOL _meterCollapsed;
@@ -80,10 +81,11 @@ typedef CGFloat NSFontWeight;
 @property (nonatomic, assign) float wetDryMix;   // 0..1
 @property (nonatomic, assign) float drive;       // 0..1
 @property (nonatomic, assign) float outputGain;  // 0..1
-@property (nonatomic, assign) BOOL isVuMeterMode;    // YES = Analog VU (2x width), NO = Digital PPM (1x width)
-@property (nonatomic, assign) BOOL rackCollapsed;    // YES = Plugin Selection Bank clapped closed
-@property (nonatomic, assign) BOOL consoleCollapsed; // YES = Input/WetDry/Drive/Output Bank clapped closed
-@property (nonatomic, assign) BOOL meterCollapsed;   // YES = Metering Bank clapped closed
+@property (nonatomic, assign) BOOL isVuMeterMode;         // YES = Analog VU (2x width), NO = Digital PPM (1x width)
+@property (nonatomic, assign) BOOL isVuCalibratedMinus18; // YES = 0 VU = +4 dBu = -18 dBFS, NO = 0 VU = -3 dBFS
+@property (nonatomic, assign) BOOL rackCollapsed;         // YES = Plugin Selection Bank clapped closed
+@property (nonatomic, assign) BOOL consoleCollapsed;      // YES = Input/WetDry/Drive/Output Bank clapped closed
+@property (nonatomic, assign) BOOL meterCollapsed;        // YES = Metering Bank clapped closed
 
 @property (nonatomic, copy) void (^onParameterChanged)(uint32_t paramId, float normalizedValue);
 @property (nonatomic, copy) void (^onProfileChanged)(int newProfile);
