@@ -162,7 +162,106 @@ impl Server {
     }
 
     pub fn scan_plugins(&self) -> usize {
-        let discovered = self.format_mgr.scan_all();
+        self.scan_plugins_with_progress(false, None)
+    }
+
+    pub fn scan_plugins_with_progress(
+        &self,
+        rescan: bool,
+        progress: Option<&dyn Fn(&str, usize, usize, &str)>,
+    ) -> usize {
+        let cache_file = plugin_cache_file();
+        let mut cache: PluginCache = if !rescan && cache_file.exists() {
+            std::fs::read_to_string(&cache_file)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default()
+        } else {
+            PluginCache::default()
+        };
+
+        let mut discovered = Vec::new();
+
+        // 1. Scan AU
+        let au_plugins = if self.config.lock().au {
+            og_hosting::au::scan_audiounits()
+                .into_iter()
+                .filter(|p| p.id.starts_with("AudioUnit:aufx:") && !p.is_instrument)
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        let cfg = self.config.lock().clone();
+        let vst3_bundles = if cfg.vst3 {
+            og_hosting::vst3::find_vst3_bundles(&cfg.vst3_folders)
+        } else {
+            Vec::new()
+        };
+
+        let total_items = au_plugins.len() + vst3_bundles.len();
+        let mut current_idx = 0;
+
+        for p in au_plugins {
+            current_idx += 1;
+            if let Some(ref cb) = progress {
+                cb(&p.name, current_idx, total_items, "AudioUnit");
+            }
+            discovered.push(p);
+        }
+
+        // 2. Scan VST3 with caching
+        let mut updated_cache_entries = Vec::new();
+        for bundle in vst3_bundles {
+            current_idx += 1;
+            let path_str = bundle.to_string_lossy().to_string();
+            let bundle_name = bundle
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| path_str.clone());
+
+            let mtime_secs = std::fs::metadata(&bundle)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
+            // Check if cached
+            if !rescan {
+                if let Some(entry) = cache.entries.iter().find(|e| e.path == path_str && e.mtime_secs == mtime_secs) {
+                    if let Some(ref cb) = progress {
+                        cb(&bundle_name, current_idx, total_items, "VST3 (cached)");
+                    }
+                    discovered.push(entry.plugin.clone());
+                    updated_cache_entries.push(entry.clone());
+                    continue;
+                }
+            }
+
+            // Not cached: inspect
+            if let Some(ref cb) = progress {
+                cb(&bundle_name, current_idx, total_items, "VST3");
+            }
+            let plugins = og_hosting::vst3::inspect_vst3_classes(&bundle);
+            for p in plugins {
+                if !p.is_instrument {
+                    discovered.push(p.clone());
+                    updated_cache_entries.push(CachedPluginEntry {
+                        plugin: p,
+                        path: path_str.clone(),
+                        mtime_secs,
+                    });
+                }
+            }
+        }
+
+        cache.version = 1;
+        cache.entries = updated_cache_entries;
+        if let Ok(json) = serde_json::to_string_pretty(&cache) {
+            let _ = std::fs::write(&cache_file, json);
+        }
+
         let mut guard = self.known_plugins.lock();
         for p in discovered {
             if !guard.iter().any(|existing| existing.id == p.id) {
@@ -401,4 +500,29 @@ impl Drop for Server {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PluginCache {
+    pub version: u32,
+    pub entries: Vec<CachedPluginEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedPluginEntry {
+    pub plugin: ServerPlugin,
+    pub path: String,
+    pub mtime_secs: u64,
+}
+
+pub fn plugin_cache_file() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = dirs::home_dir() {
+            let dir = home.join("Library/Application Support/OpenGridder");
+            let _ = std::fs::create_dir_all(&dir);
+            return dir.join("plugin_cache.json");
+        }
+    }
+    PathBuf::from("plugin_cache.json")
 }

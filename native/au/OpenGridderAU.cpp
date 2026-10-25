@@ -212,6 +212,9 @@ public:
                 if (outDataSize) *outDataSize = sizeof(UInt32);
                 if (outWritable) *outWritable = true;
                 return noErr;
+            case kAudioUnitProperty_CocoaUI:
+                if (outDataSize) *outDataSize = sizeof(AudioUnitCocoaViewInfo);
+                return noErr;
             default:
                 return kAudioUnitErr_InvalidProperty;
         }
@@ -305,6 +308,16 @@ public:
                 *static_cast<UInt32*>(outData) = bypass_ ? 1 : 0;
                 *ioDataSize = sizeof(UInt32);
                 return noErr;
+            case kAudioUnitProperty_CocoaUI: {
+                if (*ioDataSize < sizeof(AudioUnitCocoaViewInfo)) return kAudioUnitErr_InvalidPropertyValue;
+                AudioUnitCocoaViewInfo* viewInfo = static_cast<AudioUnitCocoaViewInfo*>(outData);
+                CFBundleRef bundle = CFBundleGetBundleWithIdentifier(CFSTR("com.opengridder.audiounit"));
+                if (!bundle) bundle = CFBundleGetMainBundle();
+                viewInfo->mCocoaAUViewBundleLocation = bundle ? CFBundleCopyBundleURL(bundle) : NULL;
+                viewInfo->mCocoaAUViewClass[0] = CFStringCreateCopy(kCFAllocatorDefault, CFSTR("OpenGridderAUCocoaViewFactory"));
+                *ioDataSize = sizeof(AudioUnitCocoaViewInfo);
+                return noErr;
+            }
             default:
                 return kAudioUnitErr_InvalidProperty;
         }

@@ -71,11 +71,48 @@ For a separate studio computer on the local network:
 2. Update `client.json` on the DAW machine with the server machine's local IP address.
 3. The protocol is intended for trusted studio networks; never expose server ports to the public Internet.
 
-## Controls
+## Controls and Hardware Interface
 
-- **Master Bypass**: Defaults to Active. When bypassed, passes dry audio while preserving plugin delay compensation alignment.
-- **Plugin Slot**: Values 0 (no effect) through 63 select discovered server effects by catalog index.
-- **Latency Profile**: Selects between Low (128), Standard (256), High (512), and Studio (1024) samples.
+OpenGridder features a custom zero-JUCE hardware console interface designed with **GoodLookinDri**, rendering native high-performance Cocoa views across AudioUnit v3, AudioUnit v2, and VST3.
+
+### Client Plugin Interface (720x420 Hardware Chassis)
+The plugin interface mimics a dark brushed anodized analog console rack with corner hex fasteners, split into two functional sections:
+
+#### 1. Left Control Panel (Routing & Profile)
+- **Status LED Dot**: Real-time connection indicator (Green = connected, Red = offline / searching).
+- **Server Address Readout**: Displays the bound server IP and port (`127.0.0.1:55056`).
+- **Latency Profile Buttons (PDC)**: Four tactile buttons (`Low 128`, `Std 256`, `High 512`, `Studio 1024`). Clicking instantly switches the network streaming buffer size and notifies the host DAW to update its plugin delay compensation without audio drops.
+- **Plugin Slot Selectors**: 4 dedicated slot buttons (`Slot 0` through `Slot 3`).
+- **Oversampling Badges**: Clickable `1x`, `2x`, `4x` oversampling badges on each slot to toggle high-precision DSP oversampling on remote processors.
+- **Master Bypass Switch**: Heavy-duty master bypass toggle button (`MASTER: ACTIVE` / `MASTER BYPASS: ENGAGED`). Passes sample-accurate dry audio while preserving PDC alignment in the host timeline.
+
+#### 2. Right Hardware Console Strip (Processing & Telemetry)
+- **Input Gain Knob**: Continuous rotary controller adjusting incoming audio gain from -12.0 dB to +12.0 dB (default: 0.0 dB). Drag vertically to adjust.
+- **Wet/Dry Mix Knob**: Continuous rotary controller blending dry and remote DSP wet return from 0% to 100% (default: 100%).
+- **Drive / Saturation Knob**: Rotary drive controller scaling harmonic warming from 1.0x to 10.0x (default: 2.0x).
+- **Output Trim Knob**: Continuous rotary controller trimming master output levels from -12.0 dB to +12.0 dB (default: 0.0 dB).
+- **Dual 20-Segment LED VU Meters**: Calibrated stereo LED ladder meters (-48 dBFS to +3 dBFS) with green/yellow/red gradient thresholds and dynamic peak hold indicators.
+- **Telemetry Readout**: Real-time display of roundtrip packet delay and active buffer compensation in samples.
+
+---
+
+## Server Tools and Splash Screen
+
+### Startup Splash Window
+Upon launching **OpenGridder Server.app**, a hardware-styled floating splash screen appears:
+- **Real-Time Progress Bar**: Shows plugin indexing progress across system audio units and VST3 directories.
+- **Dynamic Status Label**: Displays the current plugin name and file path being scanned.
+- **High-Speed Timestamp Caching**: Re-scanning skips unchanged `.vst3` and `.component` bundles by comparing file modification timestamps against `plugin_cache.json`. A library of over 1,700 plugins loads in less than 0.5 seconds on subsequent launches.
+- **Skip Scan Button**: Allows instant bypass of scanning to launch directly into the server state. Automatically dismisses when the server is ready.
+
+### Plugin Manager Tool (`Cmd-P`)
+Access the Plugin Manager from the macOS menu bar status icon or by pressing `Cmd-P`:
+- **Format Filter**: Segmented tabs to view `All`, `AudioUnit`, `VST3`, or `VST2` plugins.
+- **Instant Search Field**: Filter thousands of plugins in real time by plugin name or manufacturer.
+- **Plugin Details Table**: Displays Name, Format, Manufacturer, Category, and Validation Status.
+- **Rescan All (`Cmd-R`)**: One-click command to flush the timestamp cache and trigger a full re-scan.
+
+---
 
 ## Latency and Stability
 

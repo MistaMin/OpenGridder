@@ -2,6 +2,8 @@
 // Native Apple AudioToolbox implementation - Zero JUCE.
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
+#import <CoreAudioKit/CoreAudioKit.h>
+#import "OpenGridderEditorView.h"
 #include <cstring>
 #include "opengridder.h"
 
@@ -166,6 +168,45 @@ static const AUParameterAddress kParamLatencyProfile = 2;
     double sampleRate = _inputBus.format.sampleRate;
     if (sampleRate <= 0.0) sampleRate = 44100.0;
     return (NSTimeInterval)og_native_latency(_rust) / sampleRate;
+}
+
+- (void)requestViewControllerWithCompletionHandler:(void (^)(AUViewControllerBase * _Nullable))completionHandler {
+    NSViewController *vc = [[NSViewController alloc] init];
+    OpenGridderEditorView *view = [[OpenGridderEditorView alloc] initWithFrame:NSMakeRect(0, 0, 720, 420)];
+    view.rust = _rust;
+    view.isBypassed = (_bypassParam.value > 0.5f);
+    view.activeProfile = (int)_profileParam.value;
+    view.activeSlot = (uint32_t)_selectionParam.value;
+
+    __weak typeof(self) weakSelf = self;
+    view.onProfileChanged = ^(int newProfile) {
+        if (weakSelf) [weakSelf setProfileFromUI:newProfile];
+    };
+    view.onParameterChanged = ^(uint32_t paramId, float val) {
+        if (weakSelf) [weakSelf setParamFromUI:paramId value:val];
+    };
+
+    vc.view = view;
+    completionHandler(vc);
+}
+
+- (void)setProfileFromUI:(int)newProfile {
+    _profileParam.value = (float)newProfile;
+    uint32_t lat = (newProfile == 0) ? 128 : (newProfile == 1) ? 256 : (newProfile == 2) ? 512 : 1024;
+    if (_rust) {
+        og_native_set_transport_latency(_rust, lat);
+        og_native_accept_latency(_rust, lat);
+    }
+}
+
+- (void)setParamFromUI:(uint32_t)paramId value:(float)val {
+    if (paramId == 0) {
+        _bypassParam.value = val;
+        if (_rust) og_native_bypass(_rust, val > 0.5f);
+    } else if (paramId == 1) {
+        _selectionParam.value = val * 63.0f;
+        if (_rust) og_native_select(_rust, (uint32_t)(val * 63.0f));
+    }
 }
 
 - (AUInternalRenderBlock)internalRenderBlock {

@@ -30,32 +30,41 @@ pub fn default_vst3_folders() -> Vec<PathBuf> {
     dirs
 }
 
-/// Scan VST3 folders for `.vst3` bundles and extract plugin metadata.
-pub fn scan_vst3_folders(extra_folders: &[String]) -> Vec<ServerPlugin> {
+/// Find all `.vst3` bundle paths in default and extra folders.
+pub fn find_vst3_bundles(extra_folders: &[String]) -> Vec<PathBuf> {
     let mut folders = default_vst3_folders();
     for f in extra_folders {
         folders.push(PathBuf::from(f));
     }
-
-    let mut plugins = Vec::new();
+    let mut bundles = Vec::new();
     for folder in folders {
-        scan_vst3_dir(&folder, &mut plugins);
+        collect_vst3_bundles(&folder, &mut bundles);
     }
-    plugins
+    bundles
 }
 
-fn scan_vst3_dir(dir: &Path, out: &mut Vec<ServerPlugin>) {
+fn collect_vst3_bundles(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) == Some("vst3") {
-            out.extend(inspect_vst3_classes(&path));
+            out.push(path);
         } else if path.is_dir() {
-            scan_vst3_dir(&path, out);
+            collect_vst3_bundles(&path, out);
         }
     }
+}
+
+/// Scan VST3 folders for `.vst3` bundles and extract plugin metadata.
+pub fn scan_vst3_folders(extra_folders: &[String]) -> Vec<ServerPlugin> {
+    let bundles = find_vst3_bundles(extra_folders);
+    let mut plugins = Vec::new();
+    for bundle in bundles {
+        plugins.extend(inspect_vst3_classes(&bundle));
+    }
+    plugins
 }
 
 pub fn hosting_available() -> bool {

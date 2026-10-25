@@ -8,7 +8,11 @@ if(NOT EXISTS "${OPENGRIDDER_RUST_LIBRARY}")
   message(FATAL_ERROR "Build Rust library and set OPENGRIDDER_RUST_LIBRARY")
 endif()
 
-add_library(OpenGridder MODULE OpenGridderAU.cpp)
+add_library(OpenGridder MODULE
+  OpenGridderAU.cpp
+  OpenGridderAUCocoaView.mm
+  ../include/OpenGridderEditorView.mm
+)
 target_include_directories(OpenGridder PRIVATE ../include)
 target_link_libraries(OpenGridder PRIVATE
   "${OPENGRIDDER_RUST_LIBRARY}"
@@ -16,6 +20,7 @@ target_link_libraries(OpenGridder PRIVATE
   "-framework AudioToolbox"
   "-framework CoreAudio"
   "-framework CoreFoundation"
+  "-framework Cocoa"
   "-framework Security"
   "-framework SystemConfiguration"
   iconv resolv

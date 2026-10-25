@@ -59,6 +59,8 @@ fn run() -> Result<(), String> {
     let mut only_au = None;
     let mut only_vst3: Option<PathBuf> = None;
     let mut list = false;
+    let mut rescan = false;
+    let mut scan_progress = false;
     let mut index = 0;
     while index < args.len() {
         let option = &args[index];
@@ -76,6 +78,8 @@ fn run() -> Result<(), String> {
                 }
             }
             "--list" => list = true,
+            "--rescan" => rescan = true,
+            "--scan-progress" => scan_progress = true,
             "--no-scan" => config.scan_for_plugins = false,
             "--no-isolation" => config.sandbox_mode = SandboxMode::None as i32,
             _ => return Err(format!("Unknown option: {option}")),
@@ -113,7 +117,16 @@ fn run() -> Result<(), String> {
             server.add_known_plugin(desc);
         }
     } else if config.scan_for_plugins {
-        server.scan_plugins();
+        if scan_progress {
+            let progress_cb = |name: &str, cur: usize, total: usize, fmt: &str| {
+                println!(
+                    "SCAN_PROGRESS:{{\"current\":{cur},\"total\":{total},\"name\":{name:?},\"format\":{fmt:?}}}"
+                );
+            };
+            server.scan_plugins_with_progress(rescan, Some(&progress_cb));
+        } else {
+            server.scan_plugins_with_progress(rescan, None);
+        }
     }
     if list {
         println!(
@@ -123,6 +136,11 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
     let port = server.start(&bind, port)?;
+    if scan_progress {
+        let cat = serde_json::to_string(&server.known_plugins()).unwrap_or_default();
+        println!("SCAN_CATALOG:{cat}");
+        println!("SCAN_COMPLETE:{{\"total\":{},\"port\":{port}}}", server.known_plugins().len());
+    }
     println!(
         "OpenGridder Server listening on {bind}:{port}; {} effects; chain isolation={}",
         server.known_plugins().len(),

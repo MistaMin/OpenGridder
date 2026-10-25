@@ -4,6 +4,7 @@ members = [
     "crates/og-common",
     "crates/og-dsp",
     "crates/og-goodlookinui",
+    "crates/goodlookindri",
     "crates/og-hosting",
     "crates/og-screen",
     "crates/og-client",

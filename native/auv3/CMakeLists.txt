@@ -9,7 +9,10 @@ if(NOT EXISTS "${OPENGRIDDER_RUST_LIBRARY}")
     message(FATAL_ERROR "Build Rust library and set OPENGRIDDER_RUST_LIBRARY")
 endif()
 
-add_library(OpenGridderAUv3 MODULE OpenGridderAUv3.mm)
+add_library(OpenGridderAUv3 MODULE
+    OpenGridderAUv3.mm
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/OpenGridderEditorView.mm"
+)
 target_compile_options(OpenGridderAUv3 PRIVATE -fobjc-arc)
 
 set(BUNDLE_DIR "${CMAKE_BINARY_DIR}/OpenGridderAUv3.appex")
@@ -26,6 +29,8 @@ target_include_directories(OpenGridderAUv3 PRIVATE
 
 target_link_libraries(OpenGridderAUv3 PRIVATE
     "${OPENGRIDDER_RUST_LIBRARY}"
+    "-framework Cocoa"
+    "-framework AppKit"
     "-framework AudioToolbox"
     "-framework AVFoundation"
     "-framework CoreAudio"

@@ -8,8 +8,14 @@
 #include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "pluginterfaces/vst/vstspeaker.h"
+#include "pluginterfaces/gui/iplugview.h"
 
+#import "OpenGridderEditorView.h"
 #include "opengridder.h"
+
+namespace Steinberg {
+DEF_CLASS_IID(IPlugView)
+}
 
 #include <algorithm>
 #include <atomic>
@@ -373,9 +379,14 @@ public:
         return kResultOk;
     }
 
-    IPlugView* PLUGIN_API createView(FIDString name) override {
-        return nullptr;
-    }
+    NativePlugin* rust() const { return rust_; }
+    bool bypass() const { return bypass_; }
+    int profile() const { return profile_; }
+    uint32_t selection() const { return static_cast<uint32_t>(selection_); }
+    void setProfile(int p) { applyParameter(kParamLatencyProfile, static_cast<double>(p) / 3.0); }
+    void applyParameterFromUI(ParamID id, ParamValue val) { applyParameter(id, val); }
+
+    IPlugView* PLUGIN_API createView(FIDString name) override;
 
 private:
     void applyParameter(ParamID id, ParamValue val) {
@@ -441,6 +452,84 @@ private:
     int profile_;
     bool active_;
 };
+
+// --- GoodLookin VST3 Editor View Adapter ---
+class OpenGridderPlugView : public IPlugView {
+public:
+    OpenGridderPlugView(OpenGridderVST3* controller) : controller_(controller), view_(nil) {}
+    virtual ~OpenGridderPlugView() { removed(); }
+
+    tresult PLUGIN_API queryInterface(const TUID _iid, void** obj) override {
+        QUERY_INTERFACE(_iid, obj, IPlugView::iid, IPlugView)
+        QUERY_INTERFACE(_iid, obj, FUnknown::iid, FUnknown)
+        *obj = nullptr;
+        return kNoInterface;
+    }
+    uint32 PLUGIN_API addRef() override { return ++refCount_; }
+    uint32 PLUGIN_API release() override {
+        uint32 r = --refCount_;
+        if (r == 0) { delete this; return 0; }
+        return r;
+    }
+
+    tresult PLUGIN_API isPlatformTypeSupported(FIDString type) override {
+        if (type && std::strcmp(type, kPlatformTypeNSView) == 0) return kResultTrue;
+        return kResultFalse;
+    }
+
+    tresult PLUGIN_API attached(void* parent, FIDString type) override {
+        if (!type || std::strcmp(type, kPlatformTypeNSView) != 0 || !parent) return kResultFalse;
+        NSView* parentView = (__bridge NSView*)parent;
+        NSRect frame = NSMakeRect(0, 0, 720, 420);
+        view_ = [[OpenGridderEditorView alloc] initWithFrame:frame];
+        view_.rust = controller_->rust();
+        view_.isBypassed = controller_->bypass();
+        view_.activeProfile = controller_->profile();
+        view_.activeSlot = controller_->selection();
+
+        OpenGridderVST3* c = controller_;
+        view_.onProfileChanged = ^(int newProfile) {
+            c->setProfile(newProfile);
+        };
+        view_.onParameterChanged = ^(uint32_t paramId, float val) {
+            c->applyParameterFromUI(paramId, val);
+        };
+
+        [parentView addSubview:view_];
+        return kResultOk;
+    }
+
+    tresult PLUGIN_API removed() override {
+        if (view_) {
+            [view_ removeFromSuperview];
+            view_ = nil;
+        }
+        return kResultOk;
+    }
+
+    tresult PLUGIN_API onWheel(float distance) override { return kResultOk; }
+    tresult PLUGIN_API onKeyDown(char16 key, int16 keyCode, int16 modifiers) override { return kResultFalse; }
+    tresult PLUGIN_API onKeyUp(char16 key, int16 keyCode, int16 modifiers) override { return kResultFalse; }
+    tresult PLUGIN_API getSize(ViewRect* size) override {
+        if (!size) return kInvalidArgument;
+        size->left = 0; size->top = 0; size->right = 720; size->bottom = 420;
+        return kResultOk;
+    }
+    tresult PLUGIN_API onSize(ViewRect* newSize) override { return kResultOk; }
+    tresult PLUGIN_API onFocus(TBool state) override { return kResultOk; }
+    tresult PLUGIN_API setFrame(IPlugFrame* frame) override { return kResultOk; }
+    tresult PLUGIN_API canResize() override { return kResultFalse; }
+    tresult PLUGIN_API checkSizeConstraint(ViewRect* rect) override { return kResultOk; }
+
+private:
+    std::atomic<uint32> refCount_{1};
+    OpenGridderVST3* controller_;
+    OpenGridderEditorView* view_{nil};
+};
+
+IPlugView* PLUGIN_API OpenGridderVST3::createView(FIDString name) {
+    return new OpenGridderPlugView(this);
+}
 
 // --- Plugin Factory ---
 class OpenGridderFactory : public IPluginFactory2 {

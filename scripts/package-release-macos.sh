@@ -7,7 +7,7 @@ og_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$og_root"
 
 og_version="0.1.0-alpha"
-og_stage="$og_root/target/release-stage/$og_version"
+og_stage="$og_root/target/pkg-stage/$og_version"
 og_dist="$og_root/dist/$og_version"
 
 og_application="${OPENGRIDDER_SIGN_IDENTITY:-Developer ID Application: Marcos Deida (ZQYU67JUBH)}"
