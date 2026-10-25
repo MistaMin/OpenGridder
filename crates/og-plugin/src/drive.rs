@@ -36,6 +36,7 @@ pub struct ShapeParams {
     pub gain: f32,
     pub bias: f32,
     pub norm: f32,
+    pub slope: f32,
 }
 
 impl ShapeParams {
@@ -46,26 +47,112 @@ impl ShapeParams {
             _ => 0.0,
         };
         let norm = (0.5 * ((gain + bias).tanh() + (gain - bias).tanh())).max(1e-4);
-        Self { gain, bias, norm }
+        let slope = (gain * (1.0 - bias.tanh().powi(2))) / norm;
+        Self { gain, bias, norm, slope }
     }
 }
 
 #[inline]
-fn shape(x: f32, p: &ShapeParams) -> f32 {
+pub fn shape(x: f32, p: &ShapeParams) -> f32 {
     ((p.gain * x + p.bias).tanh() - p.bias.tanh()) / p.norm
 }
 
 /// ln(cosh(u)) computed without overflow.
 #[inline]
-fn log_cosh(u: f32) -> f32 {
+pub fn log_cosh(u: f32) -> f32 {
     let a = u.abs();
     a + (-2.0 * a).exp().ln_1p() - std::f32::consts::LN_2
 }
 
-/// Antiderivative of the (un-normalised) shaper.
+/// Antiderivative of the shaper.
 #[inline]
-fn shape_antiderivative(x: f32, p: &ShapeParams) -> f32 {
-    log_cosh(p.gain * x + p.bias) / p.gain - p.bias.tanh() * x
+pub fn shape_antiderivative(x: f32, p: &ShapeParams) -> f32 {
+    (log_cosh(p.gain * x + p.bias) / p.gain - p.bias.tanh() * x) / p.norm
+}
+
+/// HybridEQ-style Residual ADAA engine (Source/DSP/Adaa.h `dsp::adaa::Residual`).
+///
+/// Plain first-order ADAA replaces f(x_n) with the mean of f over [x_{n-1}, x_n],
+/// which acts as a two-sample average introducing a half-sample delay and significant
+/// high-frequency droop (approx -2 dB at 10 kHz, -11.7 dB at 20 kHz at 48 kHz).
+///
+/// The HybridEQ Residual method splits the function into linear and nonlinear parts:
+///   y = slope * x + r(x),   where r(x) = f(x) - slope * x.
+/// ADAA is applied to the residual r(x) only. The linear part goes through a first-order
+/// all-pass filter (1/3 + z^-1) / (1 + 1/3 z^-1), which has the exact same half-sample group
+/// delay at low frequencies but identically 1.000000 (0.000 dB) magnitude response up to Nyquist!
+/// As the stage saturates, a knee weight smoothly crossfades the linear part into the plain
+/// two-sample average so anti-aliasing cancellation remains exact in hard clipping.
+#[derive(Clone, Default)]
+pub struct ResidualAdaa {
+    x1: f32,
+    f1: f32,
+    r1: f32,
+    apx: f32,
+    apy: f32,
+    primed: bool,
+}
+
+impl ResidualAdaa {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn reset(&mut self) {
+        self.primed = false;
+        self.x1 = 0.0;
+        self.f1 = 0.0;
+        self.r1 = 0.0;
+        self.apx = 0.0;
+        self.apy = 0.0;
+    }
+
+    #[inline]
+    pub fn step(&mut self, x: f32, f: f32, f_int: f32, slope: f32) -> f32 {
+        let lin_in = slope * x;
+        if !self.primed {
+            self.apx = lin_in;
+            self.apy = lin_in;
+        }
+        // First-order all-pass (a + z^-1) / (1 + a z^-1), a = 1/3
+        let lin = (1.0 / 3.0) * (lin_in - self.apy) + self.apx;
+        self.apx = lin_in;
+        self.apy = lin;
+
+        let r = f - lin_in;
+        let fr = f_int - 0.5 * slope * x * x;
+        let mut result = lin + r;
+
+        if self.primed {
+            let dx = x - self.x1;
+            if dx.abs() > 1e-5 {
+                let mut mean_r = (fr - self.f1) / dx;
+                let lo = r.min(self.r1);
+                let hi = r.max(self.r1);
+                let tol = (hi - lo) + 1e-6 * (1.0 + r.abs());
+                if mean_r < lo - tol || mean_r > hi + tol {
+                    mean_r = r;
+                }
+                let c = if x.abs() > 1e-9 && lin_in.abs() > 1e-9 {
+                    (1.0 - f / lin_in).abs()
+                } else {
+                    0.0
+                };
+                let c2 = c * c;
+                let c4 = c2 * c2;
+                let c8 = c4 * c4;
+                const K_KNEE: f32 = 0.3;
+                const K8: f32 = K_KNEE * K_KNEE * K_KNEE * K_KNEE * K_KNEE * K_KNEE * K_KNEE * K_KNEE;
+                let w = c8 / (c8 + K8);
+                result = lin + mean_r + w * (0.5 * slope * (x + self.x1) - lin);
+            }
+        }
+        self.x1 = x;
+        self.f1 = fr;
+        self.r1 = r;
+        self.primed = true;
+        result
+    }
 }
 
 #[derive(Clone)]
@@ -125,7 +212,7 @@ impl Resampler2 {
 
 #[derive(Clone)]
 struct Channel {
-    adaa_prev: f32,
+    adaa: ResidualAdaa,
     r1: Resampler2,
     r2: Resampler2,
     dc_x1: f32,
@@ -138,7 +225,7 @@ struct Channel {
 impl Channel {
     fn new() -> Self {
         Self {
-            adaa_prev: 0.0,
+            adaa: ResidualAdaa::new(),
             r1: Resampler2::new(),
             r2: Resampler2::new(),
             dc_x1: 0.0,
@@ -228,7 +315,6 @@ impl DriveStage {
         active: bool,
     ) -> f32 {
         if quality == QUALITY_ADAA && !active {
-            self.channels[ch].adaa_prev = x;
             return x;
         }
         let lf_a = self.lf_a;
@@ -259,15 +345,11 @@ impl DriveStage {
                 c.r1.downsample(sa, sb, taps)
             }
             _ => {
-                // First-order ADAA: (F(x1) - F(x0)) / (x1 - x0)
-                let x0 = c.adaa_prev;
-                c.adaa_prev = xs;
-                let dx = xs - x0;
-                if dx.abs() < 1e-4 {
-                    shape(0.5 * (xs + x0), p)
-                } else {
-                    (shape_antiderivative(xs, p) - shape_antiderivative(x0, p)) / dx / p.norm
-                }
+                // HybridEQ Residual ADAA: preserves high-frequency response with unity magnitude
+                // (0.000 dB loss) across the entire 20 Hz .. 20 kHz audio band for small/linear signals.
+                let f = shape(xs, p);
+                let f_int = shape_antiderivative(xs, p);
+                c.adaa.step(xs, f, f_int, p.slope)
             }
         };
 
@@ -356,6 +438,36 @@ mod tests {
                 .unwrap()
                 .0;
             assert_eq!(peak, quality_latency(q), "quality {q}");
+        }
+    }
+
+    #[test]
+    fn adaa_residual_preserves_high_frequencies_flat_to_nyquist() {
+        // Just like HybridEQ tests/adaa.cpp test 2:
+        // A linear/small-signal stage must keep its level with < 0.01 dB loss from 100 Hz to 20 kHz.
+        let sr = 48000.0f32;
+        let p = ShapeParams::new(1.0, CHAR_CLEAN);
+        for f in [100.0, 1000.0, 5000.0, 10000.0, 15000.0, 20000.0] {
+            let mut adaa = ResidualAdaa::new();
+            let w = 2.0 * std::f32::consts::PI * f / sr;
+            let mut num = 0.0f32;
+            let mut den = 0.0f32;
+            for i in 0..4800 {
+                let x = 0.05 * (w * i as f32).sin();
+                let fn_val = shape(x, &p);
+                let fn_int = shape_antiderivative(x, &p);
+                let y = adaa.step(x, fn_val, fn_int, p.slope);
+                if i > 200 {
+                    num += y * y;
+                    den += (p.slope * x) * (p.slope * x);
+                }
+            }
+            let diff_db = (10.0 * (num / den).log10()).abs();
+            assert!(
+                diff_db < 0.01,
+                "At frequency {} Hz, level change was {} dB (should be < 0.01 dB)",
+                f, diff_db
+            );
         }
     }
 }
