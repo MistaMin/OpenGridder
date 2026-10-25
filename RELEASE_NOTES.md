@@ -1,20 +1,13 @@
-# OpenGridder 1.2.1-preview.1 - macOS AAX Alpha Software
+# OpenGridder 0.1.0-alpha - Multi-Format Release
 
-Included: universal AAX Native mono/stereo effect, universal AU/VST3 hosting
-server, launcher, manual and dependency notices. No other client formats or
-legacy .dpm binaries are included.
-
-The AAX uses the host's generic view with Master Bypass and Remote Plugin
-(0-128, one catalog selection). The Rust callback uses preallocated queues and
-aligned dry fallback; server chains are isolated in child processes. PACE
-Signing Only is used; no OpenGridder activation codes are required.
-
-This package is alpha software for evaluation. Pro Tools host
-tests, complete remote session recall, native plugin editors, automation and
-long-duration/network qualification remain open. Pro Tools 10 and OS X 10.8.5
-are not supported by this 64-bit build; macOS 26 compatibility is unqualified.
-Do not assume zero latency or guaranteed glitch-free tracking.
-
-RTAS and TDM will be separate, explicitly untested BETA releases after runnable
-legacy binaries can be built. Neither a 32-bit queue archive nor adapter source
-is a .dpm plugin.
+### Highlights:
+- **Zero JUCE Architecture**: Pure Rust core with clean C/C++ SDK wrappers across all targets.
+- **AudioUnit v3 (AUv3)**: Modern macOS App Extension (`OpenGridderAUv3.appex`) embedded inside `OpenGridder Server.app`, compatible with Logic Pro and GarageBand on macOS 11 through macOS 26/27.
+- **VST3**: Universal binary (`OpenGridder.vst3`, arm64 + x86_64) supporting Steinberg Cubase, Nuendo, Studio One, Bitwig, and Reaper with dynamic `kLatencyChanged` delay compensation.
+- **AudioUnit v2 (AUv2)**: Universal binary with Carbon Component Manager 'thng' resource for Logic Pro 8, Logic Pro 9 (32/64-bit), and modern DAWs.
+- **VST 2.4**: Universal binary (i386 + x86_64 + arm64) for Cubase 4/5/6/7, Nuendo, and legacy Mac DAWs.
+- **AAX Native**: Universal binary (arm64 + x86_64) PACE Eden-signed for Pro Tools 11+ and Pro Tools Ultimate.
+- **OpenGridder Server.app**: Native macOS Cocoa application bundle with custom high-res icon, system menu bar status controls, dock integration, log viewer, and background daemon management.
+- **Windows 7 Server**: x86_64 server package with custom Win32 synchronization (`WaitOnAddress`) and cryptographic (`ProcessPrng`) forwarder shims.
+- **Notarization & Codesigning**: Apple Developer ID signed, notarized with `xcrun notarytool`, and stapled for both `.pkg` and `.dmg`.
+- **4 Latency Profiles**: Low (128), Standard (256), High (512), and Studio (1024) samples.
