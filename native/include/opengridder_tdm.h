@@ -7,6 +7,7 @@ extern "C" {
 typedef struct TdmClient TdmClient;
 /* Non-realtime, single worker ownership. Original SDK-neutral mailbox ABI. */
 TdmClient* og_tdm_create(double rate, uint32_t epoch, uint32_t selection, bool bypass);
+TdmClient* og_tdm_create_profile(double rate, uint32_t epoch, uint32_t selection, bool bypass, uint32_t profile);
 void og_tdm_destroy(TdmClient*);
 uint32_t og_tdm_next_capture(TdmClient*);
 int32_t og_tdm_status(TdmClient*);
