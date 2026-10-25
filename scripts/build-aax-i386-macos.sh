@@ -18,13 +18,27 @@ from pathlib import Path
 if 'i386' not in Path(sys.argv[1]).read_text(): raise SystemExit('Apple SDK lacks i386 libSystem')
 PY
 fi
+# Xcode 4.6 libc++ places [[noreturn]] before friend, which modern Clang rejects.
+# Patch a generated header copy only; preserve the independently installed SDK.
+og_cxx_headers="$og_root/target/legacy-cxx-headers"
+python3 - "$OPENGRIDDER_LEGACY_CXX_HEADERS" "$og_cxx_headers" <<'PYHEADERS'
+import shutil,sys
+from pathlib import Path
+source,target=map(Path,sys.argv[1:])
+shutil.copytree(source,target,dirs_exist_ok=True,symlinks=True)
+config=target/'__config'
+text=config.read_text()
+text=text.replace('#  define _LIBCPP_NORETURN [[noreturn]]',
+                  '#  define _LIBCPP_NORETURN __attribute__ ((noreturn))')
+config.write_text(text)
+PYHEADERS
 bash "$og_root/scripts/build-legacy-client-macos.sh"
 og_build="$og_root/target/aax-i386"
 cmake -S "$og_root/native/aax" -B "$og_build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=i386 \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=10.8 -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
     -DCMAKE_OSX_SYSROOT="$OPENGRIDDER_LEGACY_APPLE_SDK" \
-    "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem \"$OPENGRIDDER_LEGACY_CXX_HEADERS\"" \
+    "-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem \"$og_cxx_headers\"" \
     -DAAX_SDK_ROOT="$AAX_SDK_ROOT" \
     -DOPENGRIDDER_RUST_LIBRARY="$og_root/target/legacy-client-i686/libopengridder_legacy_client.a"
 cmake --build "$og_build" -j "${OG_BUILD_JOBS:-4}"

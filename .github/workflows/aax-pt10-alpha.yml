@@ -1,0 +1,38 @@
+name: Build experimental Pro Tools 10 AAX
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: opengridder-private-aax-signing
+  cancel-in-progress: false
+jobs:
+  pt10-aax:
+    if: github.repository == 'MistaMin/OpenGridder-Rust' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, macOS, ARM64, opengridder-aax-release]
+    timeout-minutes: 30
+    env:
+      AAX_SDK_ROOT: ${{ vars.OPENGRIDDER_AAX_SDK_ROOT }}
+      OPENGRIDDER_LEGACY_APPLE_SDK: ${{ vars.OPENGRIDDER_LEGACY_APPLE_SDK }}
+      OPENGRIDDER_LEGACY_CXX_HEADERS: ${{ vars.OPENGRIDDER_LEGACY_CXX_HEADERS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Build actual i386 AAX against external legacy SDK
+        run: bash scripts/build-aax-i386-macos.sh
+      - name: Sign with PT10-compatible PACE signature
+        run: bash scripts/sign-aax-i386-macos.sh
+      - name: Package experimental bundle preserving PACE symlinks
+        shell: bash
+        run: |
+          mkdir -p target/pt10-alpha-artifact
+          ditto -c -k --sequesterRsrc --keepParent target/aax-i386-pace-signed/OpenGridder.aaxplugin target/pt10-alpha-artifact/OpenGridder-AAX-PT10-alpha-untested.zip
+          cp target/aax-i386-pace-signed/pace-verification.txt target/pt10-alpha-artifact/
+          printf '%s\n' 'Experimental i386 AAX, minimum deployment 10.8. Signed, but not qualified in Pro Tools 10. No SDK source included. RTAS/TDM are not included.' > target/pt10-alpha-artifact/README.txt
+          cd target/pt10-alpha-artifact
+          shasum -a 256 OpenGridder-AAX-PT10-alpha-untested.zip > SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: OpenGridder-AAX-PT10-alpha-untested
+          path: target/pt10-alpha-artifact/
+          if-no-files-found: error
+          retention-days: 14
