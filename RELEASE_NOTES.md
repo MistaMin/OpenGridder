@@ -1,6 +1,8 @@
-# OpenGridder 0.1.0-alpha - Multi-Format Release
+# OpenGridder 0.1.1-alpha - Multi-Format Release
 
 ### Highlights:
+- **AudioGridder Feature Parity & Unlimited Plugin Chain**: Dynamic slot rack supporting arbitrary length plugin chains, with native Cocoa categorized plugin browser menu, per-plugin bypass, per-plugin oversampling (`1x`, `2x`, `4x`), and remote GUI editor triggering.
+- **Pro Tools Custom GUI Integration**: Full `AAX_CEffectGUI` implementation bringing the GoodLookin rack interface directly into Avid Pro Tools with active remote plugin management and rotary controls.
 - **Zero JUCE Architecture**: Pure Rust core with clean native C/C++/Objective-C SDK wrappers across all targets.
 - **GoodLookinDri Hardware UI**: Custom brushed anodized aluminum console interface across AUv3, AUv2 Cocoa UI, and VST3 with rotary controls, clickable oversampling badges (1x/2x/4x), and animated dual stereo LED ladder VU meters.
 - **Server Startup Splash Window**: Centered floating splash screen with real-time scan progress, live plugin name display, and skip scan button; auto-dismisses upon server readiness.

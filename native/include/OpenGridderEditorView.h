@@ -9,6 +9,8 @@
 #define OPENGRIDDER_VIEW_CLASS_NAME OpenGridderAUv3EditorView
 #elif defined(OG_BUILD_AU)
 #define OPENGRIDDER_VIEW_CLASS_NAME OpenGridderAUEditorView
+#elif defined(OG_BUILD_AAX)
+#define OPENGRIDDER_VIEW_CLASS_NAME OpenGridderAAXEditorView
 #else
 #define OPENGRIDDER_VIEW_CLASS_NAME OpenGridderEditorView
 #endif
@@ -34,6 +36,7 @@ typedef CGFloat NSFontWeight;
 @interface OpenGridderEditorView : NSView {
 @public
     NativePlugin *_rust;
+    NativePlugin* (^_rustProvider)(void);
     BOOL _isBypassed;
     int _activeProfile;
     uint32_t _activeSlot;
@@ -57,6 +60,7 @@ typedef CGFloat NSFontWeight;
 }
 
 @property (nonatomic, assign) NativePlugin *rust;
+@property (nonatomic, copy) NativePlugin* (^rustProvider)(void);
 @property (nonatomic, assign) BOOL isBypassed;
 @property (nonatomic, assign) int activeProfile;
 @property (nonatomic, assign) uint32_t activeSlot;
@@ -71,5 +75,7 @@ typedef CGFloat NSFontWeight;
 
 - (instancetype)initWithFrame:(NSRect)frame;
 - (void)updateStatus:(int)statusCode latencySamples:(uint32_t)latency;
+- (void)showPluginMenuAtPoint:(NSPoint)pt;
+- (void)onSelectPlugin:(NSMenuItem *)sender;
 
 @end

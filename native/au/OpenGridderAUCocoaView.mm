@@ -17,6 +17,15 @@
 - (NSView *)uiViewForAudioUnit:(AudioUnit)inAudioUnit withSize:(NSSize)inPreferredSize {
     OpenGridderEditorView *view = [[OpenGridderEditorView alloc] initWithFrame:NSMakeRect(0, 0, 720, 420)];
 
+    view.rustProvider = ^NativePlugin* {
+        NativePlugin* r = nullptr;
+        UInt32 size = sizeof(NativePlugin*);
+        if (AudioUnitGetProperty(inAudioUnit, 65536, kAudioUnitScope_Global, 0, &r, &size) == noErr) {
+            return r;
+        }
+        return nullptr;
+    };
+
     Float32 bypass = 0.0f;
     AudioUnitGetParameter(inAudioUnit, 0 /* kParamBypass */, kAudioUnitScope_Global, 0, &bypass);
     view.isBypassed = (bypass > 0.5f);

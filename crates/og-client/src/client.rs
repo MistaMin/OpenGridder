@@ -12,7 +12,8 @@ use og_common::message::{
     ExchangePayload, HandshakeRequest, HandshakeResponse, KeyPayload, MessageFactory,
     MessageType, MidiEvent, MousePayload, OversamplingPayload, ParameterValuePayload, PositionInfo,
     PresetPayload, RawMessage, ScreenBoundsPayload, AG_PROTOCOL_VERSION, HANDSHAKE_FLAGS_LOCAL_MODE,
-    HANDSHAKE_FLAGS_SANDBOX_ENABLED, HANDSHAKE_FLAG_STATE_ACK, HANDSHAKE_RESP_FLAG_STATE_ACK,
+    HANDSHAKE_FLAGS_SANDBOX_ENABLED, HANDSHAKE_FLAG_NO_PLUGINLIST_FILTER, HANDSHAKE_FLAG_STATE_ACK,
+    HANDSHAKE_RESP_FLAG_STATE_ACK,
 };
 use og_common::server_plugin::{PluginLayout, PluginParameter, ServerPlugin};
 use parking_lot::Mutex;
@@ -139,14 +140,14 @@ impl Client {
             .next()
             .ok_or_else(|| format!("no socket address for {}", addr_str))?;
 
-        let timeout = Duration::from_millis(5000);
+        let timeout = Duration::from_millis(10000);
         let mut master = TcpStream::connect_timeout(&addr, timeout)
             .map_err(|e| format!("master connect failed: {}", e))?;
         let _ = master.set_nodelay(true);
         let _ = master.set_read_timeout(Some(timeout));
         let _ = master.set_write_timeout(Some(timeout));
 
-        let mut flags = HANDSHAKE_FLAG_STATE_ACK;
+        let mut flags = HANDSHAKE_FLAG_STATE_ACK | HANDSHAKE_FLAG_NO_PLUGINLIST_FILTER;
         if cfg.local_mode {
             flags |= HANDSHAKE_FLAGS_LOCAL_MODE;
         }
@@ -226,7 +227,7 @@ impl Client {
                 msg.msg_type
             ));
         }
-        let parsed_plugins = Self::parse_plugin_list(msg.as_str());
+        let parsed_plugins = Self::parse_plugin_list(&msg);
         *self.plugins.lock() = parsed_plugins;
 
         *self.cmd_out.lock() = Some(cmd_out);
@@ -248,28 +249,43 @@ impl Client {
         *self.screen_stream.lock() = None;
     }
 
-    fn parse_plugin_list(text: &str) -> Vec<ServerPlugin> {
-        // Supports both JSON array of ServerPlugin objects and newline-delimited ServerPlugin::from_string
-        let trimmed = text.trim();
-        if trimmed.starts_with('[') {
-            if let Ok(list) = serde_json::from_str::<Vec<ServerPlugin>>(trimmed) {
+    fn parse_plugin_list(msg: &RawMessage) -> Vec<ServerPlugin> {
+        let text = msg.as_str().trim();
+        if text.starts_with('[') {
+            if let Ok(list) = serde_json::from_str::<Vec<ServerPlugin>>(text) {
                 return list;
             }
         }
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            if let Some(arr) = val.get("plugins").and_then(|v| v.as_array()) {
-                let mut out = Vec::new();
-                for item in arr {
-                    if let Some(s) = item.as_str() {
-                        if let Some(p) = ServerPlugin::from_string(s) {
-                            out.push(p);
-                        }
-                    } else if let Ok(p) = serde_json::from_value::<ServerPlugin>(item.clone()) {
-                        out.push(p);
-                    }
-                }
-                return out;
+        let val = if msg.payload.len() >= 4 {
+            let mp = msg.get_msgpack();
+            if mp.is_object() || mp.is_array() {
+                mp
+            } else {
+                serde_json::from_str::<serde_json::Value>(text)
+                    .unwrap_or_else(|_| serde_json::json!({}))
             }
+        } else {
+            serde_json::from_str::<serde_json::Value>(text)
+                .unwrap_or_else(|_| serde_json::json!({}))
+        };
+
+        if let Some(arr) = val.get("plugins").and_then(|v| v.as_array()) {
+            return arr
+                .iter()
+                .map(|item| {
+                    serde_json::from_value::<ServerPlugin>(item.clone())
+                        .unwrap_or_else(|_| ServerPlugin::from_json(item))
+                })
+                .collect();
+        }
+        if let Some(arr) = val.as_array() {
+            return arr
+                .iter()
+                .map(|item| {
+                    serde_json::from_value::<ServerPlugin>(item.clone())
+                        .unwrap_or_else(|_| ServerPlugin::from_json(item))
+                })
+                .collect();
         }
         text.lines()
             .filter_map(|l| ServerPlugin::from_string(l.trim()))
@@ -298,7 +314,8 @@ impl Client {
 
         let res_msg = MessageFactory::get_next_message(sock, None)
             .map_err(|e| format!("read AddPluginResult failed: {}", e))?;
-        let res: AddPluginResult = serde_json::from_slice(&res_msg.payload)
+        let res_json = res_msg.get_json();
+        let res: AddPluginResult = serde_json::from_value(res_json)
             .map_err(|e| format!("failed to decode AddPluginResult: {}", e))?;
 
         if !res.ok {
@@ -308,8 +325,8 @@ impl Client {
         // Read Presets message
         let presets_msg = MessageFactory::get_next_message(sock, None)
             .map_err(|e| format!("read Presets failed: {}", e))?;
-        let presets: Vec<String> = presets_msg
-            .as_str()
+        let presets_str = presets_msg.get_string();
+        let presets: Vec<String> = presets_str
             .split('|')
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
@@ -318,26 +335,14 @@ impl Client {
         // Read ParameterList message
         let params_msg = MessageFactory::get_next_message(sock, None)
             .map_err(|e| format!("read ParameterList failed: {}", e))?;
+        let params_json = params_msg.get_json();
         let params: Vec<PluginParameter> =
-            serde_json::from_str(params_msg.as_str()).unwrap_or_default();
+            serde_json::from_value(params_json).unwrap_or_default();
 
-        // Read PluginLayouts message
-        let layouts_msg = MessageFactory::get_next_message(sock, None)
-            .map_err(|e| format!("read PluginLayouts failed: {}", e))?;
-        let layouts: Vec<PluginLayout> =
-            serde_json::from_str(layouts_msg.as_str()).unwrap_or_default();
+        self.latency_samples
+            .store(res.latency_samples, Ordering::Relaxed);
 
-        // Read Latency message
-        let lat_msg = MessageFactory::get_next_message(sock, None)
-            .map_err(|e| format!("read Latency failed: {}", e))?;
-        if lat_msg.payload.len() >= 4 {
-            let lat = i32::from_le_bytes(lat_msg.payload[0..4].try_into().unwrap());
-            self.latency_samples.store(lat, Ordering::Relaxed);
-        } else {
-            self.latency_samples
-                .store(res.latency_samples, Ordering::Relaxed);
-        }
-
+        let layouts: Vec<PluginLayout> = Vec::new();
         Ok((res, params, layouts, presets))
     }
 
@@ -361,11 +366,7 @@ impl Client {
     pub fn edit_plugin(&self, idx: i32, x: i32, y: i32) -> Result<(), String> {
         let mut guard = self.cmd_out.lock();
         let sock = guard.as_mut().ok_or("not connected")?;
-        let mut payload = Vec::with_capacity(12);
-        payload.extend_from_slice(&idx.to_le_bytes());
-        payload.extend_from_slice(&x.to_le_bytes());
-        payload.extend_from_slice(&y.to_le_bytes());
-        RawMessage::new(MessageType::EditPlugin, payload)
+        RawMessage::edit_plugin(idx, 0, x, y)
             .send(sock)
             .map_err(|e| e.to_string())
     }
@@ -403,7 +404,7 @@ impl Client {
         if self.state_ack.load(Ordering::Relaxed) {
             let reply = MessageFactory::get_next_message(sock, None).map_err(|e| e.to_string())?;
             if reply.msg_type_enum() != MessageType::Result { return Err("Unexpected state restore acknowledgement".into()); }
-            let result: serde_json::Value = serde_json::from_slice(&reply.payload).map_err(|e| e.to_string())?;
+            let result: serde_json::Value = reply.get_json();
             if result.get("ok").and_then(|v| v.as_bool()) != Some(true) {
                 return Err(result.get("error").and_then(|v| v.as_str()).unwrap_or("State restore failed").into());
             }
@@ -458,7 +459,7 @@ impl Client {
             .send(sock)
             .map_err(|e| e.to_string())?;
         let resp = MessageFactory::get_next_message(sock, None).map_err(|e| e.to_string())?;
-        Ok(Self::parse_plugin_list(resp.as_str()))
+        Ok(Self::parse_plugin_list(&resp))
     }
 
     /// Select preset `preset` on plugin `idx` (`MessageType::Preset`).

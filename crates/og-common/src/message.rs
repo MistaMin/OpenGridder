@@ -85,7 +85,7 @@ impl Default for HandshakeRequest {
 }
 
 impl HandshakeRequest {
-    pub const WIRE_SIZE: usize = 56;
+    pub const WIRE_SIZE: usize = 64;
     pub const SIZE: usize = Self::WIRE_SIZE;
 
     pub fn set_flag(&mut self, flag: u8) {
@@ -110,6 +110,7 @@ impl HandshakeRequest {
         buf[40] = self.flags;
         // unused1 + 6 bytes padding before u64 activeChannels
         buf[48..56].copy_from_slice(&self.active_channels.to_le_bytes());
+        // unused2 (2 bytes) + 6 bytes tail padding (all zeroes)
         buf
     }
 
@@ -989,7 +990,12 @@ impl RawMessage {
 
     pub fn get_json(&self) -> Value {
         let s = self.get_string();
-        serde_json::from_str(&s).unwrap_or_else(|_| json!({}))
+        if !s.is_empty() {
+            if let Ok(v) = serde_json::from_str(&s) {
+                return v;
+            }
+        }
+        serde_json::from_str(self.as_str()).unwrap_or_else(|_| json!({}))
     }
 
     pub fn from_msgpack(msg_type: MessageType, j: &Value) -> Self {
@@ -1366,7 +1372,11 @@ pub fn send_json_message<W: Write, T: Serialize>(
 ) -> Result<(), MessageError> {
     let json_bytes =
         serde_json::to_vec(data).map_err(|e| MessageError::new(ErrorCode::Data, e.to_string()))?;
-    RawMessage::new(msg_type, json_bytes).send(stream)
+    let len = json_bytes.len() as i32;
+    let mut payload = Vec::with_capacity(4 + json_bytes.len());
+    payload.extend_from_slice(&len.to_le_bytes());
+    payload.extend_from_slice(&json_bytes);
+    RawMessage::new(msg_type, payload).send(stream)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1405,9 +1415,13 @@ impl ScreenHeader {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AddPluginResult {
+    #[serde(alias = "success", default)]
     pub ok: bool,
+    #[serde(alias = "latency", default)]
     pub latency_samples: i32,
+    #[serde(alias = "disabledSideChain", default)]
     pub disabled_sidechain: bool,
+    #[serde(default)]
     pub err: String,
 }
 

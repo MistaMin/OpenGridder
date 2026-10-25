@@ -23,6 +23,14 @@ static NSFont *MonoFont(CGFloat size, NSFontWeight weight) {
 @implementation OpenGridderEditorView
 
 @synthesize rust = _rust;
+@synthesize rustProvider = _rustProvider;
+
+- (NativePlugin *)rust {
+    if (_rustProvider) {
+        return _rustProvider();
+    }
+    return _rust;
+}
 @synthesize isBypassed = _isBypassed;
 @synthesize activeProfile = _activeProfile;
 @synthesize activeSlot = _activeSlot;
@@ -299,11 +307,16 @@ static void DrawGoodLookinKnob(CGContextRef ctx, CGRect bounds, float normVal, N
     // Plugin Slots Header
     [@"REMOTE PLUGIN SLOTS" drawAtPoint:NSMakePoint(40, bounds.size.height - 198) withAttributes:sectionAttrs];
 
-    // 4 Plugin Slot Buttons with Oversampling Badges
-    for (int i = 0; i < 4; ++i) {
-        CGFloat sy = bounds.size.height - 232 - i * 32;
-        CGRect slotRect = CGRectMake(40, sy, 208, 26);
-        BOOL selected = (_activeSlot == (uint32_t)i);
+    // Dynamic Plugin Slots with Per-Plugin Bypass, Oversampling, and Unload
+    uint32_t numLoaded = self.rust ? og_native_num_loaded_plugins(self.rust) : 0;
+    CGFloat slotH = 26;
+    CGFloat slotSpacing = 4;
+    CGFloat baseY = bounds.size.height - 230;
+
+    for (uint32_t i = 0; i < numLoaded; ++i) {
+        CGFloat sy = baseY - i * (slotH + slotSpacing);
+        CGRect slotRect = CGRectMake(40, sy, 208, slotH);
+        BOOL selected = (_activeSlot == i);
 
         CGContextSetRGBFillColor(ctx, selected ? 0.20 : 0.14, selected ? 0.25 : 0.16, selected ? 0.28 : 0.17, 1.0);
         CGContextFillRect(ctx, slotRect);
@@ -311,29 +324,88 @@ static void DrawGoodLookinKnob(CGContextRef ctx, CGRect bounds, float normVal, N
         CGContextSetLineWidth(ctx, 1.0);
         CGContextStrokeRect(ctx, slotRect);
 
-        // Slot Title
-        NSString *slotTitle = (i == 0) ? @"Slot 0: Connected Effect" : [NSString stringWithFormat:@"Slot %d: Empty", i];
-        NSDictionary *slotAttrs = @{
-            NSFontAttributeName: SysFont(11, NSFontWeightMedium),
-            NSForegroundColorAttributeName: selected ? [NSColor whiteColor] : [NSColor colorWithCalibratedWhite:0.75 alpha:1.0]
+        char nameBuf[256] = {0};
+        bool bypassed = false;
+        uint32_t osFactor = 1;
+        og_native_get_loaded_plugin(self.rust, i, nameBuf, sizeof(nameBuf), &bypassed, &osFactor);
+        NSString *slotTitle = [NSString stringWithUTF8String:nameBuf];
+        if (slotTitle.length == 0) slotTitle = [NSString stringWithFormat:@"Plugin %u", i];
+
+        // 1. Per-Plugin Bypass Button [B]
+        CGRect bypBadge = CGRectMake(slotRect.origin.x + 3, sy + 3, 20, 20);
+        CGContextSetRGBFillColor(ctx, bypassed ? 0.85 : 0.12, bypassed ? 0.45 : 0.14, bypassed ? 0.15 : 0.16, 1.0);
+        CGContextFillRect(ctx, bypBadge);
+        CGContextSetRGBStrokeColor(ctx, bypassed ? 1.0 : 0.4, bypassed ? 0.7 : 0.4, bypassed ? 0.3 : 0.4, 1.0);
+        CGContextStrokeRect(ctx, bypBadge);
+
+        NSDictionary *bBadgeAttrs = @{
+            NSFontAttributeName: SysFont(9, NSFontWeightBold),
+            NSForegroundColorAttributeName: bypassed ? [NSColor blackColor] : [NSColor colorWithCalibratedWhite:0.6 alpha:1.0]
         };
-        [slotTitle drawAtPoint:NSMakePoint(48, sy + 5) withAttributes:slotAttrs];
+        NSSize bSz = [@"B" sizeWithAttributes:bBadgeAttrs];
+        [@"B" drawAtPoint:NSMakePoint(bypBadge.origin.x + (20 - bSz.width) * 0.5, bypBadge.origin.y + 4) withAttributes:bBadgeAttrs];
 
-        // 1x/2x/4x Oversampling Badge
-        CGRect badgeRect = CGRectMake(slotRect.origin.x + slotRect.size.width - 34, sy + 3, 30, 20);
+        // 2. Plugin Title
+        NSDictionary *slotAttrs = @{
+            NSFontAttributeName: SysFont(10, NSFontWeightMedium),
+            NSForegroundColorAttributeName: bypassed ? [NSColor colorWithCalibratedWhite:0.5 alpha:1.0] : [NSColor whiteColor]
+        };
+        // Truncate title if long
+        if (slotTitle.length > 15) {
+            slotTitle = [NSString stringWithFormat:@"%@…", [slotTitle substringToIndex:14]];
+        }
+        [slotTitle drawAtPoint:NSMakePoint(67, sy + 6) withAttributes:slotAttrs];
+
+        // 3. Per-Plugin Oversampling Badge (1x / 2x / 4x)
+        CGRect osBadge = CGRectMake(slotRect.origin.x + slotRect.size.width - 50, sy + 3, 24, 20);
         CGContextSetRGBFillColor(ctx, 0.12, 0.14, 0.16, 1.0);
-        CGContextFillRect(ctx, badgeRect);
-        CGContextSetRGBStrokeColor(ctx, 0.95, 0.75, 0.25, 0.8);
+        CGContextFillRect(ctx, osBadge);
+        CGContextSetRGBStrokeColor(ctx, (osFactor > 1) ? 0.95 : 0.5, (osFactor > 1) ? 0.75 : 0.5, (osFactor > 1) ? 0.25 : 0.5, 0.8);
         CGContextSetLineWidth(ctx, 1.0);
-        CGContextStrokeRect(ctx, badgeRect);
+        CGContextStrokeRect(ctx, osBadge);
 
-        NSString *osText = [NSString stringWithFormat:@"%dx", _oversamplingFactor];
+        NSString *osText = [NSString stringWithFormat:@"%ux", osFactor];
         NSDictionary *osAttrs = @{
-            NSFontAttributeName: MonoFont(9, NSFontWeightBold),
-            NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.95 green:0.75 blue:0.25 alpha:1.0]
+            NSFontAttributeName: MonoFont(8, NSFontWeightBold),
+            NSForegroundColorAttributeName: (osFactor > 1) ? [NSColor colorWithCalibratedRed:0.95 green:0.75 blue:0.25 alpha:1.0] : [NSColor colorWithCalibratedWhite:0.65 alpha:1.0]
         };
         NSSize osSz = [osText sizeWithAttributes:osAttrs];
-        [osText drawAtPoint:NSMakePoint(badgeRect.origin.x + (30 - osSz.width) * 0.5, badgeRect.origin.y + 3) withAttributes:osAttrs];
+        [osText drawAtPoint:NSMakePoint(osBadge.origin.x + (24 - osSz.width) * 0.5, osBadge.origin.y + 4) withAttributes:osAttrs];
+
+        // 4. Unload / Delete Button [✕]
+        CGRect delBadge = CGRectMake(slotRect.origin.x + slotRect.size.width - 23, sy + 3, 20, 20);
+        CGContextSetRGBFillColor(ctx, 0.18, 0.12, 0.12, 1.0);
+        CGContextFillRect(ctx, delBadge);
+        CGContextSetRGBStrokeColor(ctx, 0.6, 0.25, 0.25, 0.8);
+        CGContextStrokeRect(ctx, delBadge);
+
+        NSDictionary *delAttrs = @{
+            NSFontAttributeName: SysFont(9, NSFontWeightBold),
+            NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.85 green:0.4 blue:0.4 alpha:1.0]
+        };
+        NSSize dSz = [@"✕" sizeWithAttributes:delAttrs];
+        [@"✕" drawAtPoint:NSMakePoint(delBadge.origin.x + (20 - dSz.width) * 0.5, delBadge.origin.y + 4) withAttributes:delAttrs];
+    }
+
+    // Add Plugin Button [+]
+    CGFloat addSy = baseY - numLoaded * (slotH + slotSpacing);
+    if (addSy >= 90) {
+        CGRect addRect = CGRectMake(40, addSy, 208, slotH);
+        CGContextSetRGBFillColor(ctx, 0.12, 0.14, 0.16, 0.8);
+        CGContextFillRect(ctx, addRect);
+        CGContextSetRGBStrokeColor(ctx, 0.35, 0.45, 0.55, 0.8);
+        CGFloat dash[2] = {4.0, 3.0};
+        CGContextSetLineDash(ctx, 0, dash, 2);
+        CGContextStrokeRect(ctx, addRect);
+        CGContextSetLineDash(ctx, 0, NULL, 0); // Reset dash
+
+        NSDictionary *addAttrs = @{
+            NSFontAttributeName: SysFont(10, NSFontWeightBold),
+            NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.45 green:0.75 blue:0.95 alpha:1.0]
+        };
+        NSString *addTxt = @"+ Add Plugin...";
+        NSSize addSz = [addTxt sizeWithAttributes:addAttrs];
+        [addTxt drawAtPoint:NSMakePoint(addRect.origin.x + (208 - addSz.width) * 0.5, addSy + 6) withAttributes:addAttrs];
     }
 
     // Master Bypass Toggle
@@ -474,22 +546,67 @@ static void DrawGoodLookinKnob(CGContextRef ctx, CGRect bounds, float normVal, N
         }
     }
 
-    // Check Oversampling Badges on Slots
-    for (int i = 0; i < 4; ++i) {
-        CGFloat sy = bounds.size.height - 232 - i * 32;
-        CGRect badgeRect = CGRectMake(40 + 208 - 34, sy + 3, 30, 20);
-        if (CGRectContainsPoint(badgeRect, NSPointToCGPoint(p))) {
-            // Cycle 1x -> 2x -> 4x -> 1x
-            _oversamplingFactor = (_oversamplingFactor == 1) ? 2 : (_oversamplingFactor == 2) ? 4 : 1;
+    // Dynamic Plugin Slots
+    uint32_t numLoaded = self.rust ? og_native_num_loaded_plugins(self.rust) : 0;
+    CGFloat slotH = 26;
+    CGFloat slotSpacing = 4;
+    CGFloat baseY = bounds.size.height - 230;
+
+    for (uint32_t i = 0; i < numLoaded; ++i) {
+        CGFloat sy = baseY - i * (slotH + slotSpacing);
+        CGRect slotRect = CGRectMake(40, sy, 208, slotH);
+
+        // 1. Bypass badge [B]
+        CGRect bypBadge = CGRectMake(slotRect.origin.x + 3, sy + 3, 20, 20);
+        if (CGRectContainsPoint(bypBadge, NSPointToCGPoint(p))) {
+            char nameBuf[256] = {0};
+            bool bypassed = false;
+            uint32_t osFactor = 1;
+            og_native_get_loaded_plugin(self.rust, i, nameBuf, sizeof(nameBuf), &bypassed, &osFactor);
+            og_native_set_plugin_bypassed(self.rust, i, !bypassed);
             [self setNeedsDisplay:YES];
             return;
         }
-        CGRect slotRect = CGRectMake(40, sy, 208, 26);
+
+        // 2. Oversampling badge [1x / 2x / 4x]
+        CGRect osBadge = CGRectMake(slotRect.origin.x + slotRect.size.width - 50, sy + 3, 24, 20);
+        if (CGRectContainsPoint(osBadge, NSPointToCGPoint(p))) {
+            char nameBuf[256] = {0};
+            bool bypassed = false;
+            uint32_t osFactor = 1;
+            og_native_get_loaded_plugin(self.rust, i, nameBuf, sizeof(nameBuf), &bypassed, &osFactor);
+            uint32_t nextOs = (osFactor == 1) ? 2 : (osFactor == 2) ? 4 : 1;
+            og_native_set_plugin_oversampling(self.rust, i, nextOs);
+            [self setNeedsDisplay:YES];
+            return;
+        }
+
+        // 3. Delete badge [✕]
+        CGRect delBadge = CGRectMake(slotRect.origin.x + slotRect.size.width - 23, sy + 3, 20, 20);
+        if (CGRectContainsPoint(delBadge, NSPointToCGPoint(p))) {
+            og_native_unload_plugin(self.rust, i);
+            [self setNeedsDisplay:YES];
+            return;
+        }
+
+        // 4. Slot body click -> open remote plugin window
         if (CGRectContainsPoint(slotRect, NSPointToCGPoint(p))) {
             _activeSlot = i;
-            if (self.rust) og_native_select(self.rust, _activeSlot);
-            if (self.onParameterChanged) self.onParameterChanged(1, (float)i / 128.0f);
+            NSWindow *win = self.window;
+            NSPoint winPoint = [self convertPoint:p toView:nil];
+            NSRect screenRect = [win convertRectToScreen:NSMakeRect(winPoint.x, winPoint.y, 1, 1)];
+            og_native_edit_plugin(self.rust, i, (int32_t)screenRect.origin.x, (int32_t)screenRect.origin.y);
             [self setNeedsDisplay:YES];
+            return;
+        }
+    }
+
+    // Add Plugin Button [+]
+    CGFloat addSy = baseY - numLoaded * (slotH + slotSpacing);
+    if (addSy >= 90) {
+        CGRect addRect = CGRectMake(40, addSy, 208, slotH);
+        if (CGRectContainsPoint(addRect, NSPointToCGPoint(p))) {
+            [self showPluginMenuAtPoint:p];
             return;
         }
     }
@@ -527,6 +644,64 @@ static void DrawGoodLookinKnob(CGContextRef ctx, CGRect bounds, float normVal, N
 
 - (void)mouseUp:(NSEvent *)event {
     _draggedKnob = -1;
+}
+
+- (void)showPluginMenuAtPoint:(NSPoint)pt {
+    NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Available Plugins"];
+    [menu setAutoenablesItems:NO];
+
+    if (!self.rust) {
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@"Connecting to server (127.0.0.1:55056)..." action:nil keyEquivalent:@""];
+        [item setEnabled:NO];
+        [menu addItem:item];
+        [menu popUpMenuPositioningItem:nil atLocation:pt inView:self];
+        return;
+    }
+    uint32_t numAvail = og_native_num_available_plugins(self.rust);
+
+    if (numAvail == 0) {
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@"No plugins available on server" action:nil keyEquivalent:@""];
+        [item setEnabled:NO];
+        [menu addItem:item];
+    } else {
+        NSMutableDictionary *categoryMenus = [NSMutableDictionary dictionary];
+
+        for (uint32_t i = 0; i < numAvail; ++i) {
+            char nameBuf[256] = {0};
+            char idBuf[256] = {0};
+            char catBuf[256] = {0};
+            og_native_get_available_plugin(self.rust, i, nameBuf, sizeof(nameBuf), idBuf, sizeof(idBuf), catBuf, sizeof(catBuf));
+
+            NSString *name = [NSString stringWithUTF8String:nameBuf];
+            NSString *cat = [NSString stringWithUTF8String:catBuf];
+            if (cat.length == 0) {
+                cat = @"General";
+            }
+
+            NSMenu *targetMenu = categoryMenus[cat];
+            if (!targetMenu) {
+                NSMenuItem *catItem = [[NSMenuItem alloc] initWithTitle:cat action:nil keyEquivalent:@""];
+                targetMenu = [[NSMenu alloc] initWithTitle:cat];
+                [catItem setSubmenu:targetMenu];
+                [menu addItem:catItem];
+                categoryMenus[cat] = targetMenu;
+            }
+
+            NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:name action:@selector(onSelectPlugin:) keyEquivalent:@""];
+            [item setTarget:self];
+            [item setTag:(NSInteger)i];
+            [targetMenu addItem:item];
+        }
+    }
+
+    [menu popUpMenuPositioningItem:nil atLocation:pt inView:self];
+}
+
+- (void)onSelectPlugin:(NSMenuItem *)sender {
+    if (!self.rust) return;
+    uint32_t idx = (uint32_t)sender.tag;
+    og_native_load_plugin(self.rust, idx);
+    [self setNeedsDisplay:YES];
 }
 
 @end

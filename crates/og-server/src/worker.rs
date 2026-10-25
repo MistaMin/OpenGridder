@@ -114,7 +114,7 @@ impl Worker {
             MessageType::Quit => return false,
 
             MessageType::AddPlugin => {
-                let req: serde_json::Value = serde_json::from_str(msg.as_str()).unwrap_or_default();
+                let req: serde_json::Value = msg.get_json();
                 let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 let layout = req
                     .get("layout")
@@ -160,7 +160,7 @@ impl Worker {
                         let presets_str = proc.presets().join("|");
                         let params_json =
                             serde_json::to_string(&proc.parameters()).unwrap_or_default();
-                        let layouts_json =
+                        let _layouts_json =
                             serde_json::to_string(&proc.layouts()).unwrap_or_default();
 
                         // Track in recents
@@ -187,11 +187,6 @@ impl Worker {
                             .send(cmd_stream);
                         let _ = RawMessage::from_str(MessageType::ParameterList, &params_json)
                             .send(cmd_stream);
-                        let _ = RawMessage::from_str(MessageType::PluginLayouts, &layouts_json)
-                            .send(cmd_stream);
-                        let _ =
-                            RawMessage::new(MessageType::Latency, total_lat.to_le_bytes().to_vec())
-                                .send(cmd_stream);
                     }
                     Err(err) => {
                         let res = AddPluginResult {

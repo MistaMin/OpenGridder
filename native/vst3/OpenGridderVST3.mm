@@ -482,12 +482,15 @@ public:
         NSView* parentView = (__bridge NSView*)parent;
         NSRect frame = NSMakeRect(0, 0, 720, 420);
         view_ = [[OpenGridderEditorView alloc] initWithFrame:frame];
+        OpenGridderVST3* c = controller_;
+        view_.rustProvider = ^NativePlugin* {
+            return c ? c->rust() : nullptr;
+        };
         view_.rust = controller_->rust();
         view_.isBypassed = controller_->bypass();
         view_.activeProfile = controller_->profile();
         view_.activeSlot = controller_->selection();
 
-        OpenGridderVST3* c = controller_;
         view_.onProfileChanged = ^(int newProfile) {
             c->setProfile(newProfile);
         };

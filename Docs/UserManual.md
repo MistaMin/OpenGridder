@@ -1,4 +1,4 @@
-# OpenGridder 0.1.0-alpha - Multi-Format Release
+# OpenGridder 0.1.1-alpha - Multi-Format Release
 
 ## Release scope
 

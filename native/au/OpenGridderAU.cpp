@@ -251,6 +251,9 @@ public:
             case kAudioUnitProperty_CocoaUI:
                 if (outDataSize) *outDataSize = sizeof(AudioUnitCocoaViewInfo);
                 return noErr;
+            case 65536: // kAudioUnitProperty_OpenGridderRust
+                if (outDataSize) *outDataSize = sizeof(NativePlugin*);
+                return noErr;
             default:
                 return kAudioUnitErr_InvalidProperty;
         }
@@ -429,6 +432,12 @@ public:
                 viewInfo->mCocoaAUViewBundleLocation = bundle ? CFBundleCopyBundleURL(bundle) : NULL;
                 viewInfo->mCocoaAUViewClass[0] = CFStringCreateCopy(kCFAllocatorDefault, CFSTR("OpenGridderAUCocoaViewFactory"));
                 *ioDataSize = sizeof(AudioUnitCocoaViewInfo);
+                return noErr;
+            }
+            case 65536: {
+                if (*ioDataSize < sizeof(NativePlugin*)) return kAudioUnitErr_InvalidPropertyValue;
+                *reinterpret_cast<NativePlugin**>(outData) = rust_;
+                *ioDataSize = sizeof(NativePlugin*);
                 return noErr;
             }
             default:

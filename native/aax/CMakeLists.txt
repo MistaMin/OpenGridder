@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(OpenGridderAAX LANGUAGES CXX)
+project(OpenGridderAAX LANGUAGES CXX OBJCXX)
 set(CMAKE_CXX_STANDARD 17)
 if(CMAKE_OSX_ARCHITECTURES STREQUAL "i386")
   set(CMAKE_CXX_STANDARD 11)
@@ -25,11 +25,13 @@ target_include_directories(opengridder_aax_sdk PUBLIC
   "${AAX_SDK_ROOT}/Libs/AAXLibrary/include")
 target_compile_definitions(opengridder_aax_sdk PUBLIC MAC_VERSION=1 _LIBCPP_ENABLE_CXX17_REMOVED_AUTO_PTR)
 target_compile_options(opengridder_aax_sdk PUBLIC -include TargetConditionals.h)
-add_library(OpenGridder MODULE OpenGridder.cpp "${AAX_SDK_ROOT}/Interfaces/AAX_Exports.cpp")
+add_library(OpenGridder MODULE OpenGridder.mm "${CMAKE_CURRENT_SOURCE_DIR}/../include/OpenGridderEditorView.mm" "${AAX_SDK_ROOT}/Interfaces/AAX_Exports.cpp")
+target_compile_options(OpenGridder PRIVATE -fobjc-arc)
+target_compile_definitions(OpenGridder PRIVATE OG_BUILD_AAX=1)
 target_include_directories(OpenGridder PRIVATE ../include)
 target_link_libraries(OpenGridder PRIVATE opengridder_aax_sdk "${OPENGRIDDER_RUST_LIBRARY}"
   "-framework Foundation" "-framework CoreFoundation" "-framework AudioToolbox"
-  "-framework AppKit" "-framework Security" "-framework SystemConfiguration" iconv resolv)
+  "-framework AppKit" "-framework Cocoa" "-framework Security" "-framework SystemConfiguration" iconv resolv)
 set(BUNDLE_DIR "${CMAKE_BINARY_DIR}/OpenGridder.aaxplugin")
 set_target_properties(OpenGridder PROPERTIES PREFIX "" SUFFIX ""
   LIBRARY_OUTPUT_DIRECTORY "${BUNDLE_DIR}/Contents/MacOS")

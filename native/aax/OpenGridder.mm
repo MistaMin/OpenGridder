@@ -1,7 +1,10 @@
-// OpenGridder's SDK adapter only. DSP, transport and callback buffering are Rust.
-// Avid SDK headers/libraries are supplied externally and are not redistributed.
-#include "opengridder.h"
+// OpenGridder AAX plug-in adapter for Pro Tools.
+// Zero JUCE: Pure Rust core + Native Cocoa GoodLookin UI + Avid AAX SDK.
+#import "opengridder.h"
+#import "OpenGridderEditorView.h"
 #include "AAX_CEffectParameters.h"
+#include "AAX_CEffectGUI.h"
+#include "AAX_IViewContainer.h"
 #include "AAX_CBinaryTaperDelegate.h"
 #include "AAX_CBinaryDisplayDelegate.h"
 #include "AAX_CLinearTaperDelegate.h"
@@ -22,6 +25,7 @@ namespace {
 constexpr const char* kSelection = "remote_plugin";
 constexpr const char* kLatencyProfile = "latency_profile";
 constexpr uint32_t kTransportLatency = 256;
+
 double unitValue(double value) {
 #if __cplusplus >= 201703L
     return std::clamp(value, 0.0, 1.0);
@@ -29,6 +33,7 @@ double unitValue(double value) {
     return std::max(0.0, std::min(1.0, value));
 #endif
 }
+
 struct Instance { NativePlugin* rust; int32_t channels; };
 struct Context {
     float** input;
@@ -60,6 +65,9 @@ class Parameters final : public AAX_CEffectParameters {
 public:
     ~Parameters() override { og_native_destroy(instance_.rust); }
     static AAX_CEffectParameters* AAX_CALLBACK create() { return new Parameters; }
+
+    NativePlugin* getRustHandle() const { return instance_.rust; }
+
     AAX_Result EffectInit() override {
         AAX_CSampleRate rate = 48000.0f;
         AAX_EStemFormat stem = AAX_eStemFormat_Stereo;
@@ -192,6 +200,83 @@ private:
     uint32_t lastLatency_ = kTransportLatency;
 };
 
+class OpenGridderAAXGUI final : public AAX_CEffectGUI {
+public:
+    static AAX_IEffectGUI* AAX_CALLBACK create() { return new OpenGridderAAXGUI; }
+
+    void CreateViewContents() override {}
+
+    AAX_Result GetViewSize(AAX_Point* oViewSize) const override {
+        if (oViewSize) {
+            oViewSize->vert = 420.0f;
+            oViewSize->horz = 720.0f;
+        }
+        return AAX_SUCCESS;
+    }
+
+    void CreateViewContainer() override {
+        if (!GetViewContainer()) return;
+        if (GetViewContainer()->GetType() == AAX_eViewContainer_Type_NSView) {
+            NSView* parentView = (__bridge NSView*)GetViewContainer()->GetPtr();
+            NSRect frame = NSMakeRect(0, 0, 720, 420);
+            mEditorView = [[OpenGridderAAXEditorView alloc] initWithFrame:frame];
+            mEditorView.rustProvider = ^NativePlugin* {
+                auto* p = static_cast<Parameters*>(GetEffectParameters());
+                return p ? p->getRustHandle() : nullptr;
+            };
+            auto* params = static_cast<Parameters*>(GetEffectParameters());
+            if (params) {
+                mEditorView.rust = params->getRustHandle();
+            }
+            mEditorView.onParameterChanged = ^(uint32_t paramId, float val) {
+                auto* p = static_cast<Parameters*>(GetEffectParameters());
+                if (p) {
+                    if (paramId == 0) {
+                        p->SetParameterNormalizedValue(cDefaultMasterBypassID, val);
+                    } else if (paramId == 1) {
+                        p->SetParameterNormalizedValue(kSelection, val);
+                    }
+                }
+            };
+            mEditorView.onProfileChanged = ^(int newProfile) {
+                auto* p = static_cast<Parameters*>(GetEffectParameters());
+                if (p) {
+                    p->SetParameterNormalizedValue(kLatencyProfile, static_cast<double>(newProfile) / 3.0);
+                }
+            };
+            [parentView addSubview:mEditorView];
+            AAX_Point size(420.0f, 720.0f);
+            GetViewContainer()->SetViewSize(size);
+        }
+    }
+
+    void DeleteViewContainer() override {
+        if (mEditorView) {
+            [mEditorView removeFromSuperview];
+            mEditorView = nil;
+        }
+    }
+
+    AAX_Result TimerWakeup() override {
+        if (mEditorView) {
+            auto* params = static_cast<Parameters*>(GetEffectParameters());
+            NativePlugin* rust = params ? params->getRustHandle() : nullptr;
+            if (rust) {
+                if (!mEditorView.rust) {
+                    mEditorView.rust = rust;
+                }
+                int status = og_native_status(rust);
+                uint32_t lat = og_native_latency(rust);
+                [mEditorView updateStatus:status latencySamples:lat];
+            }
+        }
+        return AAX_CEffectGUI::TimerWakeup();
+    }
+
+private:
+    OpenGridderAAXEditorView* mEditorView = nil;
+};
+
 AAX_Result describe(AAX_IEffectDescriptor* effect, bool stereo) {
     AAX_CheckedResult result;
     auto* component = effect->NewComponentDescriptor();
@@ -208,7 +293,6 @@ AAX_Result describe(AAX_IEffectDescriptor* effect, bool stereo) {
     result = properties->AddProperty(AAX_eProperty_InputStemFormat, stereo ? AAX_eStemFormat_Stereo : AAX_eStemFormat_Mono);
     result = properties->AddProperty(AAX_eProperty_OutputStemFormat, stereo ? AAX_eStemFormat_Stereo : AAX_eStemFormat_Mono);
     result = properties->AddProperty(AAX_eProperty_CanBypass, true);
-    result = properties->AddProperty(AAX_eProperty_UsesClientGUI, true);
     result = component->AddProcessProc_Native(process, properties);
     result = effect->AddComponent(component);
     return result;
@@ -223,6 +307,7 @@ AAX_Result GetEffectDescriptions(AAX_ICollection* collection) {
     result = effect->AddName("OpenGridder");
     result = effect->AddCategory(AAX_ePlugInCategory_WrappedPlugin);
     result = effect->AddProcPtr(reinterpret_cast<void*>(Parameters::create), kAAX_ProcPtrID_Create_EffectParameters);
+    result = effect->AddProcPtr(reinterpret_cast<void*>(OpenGridderAAXGUI::create), kAAX_ProcPtrID_Create_EffectGUI);
     result = describe(effect, false);
     result = describe(effect, true);
     result = collection->AddEffect("studio.opengrid.OpenGridder.fx", effect);
