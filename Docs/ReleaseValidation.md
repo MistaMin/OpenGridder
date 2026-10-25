@@ -28,3 +28,28 @@ No system installation or GitHub release publication has been performed.
 This record does not establish Pro Tools host compatibility. PT10/32-bit AAX,
 OS X10.8.5 and macOS26 qualification, full remote session recall/editor controls,
 offline bounce and sustained hardware/network performance remain outstanding.
+
+## Separate legacy artifacts — 25 October 2026
+
+These artifacts are separate from the notarized modern installer above and have
+not been installed or released publicly. Neither has run inside Pro Tools.
+
+- Experimental i386 AAX: Actions run 40147792377 passed real compilation/linking,
+  Apple/PACE signing with PT10 version-1 signature compatibility, and ZIP
+  extraction/strict Apple signature verification. The downloaded archive's
+  checksum and extracted signature were independently verified with normal
+  macOS trust/keychain access. Deployment and SDK load commands are 10.8.
+- OpenGridder RTAS BETA: Actions run 40148017808 passed the full external SDK
+  build, i386 linking, Apple signing and ZIP extraction/strict verification.
+  Private wrapper commit 73d90f0 is pinned in the workflow artifact. The build
+  uses official Apple 10.6 headers for legacy QuickDraw and 10.8 link libraries.
+  The wrapper includes a programmatic numeric remote-plugin selector editor.
+- SDK source, docs, header copies and build toolchains are excluded from both
+  artifact uploads. Wrapper sources remain in the separate local private repo.
+- TDM is **not built**. The DSP assembler runs, but its actual card firmware and
+  host/DMA transport implementation remain unfinished. No assembler probe is
+  distributed as a plugin.
+
+Host initialization/UI/audio/latency/stability and OS X 10.8.5 compatibility still
+require real Pro Tools qualification. Successful builds/signatures establish
+neither low-latency performance nor production readiness.
