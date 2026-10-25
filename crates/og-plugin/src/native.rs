@@ -124,6 +124,8 @@ struct Shared {
     input_gain: AtomicU32,
     wet_dry_mix: AtomicU32,
     drive: AtomicU32,
+    drive_quality: AtomicU32,
+    drive_char: AtomicU32,
     output_gain: AtomicU32,
     automation_slots: [AtomicU32; 16],
     meter_l: AtomicU32,
@@ -161,6 +163,15 @@ impl Shared {
                 });
     }
 
+    fn restore_drive_modes(&self, j: &serde_json::Value) {
+        if let Some(v) = j.get("driveQuality").and_then(|v| v.as_u64()) {
+            self.drive_quality.store((v as u32).min(2), Ordering::Release);
+        }
+        if let Some(v) = j.get("driveCharacter").and_then(|v| v.as_u64()) {
+            self.drive_char.store((v as u32).min(2), Ordering::Release);
+        }
+    }
+
     fn build_full_state(&self, processor: &mut PluginProcessor) -> Vec<u8> {
         let raw = processor.get_state_information();
         let mut root: serde_json::Value = serde_json::from_slice(&raw)
@@ -172,6 +183,8 @@ impl Shared {
             obj.insert("inputGain".into(), serde_json::json!(f32::from_bits(self.input_gain.load(Ordering::Acquire))));
             obj.insert("wetDryMix".into(), serde_json::json!(f32::from_bits(self.wet_dry_mix.load(Ordering::Acquire))));
             obj.insert("drive".into(), serde_json::json!(f32::from_bits(self.drive.load(Ordering::Acquire))));
+            obj.insert("driveQuality".into(), serde_json::json!(self.drive_quality.load(Ordering::Acquire)));
+            obj.insert("driveCharacter".into(), serde_json::json!(self.drive_char.load(Ordering::Acquire)));
             obj.insert("outputGain".into(), serde_json::json!(f32::from_bits(self.output_gain.load(Ordering::Acquire))));
         }
         let bytes = serde_json::to_vec(&root).unwrap_or(raw);
@@ -224,6 +237,17 @@ struct Callback {
     selection: u32,
     plugin_latency: usize,
     transport_latency: usize,
+    drive: crate::drive::DriveStage,
+    drive_latency: usize,
+    smooth_a: f32,
+    sm_in: f32,
+    sm_mix: f32,
+    sm_drive: f32,
+    sm_out: f32,
+    g_in: Vec<f32>,
+    g_mix: Vec<f32>,
+    g_drive: Vec<f32>,
+    g_out: Vec<f32>,
 }
 
 /// Opaque handle. Only one audio thread may process it at a time; control
@@ -272,6 +296,8 @@ impl NativePlugin {
             input_gain: AtomicU32::new(0.5f32.to_bits()),
             wet_dry_mix: AtomicU32::new(1.0f32.to_bits()),
             drive: AtomicU32::new(0.0f32.to_bits()),
+            drive_quality: AtomicU32::new(crate::drive::QUALITY_ADAA),
+            drive_char: AtomicU32::new(crate::drive::CHAR_CLEAN),
             output_gain: AtomicU32::new(0.5f32.to_bits()),
             automation_slots: std::array::from_fn(|_| AtomicU32::new(0.0f32.to_bits())),
             meter_l: AtomicU32::new(0.0f32.to_bits()),
@@ -314,6 +340,17 @@ impl NativePlugin {
                 selection: 0,
                 plugin_latency: 0,
                 transport_latency: latency,
+                drive: crate::drive::DriveStage::new(channels, rate),
+                drive_latency: 0,
+                smooth_a: 1.0 - (-1.0 / (0.010 * rate.max(8000.0))).exp() as f32,
+                sm_in: 1.0,
+                sm_mix: 1.0,
+                sm_drive: 0.0,
+                sm_out: 1.0,
+                g_in: vec![1.0; max_frames],
+                g_mix: vec![1.0; max_frames],
+                g_drive: vec![0.0; max_frames],
+                g_out: vec![1.0; max_frames],
             }),
             worker: None,
         };
@@ -448,7 +485,8 @@ impl NativePlugin {
                                                     if let Some(v) = j.get("drive").and_then(|v| v.as_f64()) {
                                                         shared.drive.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
                                                     }
-                                                    if let Some(v) = j.get("outputGain").and_then(|v| v.as_f64()) {
+                                                    shared.restore_drive_modes(&j);
+if let Some(v) = j.get("outputGain").and_then(|v| v.as_f64()) {
                                                         shared.output_gain.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
                                                     }
                                                 }
@@ -471,7 +509,8 @@ impl NativePlugin {
                                                     if let Some(v) = j.get("drive").and_then(|v| v.as_f64()) {
                                                         shared.drive.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
                                                     }
-                                                    if let Some(v) = j.get("outputGain").and_then(|v| v.as_f64()) {
+                                                    shared.restore_drive_modes(&j);
+if let Some(v) = j.get("outputGain").and_then(|v| v.as_f64()) {
                                                         shared.output_gain.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
                                                     }
                                                 }
@@ -689,9 +728,31 @@ impl NativePlugin {
         } else {
             10.0f32.powf((out_norm - 0.5) * 48.0 / 20.0)
         };
-        let has_drive = drive_norm > 1e-5;
-        let drive_gain = 1.0f32 + drive_norm * 9.0f32;
-        let drive_norm_div = if has_drive { drive_gain.tanh().max(1e-5) } else { 1.0f32 };
+        let in_target = in_lin;
+        let out_target = out_lin;
+        let drive_quality = self.shared.drive_quality.load(Ordering::Relaxed).min(2);
+        let drive_char = self.shared.drive_char.load(Ordering::Relaxed).min(2);
+        let drive_lat = crate::drive::quality_latency(drive_quality);
+
+        // Per-sample one-pole smoothing (~10 ms) of every console parameter: no zipper noise.
+        {
+            let a = cb.smooth_a;
+            let (mut si, mut sm, mut sd, mut so) = (cb.sm_in, cb.sm_mix, cb.sm_drive, cb.sm_out);
+            for n in 0..frames {
+                si += a * (in_target - si);
+                sm += a * (mix_norm - sm);
+                sd += a * (drive_norm - sd);
+                so += a * (out_target - so);
+                cb.g_in[n] = si;
+                cb.g_mix[n] = sm;
+                cb.g_drive[n] = sd;
+                cb.g_out[n] = so;
+            }
+            cb.sm_in = si;
+            cb.sm_mix = sm;
+            cb.sm_drive = sd;
+            cb.sm_out = so;
+        }
 
         let active = self.shared.active_latency.load(Ordering::Acquire);
         let plugin_delay = plugin_part(active) as usize;
@@ -699,7 +760,9 @@ impl NativePlugin {
         if cb.selection != selection
             || cb.plugin_latency != plugin_delay
             || cb.transport_latency != transport_delay
+            || cb.drive_latency != drive_lat
         {
+            cb.drive_latency = drive_lat;
             cb.wet_tags.fill(EMPTY);
             cb.dry_tags.fill(EMPTY);
             cb.selection = selection;
@@ -714,7 +777,7 @@ impl NativePlugin {
                 let chunk_transport = transport_part(chunk.latency) as u64;
                 let effective_transport = if chunk_transport > 0 { chunk_transport } else { transport_delay as u64 };
                 for n in 0..chunk.frames {
-                    let target = chunk.start + n as u64 + effective_transport;
+                    let target = chunk.start + n as u64 + effective_transport.saturating_sub(drive_lat as u64);
                     if target >= cb.clock && target < cb.clock + size as u64 {
                         let index = target as usize % size;
                         for ch in 0..self.channels {
@@ -738,12 +801,8 @@ impl NativePlugin {
                 cb.pending_midi_count = 0;
             }
             for ch in 0..self.channels {
-                if (in_lin - 1.0).abs() < 1e-6 {
-                    std::ptr::copy_nonoverlapping(input[ch], chunk.audio[ch].as_mut_ptr(), frames);
-                } else {
-                    for n in 0..frames {
-                        chunk.audio[ch][n] = *input[ch].add(n) * in_lin;
-                    }
+                for n in 0..frames {
+                    chunk.audio[ch][n] = *input[ch].add(n) * cb.g_in[n];
                 }
             }
             if let Err(chunk) = cb.send.push(chunk) {
@@ -758,11 +817,11 @@ impl NativePlugin {
         let mut peak_in_r = 0.0f32;
         for n in 0..frames {
             let now = cb.clock + n as u64;
-            let target = now + (transport_delay + plugin_delay) as u64;
+            let target = now + (transport_delay + plugin_delay).saturating_sub(drive_lat) as u64;
             let write = target as usize % size;
             let read = now as usize % size;
             for ch in 0..self.channels {
-                let in_sample = *input[ch].add(n) * in_lin;
+                let in_sample = *input[ch].add(n) * cb.g_in[n];
                 cb.dry[ch][write] = in_sample;
                 let ia = in_sample.abs();
                 if ch == 0 {
@@ -777,16 +836,21 @@ impl NativePlugin {
             cb.dry_tags[write] = target;
             let wet = !bypass && cb.wet_tags[read] == now;
             let dry = cb.dry_tags[read] == now;
+            let mix_n = cb.g_mix[n];
+            let drive_n = cb.g_drive[n];
+            let out_n = cb.g_out[n];
+            let drive_active = drive_n > 1e-4;
+            let shape = crate::drive::ShapeParams::new(1.0 + drive_n * 9.0, drive_char);
             for ch in 0..self.channels {
                 let mut sample = if bypass {
                     if dry { cb.dry[ch][read] } else { 0.0 }
                 } else if wet {
                     let w = cb.wet[ch][read];
-                    if (mix_norm - 1.0).abs() < 1e-6 || !dry {
+                    if (mix_n - 1.0).abs() < 1e-6 || !dry {
                         w
                     } else {
                         let d = cb.dry[ch][read];
-                        d * (1.0 - mix_norm) + w * mix_norm
+                        d * (1.0 - mix_n) + w * mix_n
                     }
                 } else if dry {
                     cb.dry[ch][read]
@@ -794,12 +858,10 @@ impl NativePlugin {
                     0.0
                 };
                 if !bypass {
-                    if has_drive {
-                        sample = (sample * drive_gain).tanh() / drive_norm_div;
-                    }
-                    if (out_lin - 1.0).abs() >= 1e-6 {
-                        sample *= out_lin;
-                    }
+                    sample = cb.drive.process(ch, sample, &shape, drive_quality, drive_char, drive_active);
+                    sample *= out_n;
+                } else {
+                    sample = cb.drive.delay_only(ch, sample, drive_quality);
                 }
                 *output[ch].add(n) = sample;
                 let a = sample.abs();
@@ -1302,7 +1364,8 @@ pub unsafe extern "C" fn og_native_is_editor_open(handle: *mut NativePlugin) -> 
 }
 
 /// Set a normalized parameter (`0.0..=1.0`).
-/// param_id: 0=Bypass, 1=Selection, 2=LatencyProfile, 3=InputGain, 4=WetDryMix, 5=Drive, 6=OutputGain, 7..22=AutomationSlots 0..15.
+/// param_id: 0=Bypass, 1=Selection, 2=LatencyProfile, 3=InputGain, 4=WetDryMix, 5=Drive, 6=OutputGain, 7..22=AutomationSlots 0..15,
+/// 23=DriveCharacter (0 Clean, 0.5 Tb, 1 Tr), 24=DriveQuality (0 ADAA, 0.5 2x, 1 4x). 23/24 are local GUI/state settings, not host-automated.
 /// # Safety
 /// Handle must be valid.
 #[unsafe(no_mangle)]
@@ -1328,6 +1391,8 @@ pub unsafe extern "C" fn og_native_set_param(handle: *mut NativePlugin, param_id
         4 => p.shared.wet_dry_mix.store(clamped.to_bits(), Ordering::Release),
         5 => p.shared.drive.store(clamped.to_bits(), Ordering::Release),
         6 => p.shared.output_gain.store(clamped.to_bits(), Ordering::Release),
+        23 => p.shared.drive_char.store((clamped * 2.0).round() as u32, Ordering::Release),
+        24 => p.shared.drive_quality.store((clamped * 2.0).round() as u32, Ordering::Release),
         7..=22 => {
             let slot = (param_id - 7) as usize;
             p.shared.automation_slots[slot].store(clamped.to_bits(), Ordering::Release);
@@ -1356,6 +1421,8 @@ pub unsafe extern "C" fn og_native_get_param(handle: *mut NativePlugin, param_id
         4 => f32::from_bits(p.shared.wet_dry_mix.load(Ordering::Acquire)),
         5 => f32::from_bits(p.shared.drive.load(Ordering::Acquire)),
         6 => f32::from_bits(p.shared.output_gain.load(Ordering::Acquire)),
+        23 => p.shared.drive_char.load(Ordering::Acquire) as f32 / 2.0,
+        24 => p.shared.drive_quality.load(Ordering::Acquire) as f32 / 2.0,
         7..=22 => {
             let slot = (param_id - 7) as usize;
             f32::from_bits(p.shared.automation_slots[slot].load(Ordering::Acquire))
@@ -1745,7 +1812,8 @@ pub unsafe extern "C" fn og_native_set_state(
     if let Some(v) = j.get("drive").and_then(|v| v.as_f64()) {
         p.shared.drive.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
     }
-    if let Some(v) = j.get("outputGain").and_then(|v| v.as_f64()) {
+    p.shared.restore_drive_modes(&j);
+if let Some(v) = j.get("outputGain").and_then(|v| v.as_f64()) {
         p.shared.output_gain.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
     }
     *p.shared.cached_state.lock().unwrap_or_else(|e| e.into_inner()) = slice.to_vec();

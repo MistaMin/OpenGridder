@@ -1183,8 +1183,35 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
         NSString *mixStr = [NSString stringWithFormat:@"%.0f %%", _wetDryMix * 100.0f];
         DrawStudioConsoleKnob(ctx, card1, _wetDryMix, NO, 0.28, 0.88, 0.62, @"WET / DRY MIX", mixStr);
 
-        NSString *drvStr = [NSString stringWithFormat:@"%.1f dB", _drive * 12.0f];
+        // Pre-gain is 1x..10x (0..+20 dB), exactly what the DSP applies before the tanh shaper
+        NSString *drvStr = [NSString stringWithFormat:@"+%.1f dB", 20.0f * std::log10(1.0f + _drive * 9.0f)];
         DrawStudioConsoleKnob(ctx, card2, _drive, NO, 0.96, 0.62, 0.22, @"DRIVE / SAT", drvStr);
+
+        // Drive character [CLN | Tb | Tr] and anti-alias quality [ADAA | 2x | 4x] pills
+        {
+            int drvChar = self.rust ? (int)std::lround(og_native_get_param(self.rust, 23) * 2.0f) : 0;
+            int drvQual = self.rust ? (int)std::lround(og_native_get_param(self.rust, 24) * 2.0f) : 0;
+            NSArray *charNames = @[@"CLEAN", @"Tb TUBE", @"Tr XFMR"];
+            NSArray *qualNames = @[@"ADAA", @"2x OS", @"4x OS"];
+            CGRect charPill = CGRectMake(card2.origin.x + 8.0, card2.origin.y + 32.0, 50.0, 14.0);
+            CGRect qualPill = CGRectMake(CGRectGetMaxX(card2) - 58.0, card2.origin.y + 32.0, 50.0, 14.0);
+            struct { CGRect r; NSString *t; CGFloat cr, cg, cb; } pills[2] = {
+                { charPill, charNames[std::max(0, std::min(2, drvChar))], 0.96, 0.62, 0.22 },
+                { qualPill, qualNames[std::max(0, std::min(2, drvQual))], 0.45, 0.82, 0.98 }
+            };
+            for (int i = 0; i < 2; ++i) {
+                CGContextSetRGBFillColor(ctx, 0.13, 0.15, 0.18, 1.0);
+                FillRoundedRect(ctx, pills[i].r, 3.0);
+                CGContextSetRGBStrokeColor(ctx, pills[i].cr, pills[i].cg, pills[i].cb, 0.8);
+                StrokeRoundedRect(ctx, pills[i].r, 3.0, 1.0);
+                NSDictionary *pa = @{
+                    NSFontAttributeName: MonoFont(7.6, NSFontWeightBold),
+                    NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:pills[i].cr green:pills[i].cg blue:pills[i].cb alpha:1.0]
+                };
+                NSSize psz = [pills[i].t sizeWithAttributes:pa];
+                [pills[i].t drawAtPoint:NSMakePoint(CGRectGetMidX(pills[i].r) - psz.width * 0.5, pills[i].r.origin.y + 2.5) withAttributes:pa];
+            }
+        }
 
         float outDb = (_outputGain - 0.5f) * 48.0f;
         NSString *outStr = [NSString stringWithFormat:@"%+.1f dB", outDb];
@@ -1426,6 +1453,22 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
                 return;
             }
             _draggedKnob = 1; _dragStartPoint = p; _dragStartValue = _wetDryMix; return;
+        }
+        if (CGRectContainsPoint(r2, cp) && self.rust) {
+            CGRect charPill = CGRectMake(r2.origin.x + 8.0, r2.origin.y + 32.0, 50.0, 14.0);
+            CGRect qualPill = CGRectMake(CGRectGetMaxX(r2) - 58.0, r2.origin.y + 32.0, 50.0, 14.0);
+            if (CGRectContainsPoint(charPill, cp)) {
+                int c = ((int)std::lround(og_native_get_param(self.rust, 23) * 2.0f) + 1) % 3;
+                og_native_set_param(self.rust, 23, c / 2.0f);
+                [self setNeedsDisplay:YES];
+                return;
+            }
+            if (CGRectContainsPoint(qualPill, cp)) {
+                int q = ((int)std::lround(og_native_get_param(self.rust, 24) * 2.0f) + 1) % 3;
+                og_native_set_param(self.rust, 24, q / 2.0f);
+                [self setNeedsDisplay:YES];
+                return;
+            }
         }
         if (CGRectContainsPoint(r2, cp)) {
             if (event.clickCount >= 2) {

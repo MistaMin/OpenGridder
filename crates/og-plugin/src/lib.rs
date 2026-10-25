@@ -5,6 +5,7 @@ pub mod editor;
 pub mod plugin_formats;
 pub mod processor;
 pub mod native;
+pub mod drive;
 mod spsc;
 
 pub use editor::PluginEditor;

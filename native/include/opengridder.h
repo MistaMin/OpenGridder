@@ -37,7 +37,7 @@ void og_native_send_key(NativePlugin*, const uint16_t* keys, uint32_t count);
 bool og_native_is_editor_open(NativePlugin*);
 
 // --- Local Console DSP Parameters & Real-Time Peak Meters (Phase 1) ---
-// param_id: 0=Bypass, 1=Selection, 2=LatencyProfile, 3=InputGain, 4=WetDryMix, 5=Drive, 6=OutputGain, 7..22=AutomationSlots 0..15
+// param_id: 0=Bypass, 1=Selection, 2=LatencyProfile, 3=InputGain, 4=WetDryMix, 5=Drive, 6=OutputGain, 7..22=AutomationSlots 0..15, 23=DriveCharacter (0 Clean, 0.5 Tb, 1 Tr), 24=DriveQuality (0 ADAA, 0.5 2x, 1 4x)
 void og_native_set_param(NativePlugin*, uint32_t param_id, float norm_val);
 float og_native_get_param(NativePlugin*, uint32_t param_id);
 void og_native_get_meters(NativePlugin*, float* left, float* right);
