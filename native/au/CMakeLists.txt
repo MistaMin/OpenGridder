@@ -14,6 +14,7 @@ add_library(OpenGridder MODULE
   ../include/OpenGridderEditorView.mm
 )
 target_include_directories(OpenGridder PRIVATE ../include)
+target_compile_definitions(OpenGridder PRIVATE OG_BUILD_AU=1)
 target_link_libraries(OpenGridder PRIVATE
   "${OPENGRIDDER_RUST_LIBRARY}"
   "-framework AudioUnit"

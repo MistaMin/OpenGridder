@@ -7,6 +7,7 @@
 #include <AudioUnit/AudioUnit.h>
 #include <AudioUnit/AudioUnitProperties.h>
 #include <AudioUnit/AudioUnitParameters.h>
+#include <dlfcn.h>
 
 #if defined(__i386__) || defined(__PPC__)
 #include <CoreServices/CoreServices.h>
@@ -35,6 +36,8 @@ typedef OSStatus ComponentResult;
 
 namespace {
 
+static void* AU_Anchor() { return (void*)&AU_Anchor; }
+
 enum {
     kParamBypass = 0,
     kParamSelection = 1,
@@ -59,8 +62,10 @@ public:
           bypass_(false),
           selection_(0),
           profile_(0),
-          initialized_(false)
+          initialized_(false),
+          hasConnection_(false)
     {
+        std::memset(&connection_, 0, sizeof(connection_));
         std::memset(&inputCallback_, 0, sizeof(inputCallback_));
         std::memset(&format_, 0, sizeof(format_));
         format_.mSampleRate = sampleRate_;
@@ -111,6 +116,11 @@ public:
             scratchBuffers_[1].resize(inNumberFrames, 0.0f);
         }
 
+        AudioUnitRenderActionFlags preFlags = kAudioUnitRenderAction_PreRender;
+        for (const auto& n : renderNotifies_) {
+            if (n.proc) n.proc(n.refCon, &preFlags, inTimeStamp, inOutputBusNumber, inNumberFrames, ioData);
+        }
+
         // Pull input audio from host callback
         AudioBufferList inputBufferList;
         inputBufferList.mNumberBuffers = channels_;
@@ -120,7 +130,11 @@ public:
             inputBufferList.mBuffers[ch].mData = scratchBuffers_[ch].data();
         }
 
-        if (inputCallback_.inputProc) {
+        if (hasConnection_ && connection_.sourceAudioUnit) {
+            AudioUnitRenderActionFlags flags = 0;
+            OSStatus err = AudioUnitRender(connection_.sourceAudioUnit, &flags, inTimeStamp, connection_.sourceOutputNumber, inNumberFrames, &inputBufferList);
+            if (err != noErr) return err;
+        } else if (inputCallback_.inputProc) {
             OSStatus err = inputCallback_.inputProc(inputCallback_.inputProcRefCon,
                                                    ioActionFlags,
                                                    inTimeStamp,
@@ -162,6 +176,11 @@ public:
             }
         }
 
+        AudioUnitRenderActionFlags postFlags = kAudioUnitRenderAction_PostRender;
+        for (const auto& n : renderNotifies_) {
+            if (n.proc) n.proc(n.refCon, &postFlags, inTimeStamp, inOutputBusNumber, inNumberFrames, ioData);
+        }
+
         return noErr;
     }
 
@@ -177,14 +196,24 @@ public:
                 if (outDataSize) *outDataSize = sizeof(CFPropertyListRef);
                 if (outWritable) *outWritable = true;
                 return noErr;
+            case kAudioUnitProperty_PresentPreset:
+                if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+                if (outDataSize) *outDataSize = sizeof(AUPreset);
+                if (outWritable) *outWritable = true;
+                return noErr;
             case kAudioUnitProperty_SampleRate:
                 if (outDataSize) *outDataSize = sizeof(Float64);
                 if (outWritable) *outWritable = true;
                 return noErr;
             case kAudioUnitProperty_ParameterList:
+                if (inScope != kAudioUnitScope_Global) {
+                    if (outDataSize) *outDataSize = 0;
+                    return noErr;
+                }
                 if (outDataSize) *outDataSize = kNumParams * sizeof(AudioUnitParameterID);
                 return noErr;
             case kAudioUnitProperty_ParameterInfo:
+                if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
                 if (outDataSize) *outDataSize = sizeof(AudioUnitParameterInfo);
                 return noErr;
             case kAudioUnitProperty_StreamFormat:
@@ -195,6 +224,7 @@ public:
                 if (outDataSize) *outDataSize = sizeof(UInt32);
                 return noErr;
             case kAudioUnitProperty_Latency:
+                if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
                 if (outDataSize) *outDataSize = sizeof(Float64);
                 return noErr;
             case kAudioUnitProperty_SupportedNumChannels:
@@ -208,7 +238,13 @@ public:
                 if (outDataSize) *outDataSize = sizeof(AURenderCallbackStruct);
                 if (outWritable) *outWritable = true;
                 return noErr;
+            case kAudioUnitProperty_MakeConnection:
+                if (inScope != kAudioUnitScope_Input) return kAudioUnitErr_InvalidScope;
+                if (outDataSize) *outDataSize = sizeof(AudioUnitConnection);
+                if (outWritable) *outWritable = true;
+                return noErr;
             case kAudioUnitProperty_BypassEffect:
+                if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
                 if (outDataSize) *outDataSize = sizeof(UInt32);
                 if (outWritable) *outWritable = true;
                 return noErr;
@@ -228,6 +264,50 @@ public:
     {
         if (!outData || !ioDataSize) return paramErr;
         switch (inID) {
+            case kAudioUnitProperty_ClassInfo: {
+                if (*ioDataSize < sizeof(CFPropertyListRef)) return kAudioUnitErr_InvalidPropertyValue;
+                CFMutableDictionaryRef dict = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+                SInt32 version = 1;
+                CFNumberRef verNum = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &version);
+                CFDictionarySetValue(dict, CFSTR(kAUPresetVersionKey), verNum);
+                CFRelease(verNum);
+
+                UInt32 type = 'aufx';
+                CFNumberRef typeNum = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &type);
+                CFDictionarySetValue(dict, CFSTR(kAUPresetTypeKey), typeNum);
+                CFRelease(typeNum);
+
+                UInt32 subtype = 'OGFx';
+                CFNumberRef subNum = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &subtype);
+                CFDictionarySetValue(dict, CFSTR(kAUPresetSubtypeKey), subNum);
+                CFRelease(subNum);
+
+                UInt32 manuf = 'OpGr';
+                CFNumberRef manufNum = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &manuf);
+                CFDictionarySetValue(dict, CFSTR(kAUPresetManufacturerKey), manufNum);
+                CFRelease(manufNum);
+
+                CFDictionarySetValue(dict, CFSTR(kAUPresetNameKey), CFSTR("Default"));
+                *static_cast<CFPropertyListRef*>(outData) = dict;
+                *ioDataSize = sizeof(CFPropertyListRef);
+                return noErr;
+            }
+            case kAudioUnitProperty_PresentPreset: {
+                if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+                if (*ioDataSize < sizeof(AUPreset)) return kAudioUnitErr_InvalidPropertyValue;
+                AUPreset* preset = static_cast<AUPreset*>(outData);
+                preset->presetNumber = 0;
+                preset->presetName = CFSTR("Default");
+                *ioDataSize = sizeof(AUPreset);
+                return noErr;
+            }
+            case kAudioUnitProperty_MakeConnection: {
+                if (inScope != kAudioUnitScope_Input) return kAudioUnitErr_InvalidScope;
+                if (*ioDataSize < sizeof(AudioUnitConnection)) return kAudioUnitErr_InvalidPropertyValue;
+                *static_cast<AudioUnitConnection*>(outData) = connection_;
+                *ioDataSize = sizeof(AudioUnitConnection);
+                return noErr;
+            }
             case kAudioUnitProperty_SampleRate:
                 if (*ioDataSize < sizeof(Float64)) return kAudioUnitErr_InvalidPropertyValue;
                 *static_cast<Float64*>(outData) = sampleRate_;
@@ -244,6 +324,10 @@ public:
                 *ioDataSize = sizeof(UInt32);
                 return noErr;
             case kAudioUnitProperty_ParameterList: {
+                if (inScope != kAudioUnitScope_Global) {
+                    *ioDataSize = 0;
+                    return noErr;
+                }
                 if (*ioDataSize < kNumParams * sizeof(AudioUnitParameterID)) return kAudioUnitErr_InvalidPropertyValue;
                 AudioUnitParameterID* params = static_cast<AudioUnitParameterID*>(outData);
                 params[0] = kParamBypass;
@@ -253,6 +337,7 @@ public:
                 return noErr;
             }
             case kAudioUnitProperty_ParameterInfo: {
+                if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
                 if (*ioDataSize < sizeof(AudioUnitParameterInfo)) return kAudioUnitErr_InvalidPropertyValue;
                 AudioUnitParameterInfo* info = static_cast<AudioUnitParameterInfo*>(outData);
                 std::memset(info, 0, sizeof(AudioUnitParameterInfo));
@@ -262,21 +347,24 @@ public:
                     info->minValue = 0.0f;
                     info->maxValue = 1.0f;
                     info->defaultValue = 0.0f;
-                    info->flags = kAudioUnitParameterFlag_IsWritable | kAudioUnitParameterFlag_IsReadable;
+                    info->flags = kAudioUnitParameterFlag_IsWritable | kAudioUnitParameterFlag_IsReadable | kAudioUnitParameterFlag_HasCFNameString;
+                    info->cfNameString = CFSTR("Master Bypass");
                 } else if (inElement == kParamSelection) {
                     std::strncpy(info->name, "Remote Plugin", sizeof(info->name));
                     info->unit = kAudioUnitParameterUnit_Indexed;
                     info->minValue = 0.0f;
                     info->maxValue = 128.0f;
                     info->defaultValue = 0.0f;
-                    info->flags = kAudioUnitParameterFlag_IsWritable | kAudioUnitParameterFlag_IsReadable;
+                    info->flags = kAudioUnitParameterFlag_IsWritable | kAudioUnitParameterFlag_IsReadable | kAudioUnitParameterFlag_HasCFNameString;
+                    info->cfNameString = CFSTR("Remote Plugin");
                 } else if (inElement == kParamLatencyProfile) {
                     std::strncpy(info->name, "Latency Profile", sizeof(info->name));
                     info->unit = kAudioUnitParameterUnit_Indexed;
                     info->minValue = 0.0f;
                     info->maxValue = 3.0f;
                     info->defaultValue = 0.0f;
-                    info->flags = kAudioUnitParameterFlag_IsWritable | kAudioUnitParameterFlag_IsReadable;
+                    info->flags = kAudioUnitParameterFlag_IsWritable | kAudioUnitParameterFlag_IsReadable | kAudioUnitParameterFlag_HasCFNameString;
+                    info->cfNameString = CFSTR("Latency Profile");
                 } else {
                     return kAudioUnitErr_InvalidParameter;
                 }
@@ -284,6 +372,7 @@ public:
                 return noErr;
             }
             case kAudioUnitProperty_Latency: {
+                if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
                 if (*ioDataSize < sizeof(Float64)) return kAudioUnitErr_InvalidPropertyValue;
                 uint32_t samples = rust_ ? og_native_latency(rust_) : targetLatencyFromProfile(profile_);
                 *static_cast<Float64*>(outData) = static_cast<Float64>(samples) / sampleRate_;
@@ -304,6 +393,7 @@ public:
                 *ioDataSize = sizeof(UInt32);
                 return noErr;
             case kAudioUnitProperty_BypassEffect:
+                if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
                 if (*ioDataSize < sizeof(UInt32)) return kAudioUnitErr_InvalidPropertyValue;
                 *static_cast<UInt32*>(outData) = bypass_ ? 1 : 0;
                 *ioDataSize = sizeof(UInt32);
@@ -311,7 +401,30 @@ public:
             case kAudioUnitProperty_CocoaUI: {
                 if (*ioDataSize < sizeof(AudioUnitCocoaViewInfo)) return kAudioUnitErr_InvalidPropertyValue;
                 AudioUnitCocoaViewInfo* viewInfo = static_cast<AudioUnitCocoaViewInfo*>(outData);
-                CFBundleRef bundle = CFBundleGetBundleWithIdentifier(CFSTR("com.opengridder.audiounit"));
+                CFBundleRef bundle = CFBundleGetBundleWithIdentifier(CFSTR("studio.opengrid.OpenGridder.component"));
+                if (!bundle) bundle = CFBundleGetBundleWithIdentifier(CFSTR("com.opengridder.audiounit"));
+                if (!bundle) {
+                    Dl_info info;
+                    if (dladdr((const void*)AU_Anchor, &info) && info.dli_fname) {
+                        CFStringRef path = CFStringCreateWithCString(kCFAllocatorDefault, info.dli_fname, kCFStringEncodingUTF8);
+                        if (path) {
+                            CFURLRef url = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, path, kCFURLPOSIXPathStyle, false);
+                            if (url) {
+                                CFURLRef contents = CFURLCreateCopyDeletingLastPathComponent(kCFAllocatorDefault, url);
+                                if (contents) {
+                                    CFURLRef bundleUrl = CFURLCreateCopyDeletingLastPathComponent(kCFAllocatorDefault, contents);
+                                    if (bundleUrl) {
+                                        bundle = CFBundleCreate(kCFAllocatorDefault, bundleUrl);
+                                        CFRelease(bundleUrl);
+                                    }
+                                    CFRelease(contents);
+                                }
+                                CFRelease(url);
+                            }
+                            CFRelease(path);
+                        }
+                    }
+                }
                 if (!bundle) bundle = CFBundleGetMainBundle();
                 viewInfo->mCocoaAUViewBundleLocation = bundle ? CFBundleCopyBundleURL(bundle) : NULL;
                 viewInfo->mCocoaAUViewClass[0] = CFStringCreateCopy(kCFAllocatorDefault, CFSTR("OpenGridderAUCocoaViewFactory"));
@@ -331,6 +444,21 @@ public:
     {
         if (!inData) return paramErr;
         switch (inID) {
+            case kAudioUnitProperty_ClassInfo: {
+                if (inDataSize < sizeof(CFPropertyListRef)) return kAudioUnitErr_InvalidPropertyValue;
+                return noErr;
+            }
+            case kAudioUnitProperty_PresentPreset: {
+                if (inDataSize < sizeof(AUPreset)) return kAudioUnitErr_InvalidPropertyValue;
+                return noErr;
+            }
+            case kAudioUnitProperty_MakeConnection: {
+                if (inScope != kAudioUnitScope_Input) return kAudioUnitErr_InvalidScope;
+                if (inDataSize < sizeof(AudioUnitConnection)) return kAudioUnitErr_InvalidPropertyValue;
+                connection_ = *static_cast<const AudioUnitConnection*>(inData);
+                hasConnection_ = true;
+                return noErr;
+            }
             case kAudioUnitProperty_SampleRate:
                 if (inDataSize < sizeof(Float64)) return kAudioUnitErr_InvalidPropertyValue;
                 sampleRate_ = *static_cast<const Float64*>(inData);
@@ -351,12 +479,14 @@ public:
                 if (inDataSize < sizeof(UInt32)) return kAudioUnitErr_InvalidPropertyValue;
                 maxFrames_ = *static_cast<const UInt32*>(inData);
                 if (initialized_) { createRust(); }
+                notifyPropertyListeners(kAudioUnitProperty_MaximumFramesPerSlice);
                 return noErr;
             case kAudioUnitProperty_SetRenderCallback:
                 if (inDataSize < sizeof(AURenderCallbackStruct)) return kAudioUnitErr_InvalidPropertyValue;
                 inputCallback_ = *static_cast<const AURenderCallbackStruct*>(inData);
                 return noErr;
             case kAudioUnitProperty_BypassEffect:
+                if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
                 if (inDataSize < sizeof(UInt32)) return kAudioUnitErr_InvalidPropertyValue;
                 bypass_ = (*static_cast<const UInt32*>(inData) != 0);
                 if (rust_) og_native_bypass(rust_, bypass_);
@@ -372,6 +502,7 @@ public:
                                  AudioUnitParameterValue* outValue)
     {
         if (!outValue) return paramErr;
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
         switch (inID) {
             case kParamBypass:
                 *outValue = bypass_ ? 1.0f : 0.0f;
@@ -393,6 +524,7 @@ public:
                                  AudioUnitParameterValue inValue,
                                  UInt32 inBufferOffsetInFrames)
     {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
         switch (inID) {
             case kParamBypass:
                 bypass_ = (inValue >= 0.5f);
@@ -414,6 +546,37 @@ public:
             default:
                 return kAudioUnitErr_InvalidParameter;
         }
+    }
+
+    struct RenderNotify {
+        AURenderCallback proc;
+        void* refCon;
+    };
+    std::vector<RenderNotify> renderNotifies_;
+
+    ComponentResult AddRenderNotify(AURenderCallback inProc, void* inProcRefCon) {
+        if (!inProc) return paramErr;
+        renderNotifies_.push_back({inProc, inProcRefCon});
+        return noErr;
+    }
+
+    ComponentResult RemoveRenderNotify(AURenderCallback inProc, void* inProcRefCon) {
+        renderNotifies_.erase(
+            std::remove_if(renderNotifies_.begin(), renderNotifies_.end(),
+                           [=](const RenderNotify& n) { return n.proc == inProc && n.refCon == inProcRefCon; }),
+            renderNotifies_.end());
+        return noErr;
+    }
+
+    ComponentResult ScheduleParameters(const AudioUnitParameterEvent* inParameterEvents, UInt32 inNumEvents) {
+        if (!inParameterEvents) return paramErr;
+        for (UInt32 i = 0; i < inNumEvents; ++i) {
+            const auto& ev = inParameterEvents[i];
+            if (ev.eventType == kParameterEvent_Immediate) {
+                SetParameter(ev.parameter, ev.scope, ev.element, ev.eventValues.immediate.value, ev.eventValues.immediate.bufferOffset);
+            }
+        }
+        return noErr;
     }
 
     ComponentResult AddPropertyListener(AudioUnitPropertyID inID,
@@ -500,6 +663,15 @@ public:
                               static_cast<UInt32>(params->params[2]),
                               static_cast<UInt32>(params->params[3]),
                               reinterpret_cast<AudioBufferList*>(params->params[4]));
+            case kAudioUnitScheduleParametersSelect:
+                return ScheduleParameters(reinterpret_cast<const AudioUnitParameterEvent*>(params->params[0]),
+                                          static_cast<UInt32>(params->params[1]));
+            case kAudioUnitAddRenderNotifySelect:
+                return AddRenderNotify(reinterpret_cast<AURenderCallback>(params->params[0]),
+                                       reinterpret_cast<void*>(params->params[1]));
+            case kAudioUnitRemoveRenderNotifySelect:
+                return RemoveRenderNotify(reinterpret_cast<AURenderCallback>(params->params[0]),
+                                          reinterpret_cast<void*>(params->params[1]));
             case kAudioUnitAddPropertyListenerSelect:
                 return AddPropertyListener(static_cast<AudioUnitPropertyID>(params->params[0]),
                                            reinterpret_cast<AudioUnitPropertyListenerProc>(params->params[1]),
@@ -561,6 +733,8 @@ private:
     bool initialized_;
     AURenderCallbackStruct inputCallback_;
     AudioStreamBasicDescription format_;
+    AudioUnitConnection connection_;
+    bool hasConnection_;
     std::vector<float> scratchBuffers_[2];
     std::vector<PropertyListener> listeners_;
 };
@@ -625,9 +799,24 @@ OSStatus AU_SetParameter(void* self, AudioUnitParameterID param, AudioUnitScope 
     return wrapper->mInstance ? wrapper->mInstance->SetParameter(param, scope, elem, inValue, offset) : static_cast<ComponentResult>(-1);
 }
 
+OSStatus AU_ScheduleParameters(void* self, const AudioUnitParameterEvent* inEvents, UInt32 inNumEvents) {
+    auto* wrapper = static_cast<AudioComponentPlugInInstanceWrapper*>(self);
+    return wrapper->mInstance ? wrapper->mInstance->ScheduleParameters(inEvents, inNumEvents) : static_cast<ComponentResult>(-1);
+}
+
 OSStatus AU_Render(void* self, AudioUnitRenderActionFlags* ioFlags, const AudioTimeStamp* inTimeStamp, UInt32 inOutputBusNumber, UInt32 inNumberFrames, AudioBufferList* ioData) {
     auto* wrapper = static_cast<AudioComponentPlugInInstanceWrapper*>(self);
     return wrapper->mInstance ? wrapper->mInstance->Render(ioFlags, inTimeStamp, inOutputBusNumber, inNumberFrames, ioData) : static_cast<ComponentResult>(-1);
+}
+
+OSStatus AU_AddRenderNotify(void* self, AURenderCallback inProc, void* inProcRefCon) {
+    auto* wrapper = static_cast<AudioComponentPlugInInstanceWrapper*>(self);
+    return wrapper->mInstance ? wrapper->mInstance->AddRenderNotify(inProc, inProcRefCon) : static_cast<ComponentResult>(-1);
+}
+
+OSStatus AU_RemoveRenderNotify(void* self, AURenderCallback inProc, void* inProcRefCon) {
+    auto* wrapper = static_cast<AudioComponentPlugInInstanceWrapper*>(self);
+    return wrapper->mInstance ? wrapper->mInstance->RemoveRenderNotify(inProc, inProcRefCon) : static_cast<ComponentResult>(-1);
 }
 
 OSStatus AU_AddPropertyListener(void* self, AudioUnitPropertyID prop, AudioUnitPropertyListenerProc proc, void* userData) {
@@ -655,7 +844,10 @@ AudioComponentMethod AU_Lookup(SInt16 selector) {
         case kAudioUnitSetPropertySelect: return reinterpret_cast<AudioComponentMethod>(AU_SetProperty);
         case kAudioUnitGetParameterSelect: return reinterpret_cast<AudioComponentMethod>(AU_GetParameter);
         case kAudioUnitSetParameterSelect: return reinterpret_cast<AudioComponentMethod>(AU_SetParameter);
+        case kAudioUnitScheduleParametersSelect: return reinterpret_cast<AudioComponentMethod>(AU_ScheduleParameters);
         case kAudioUnitRenderSelect: return reinterpret_cast<AudioComponentMethod>(AU_Render);
+        case kAudioUnitAddRenderNotifySelect: return reinterpret_cast<AudioComponentMethod>(AU_AddRenderNotify);
+        case kAudioUnitRemoveRenderNotifySelect: return reinterpret_cast<AudioComponentMethod>(AU_RemoveRenderNotify);
         case kAudioUnitAddPropertyListenerSelect: return reinterpret_cast<AudioComponentMethod>(AU_AddPropertyListener);
         case kAudioUnitRemovePropertyListenerSelect: return reinterpret_cast<AudioComponentMethod>(AU_RemovePropertyListener);
         case kAudioUnitRemovePropertyListenerWithUserDataSelect: return reinterpret_cast<AudioComponentMethod>(AU_RemovePropertyListenerWithUserData);
@@ -697,7 +889,10 @@ ComponentResult OpenGridderAUEntry(ComponentParameters* params, void* self) {
                 sel == kAudioUnitSetPropertySelect ||
                 sel == kAudioUnitGetParameterSelect ||
                 sel == kAudioUnitSetParameterSelect ||
+                sel == kAudioUnitScheduleParametersSelect ||
                 sel == kAudioUnitRenderSelect ||
+                sel == kAudioUnitAddRenderNotifySelect ||
+                sel == kAudioUnitRemoveRenderNotifySelect ||
                 sel == kAudioUnitAddPropertyListenerSelect ||
                 sel == kAudioUnitRemovePropertyListenerSelect ||
                 sel == kAudioUnitRemovePropertyListenerWithUserDataSelect) ? 1 : 0;

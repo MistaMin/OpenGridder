@@ -15,6 +15,7 @@ add_library(OpenGridder MODULE
 )
 
 target_compile_options(OpenGridder PRIVATE -fobjc-arc)
+target_compile_definitions(OpenGridder PRIVATE OG_BUILD_VST3=1)
 
 set_target_properties(OpenGridder PROPERTIES
     BUNDLE TRUE

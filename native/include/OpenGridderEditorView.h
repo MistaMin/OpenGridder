@@ -2,6 +2,20 @@
 #import <Cocoa/Cocoa.h>
 #include "opengridder.h"
 
+#ifndef OPENGRIDDER_VIEW_CLASS_NAME
+#if defined(OG_BUILD_VST3)
+#define OPENGRIDDER_VIEW_CLASS_NAME OpenGridderVST3EditorView
+#elif defined(OG_BUILD_AUV3)
+#define OPENGRIDDER_VIEW_CLASS_NAME OpenGridderAUv3EditorView
+#elif defined(OG_BUILD_AU)
+#define OPENGRIDDER_VIEW_CLASS_NAME OpenGridderAUEditorView
+#else
+#define OPENGRIDDER_VIEW_CLASS_NAME OpenGridderEditorView
+#endif
+#endif
+
+#define OpenGridderEditorView OPENGRIDDER_VIEW_CLASS_NAME
+
 #ifndef NSFontWeightRegular
 #if !defined(MAC_OS_X_VERSION_10_11) || MAC_OS_X_VERSION_MAX_ALLOWED < 101100
 typedef CGFloat NSFontWeight;

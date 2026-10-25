@@ -125,8 +125,8 @@ public:
 
     // --- IComponent ---
     tresult PLUGIN_API getControllerClassId(TUID classId) override {
-        memcpy(classId, kOpenGridderControllerUID, sizeof(TUID));
-        return kResultOk;
+        // Combined component and controller in single object
+        return kResultFalse;
     }
 
     tresult PLUGIN_API setIoMode(IoMode mode) override {
@@ -496,6 +496,7 @@ public:
         };
 
         [parentView addSubview:view_];
+        [view_ setNeedsDisplay:YES];
         return kResultOk;
     }
 
@@ -528,7 +529,10 @@ private:
 };
 
 IPlugView* PLUGIN_API OpenGridderVST3::createView(FIDString name) {
-    return new OpenGridderPlugView(this);
+    if (!name || std::strcmp(name, "editor") == 0) {
+        return new OpenGridderPlugView(this);
+    }
+    return nullptr;
 }
 
 // --- Plugin Factory ---

@@ -14,6 +14,7 @@ add_library(OpenGridderAUv3 MODULE
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/OpenGridderEditorView.mm"
 )
 target_compile_options(OpenGridderAUv3 PRIVATE -fobjc-arc)
+target_compile_definitions(OpenGridderAUv3 PRIVATE OG_BUILD_AUV3=1)
 
 set(BUNDLE_DIR "${CMAKE_BINARY_DIR}/OpenGridderAUv3.appex")
 set_target_properties(OpenGridderAUv3 PROPERTIES
