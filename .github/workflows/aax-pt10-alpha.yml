@@ -26,6 +26,9 @@ jobs:
         run: |
           mkdir -p target/pt10-alpha-artifact
           ditto -c -k --sequesterRsrc --keepParent target/aax-i386-pace-signed/OpenGridder.aaxplugin target/pt10-alpha-artifact/OpenGridder-AAX-PT10-alpha-untested.zip
+          ditto -x -k target/pt10-alpha-artifact/OpenGridder-AAX-PT10-alpha-untested.zip target/pt10-package-check
+          codesign --verify --deep --strict --verbose=2 target/pt10-package-check/OpenGridder.aaxplugin
+          lipo target/pt10-package-check/OpenGridder.aaxplugin/Contents/MacOS/OpenGridder -verify_arch i386
           cp target/aax-i386-pace-signed/pace-verification.txt target/pt10-alpha-artifact/
           printf '%s\n' 'Experimental i386 AAX, minimum deployment 10.8. Signed, but not qualified in Pro Tools 10. No SDK source included. RTAS/TDM are not included.' > target/pt10-alpha-artifact/README.txt
           cd target/pt10-alpha-artifact

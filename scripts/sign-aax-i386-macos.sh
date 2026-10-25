@@ -10,14 +10,17 @@ trap 'rm -rf "$og_stage"' EXIT
 mkdir -p "$og_stage/input" "$og_stage/output" "$og_output"
 ditto "$og_root/target/aax-i386/OpenGridder.aaxplugin" "$og_stage/input/OpenGridder.aaxplugin"
 lipo "$og_stage/input/OpenGridder.aaxplugin/Contents/MacOS/OpenGridder" -verify_arch i386
-codesign --force --deep --timestamp --sign "$og_identity" "$og_stage/input/OpenGridder.aaxplugin"
+codesign --force --deep --timestamp --digest-algorithm=sha1,sha256 --sign "$og_identity" "$og_stage/input/OpenGridder.aaxplugin"
 "$og_wraptool" sign --verbose --account "${OPENGRIDDER_PACE_ACCOUNT:-mistamin}" \
   --wcguid "${OPENGRIDDER_PACE_GUID:-807F4D50-CFDB-11F1-A0CD-00505692AD3E}" \
   --dsig1-compat on --signid "$og_identity" --autoinstall on \
   --in "$og_stage/input/OpenGridder.aaxplugin" --out "$og_stage/output/OpenGridder.aaxplugin"
-codesign --force --deep --timestamp --sign "$og_identity" "$og_stage/output/OpenGridder.aaxplugin"
+codesign --force --deep --timestamp --digest-algorithm=sha1,sha256 --sign "$og_identity" "$og_stage/output/OpenGridder.aaxplugin"
 codesign --verify --deep --strict --verbose=2 "$og_stage/output/OpenGridder.aaxplugin"
 "$og_wraptool" verify --verbose --in "$og_stage/output/OpenGridder.aaxplugin" > "$og_output/pace-verification.txt"
 lipo "$og_stage/output/OpenGridder.aaxplugin/Contents/MacOS/OpenGridder" -verify_arch i386
 ditto "$og_stage/output/OpenGridder.aaxplugin" "$og_output/OpenGridder.aaxplugin"
+# Verify after copying too: thin i386 signing requires an explicit SHA-1 digest
+# for old macOS, in addition to SHA-256. A cached pre-copy check is insufficient.
+codesign --verify --deep --strict --verbose=2 "$og_output/OpenGridder.aaxplugin"
 echo 'Signed experimental i386 AAX; real Pro Tools 10 qualification remains required.'
