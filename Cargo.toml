@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.2.1"
+version = "0.1.0-alpha"
 edition = "2021"
 license = "MIT"
 authors = ["Marcos Deida", "Andreas Pohl (Original AudioGridder Concept & Architecture)"]
