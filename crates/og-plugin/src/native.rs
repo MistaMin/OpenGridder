@@ -540,6 +540,31 @@ pub unsafe extern "C" fn og_native_accept_latency(handle: *mut NativePlugin, tot
         }
     }
 }
+/// Dynamically request a new transport latency profile budget.
+/// Host must acknowledge via og_native_accept_latency.
+/// # Safety
+/// Live handle, not concurrently destroyed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_set_transport_latency(handle: *mut NativePlugin, transport: u32) {
+    if let Some(p) = handle.as_ref() {
+        let mut current = p.shared.requested_latency.load(Ordering::Acquire);
+        loop {
+            let updated = latency_pair(
+                transport.clamp(32, 8192),
+                plugin_part(current),
+            );
+            match p.shared.requested_latency.compare_exchange_weak(
+                current,
+                updated,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(actual) => current = actual,
+            }
+        }
+    }
+}
 /// # Safety
 /// Live handle, not concurrently destroyed.
 #[unsafe(no_mangle)]

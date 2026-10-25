@@ -20,6 +20,7 @@
 
 namespace {
 constexpr const char* kSelection = "remote_plugin";
+constexpr const char* kLatencyProfile = "latency_profile";
 constexpr uint32_t kTransportLatency = 256;
 double unitValue(double value) {
 #if __cplusplus >= 201703L
@@ -81,6 +82,11 @@ public:
         select->SetNumberOfSteps(129);
         select->SetType(AAX_eParameterType_Discrete);
         mParameterManager.AddParameter(select);
+        auto* profile = new AAX_CParameter<int32_t>(kLatencyProfile, AAX_CString("Latency Profile"), 0,
+            AAX_CLinearTaperDelegate<int32_t>(0, 3), AAX_CNumberDisplayDelegate<int32_t>(), false);
+        profile->SetNumberOfSteps(4);
+        profile->SetType(AAX_eParameterType_Discrete);
+        mParameterManager.AddParameter(profile);
         return Controller()->SetSignalLatency(static_cast<int32_t>(transport));
     }
     AAX_Result ResetFieldData(AAX_CFieldIndex field, void* data, uint32_t bytes) const override {
@@ -98,11 +104,19 @@ public:
             if (!std::strcmp(id, kSelection)) og_native_select(instance_.rust,
                 static_cast<uint32_t>(std::lround(unitValue(value) * 128.0)));
             else if (!std::strcmp(id, cDefaultMasterBypassID)) og_native_bypass(instance_.rust, value >= 0.5);
+            else if (!std::strcmp(id, kLatencyProfile)) {
+                const auto val = static_cast<uint32_t>(std::lround(unitValue(value) * 3.0));
+                uint32_t targetLatency = 1024;
+                if (val == 1) targetLatency = 512;
+                else if (val == 2) targetLatency = 384;
+                else if (val == 3) targetLatency = 256;
+                og_native_set_transport_latency(instance_.rust, targetLatency);
+            }
         }
         return result;
     }
     AAX_Result GetParameterValueString(AAX_CParamID id, AAX_IString* text, int32_t maxLength) const override {
-        if (id && text && !std::strcmp(id, kSelection)) {
+        if (id && text && (!std::strcmp(id, kSelection) || !std::strcmp(id, kLatencyProfile))) {
             double normalized = 0.0;
             const auto result = AAX_CEffectParameters::GetParameterNormalizedValue(id, &normalized);
             if (result != AAX_SUCCESS) return result;
@@ -122,6 +136,13 @@ public:
             text->Set(display);
             return AAX_SUCCESS;
         }
+        if (id && text && !std::strcmp(id, kLatencyProfile)) {
+            if (!std::isfinite(normalized)) return AAX_ERROR_INVALID_STRING_CONVERSION;
+            const auto index = static_cast<uint32_t>(std::lround(unitValue(normalized) * 3.0));
+            const char* names[] = {"1024s LAN", "512s 10GbE", "384s Localhost VSTi", "256s Localhost Direct"};
+            text->Set(names[index % 4]);
+            return AAX_SUCCESS;
+        }
         return AAX_CEffectParameters::GetParameterStringFromValue(id, normalized, text, maxLength);
     }
     AAX_Result GetParameterValueFromString(AAX_CParamID id, double* value, const AAX_IString& text) const override {
@@ -133,6 +154,16 @@ public:
             if (end == start || index < 0 || index > 128 || (*end != 0 && *end != ':'))
                 return AAX_ERROR_INVALID_STRING_CONVERSION;
             *value = static_cast<double>(index) / 128.0;
+            return AAX_SUCCESS;
+        }
+        if (id && value && !std::strcmp(id, kLatencyProfile)) {
+            char* end = nullptr;
+            const char* start = text.Get();
+            if (!start) return AAX_ERROR_INVALID_STRING_CONVERSION;
+            const long index = std::strtol(start, &end, 10);
+            if (end == start || index < 0 || index > 3)
+                return AAX_ERROR_INVALID_STRING_CONVERSION;
+            *value = static_cast<double>(index) / 3.0;
             return AAX_SUCCESS;
         }
         return AAX_CEffectParameters::GetParameterValueFromString(id, value, text);

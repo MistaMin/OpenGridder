@@ -13,6 +13,7 @@ void og_native_select(NativePlugin*, uint32_t index);
 void og_native_bypass(NativePlugin*, bool bypass);
 uint32_t og_native_latency(NativePlugin*);
 void og_native_accept_latency(NativePlugin*, uint32_t total);
+void og_native_set_transport_latency(NativePlugin*, uint32_t transport);
 int32_t og_native_status(NativePlugin*);
 void og_native_name(NativePlugin*, uint32_t index, char* buffer, uint32_t capacity);
 #ifdef __cplusplus
