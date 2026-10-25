@@ -41,6 +41,7 @@ bool og_native_is_editor_open(NativePlugin*);
 void og_native_set_param(NativePlugin*, uint32_t param_id, float norm_val);
 float og_native_get_param(NativePlugin*, uint32_t param_id);
 void og_native_get_meters(NativePlugin*, float* left, float* right);
+void og_native_get_input_meters(NativePlugin*, float* left, float* right);
 
 // --- Chain Reordering, Presets, Remote Parameters, A/B & Server Management (Phase 2) ---
 bool og_native_exchange_plugins(NativePlugin*, uint32_t idx_a, uint32_t idx_b);

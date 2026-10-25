@@ -128,6 +128,8 @@ struct Shared {
     automation_slots: [AtomicU32; 16],
     meter_l: AtomicU32,
     meter_r: AtomicU32,
+    meter_in_l: AtomicU32,
+    meter_in_r: AtomicU32,
     active_is_b: AtomicBool,
     active_latency: AtomicU32,
     requested_latency: AtomicU32,
@@ -274,6 +276,8 @@ impl NativePlugin {
             automation_slots: std::array::from_fn(|_| AtomicU32::new(0.0f32.to_bits())),
             meter_l: AtomicU32::new(0.0f32.to_bits()),
             meter_r: AtomicU32::new(0.0f32.to_bits()),
+            meter_in_l: AtomicU32::new(0.0f32.to_bits()),
+            meter_in_r: AtomicU32::new(0.0f32.to_bits()),
             active_is_b: AtomicBool::new(false),
             active_latency: AtomicU32::new(latency_pair(latency as u32, 0)),
             requested_latency: AtomicU32::new(latency_pair(latency as u32, 0)),
@@ -750,13 +754,25 @@ impl NativePlugin {
         let mut missed = false;
         let mut peak_l = 0.0f32;
         let mut peak_r = 0.0f32;
+        let mut peak_in_l = 0.0f32;
+        let mut peak_in_r = 0.0f32;
         for n in 0..frames {
             let now = cb.clock + n as u64;
             let target = now + (transport_delay + plugin_delay) as u64;
             let write = target as usize % size;
             let read = now as usize % size;
             for ch in 0..self.channels {
-                cb.dry[ch][write] = *input[ch].add(n) * in_lin;
+                let in_sample = *input[ch].add(n) * in_lin;
+                cb.dry[ch][write] = in_sample;
+                let ia = in_sample.abs();
+                if ch == 0 {
+                    if ia > peak_in_l { peak_in_l = ia; }
+                } else if ia > peak_in_r {
+                    peak_in_r = ia;
+                }
+            }
+            if self.channels == 1 {
+                peak_in_r = peak_in_l;
             }
             cb.dry_tags[write] = target;
             let wet = !bypass && cb.wet_tags[read] == now;
@@ -800,8 +816,10 @@ impl NativePlugin {
             cb.wet_tags[read] = EMPTY;
             cb.dry_tags[read] = EMPTY;
         }
-        self.shared.meter_l.store(peak_l.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
-        self.shared.meter_r.store(peak_r.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        self.shared.meter_l.store(peak_l.clamp(0.0, 2.0).to_bits(), Ordering::Relaxed);
+        self.shared.meter_r.store(peak_r.clamp(0.0, 2.0).to_bits(), Ordering::Relaxed);
+        self.shared.meter_in_l.store(peak_in_l.clamp(0.0, 2.0).to_bits(), Ordering::Relaxed);
+        self.shared.meter_in_r.store(peak_in_r.clamp(0.0, 2.0).to_bits(), Ordering::Relaxed);
         cb.clock += frames as u64;
         if missed && self.shared.status.load(Ordering::Acquire) == 3 {
             self.shared.underruns.fetch_add(1, Ordering::Relaxed);
@@ -1365,6 +1383,28 @@ pub unsafe extern "C" fn og_native_get_meters(
     }
     if !right.is_null() {
         *right = f32::from_bits(p.shared.meter_r.load(Ordering::Relaxed));
+    }
+}
+
+/// Read true stereo input peak levels (post-Input Gain, pre-network/output) measured on the audio thread.
+/// # Safety
+/// Handle and output pointers must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_get_input_meters(
+    handle: *mut NativePlugin,
+    left: *mut f32,
+    right: *mut f32,
+) {
+    let Some(p) = handle.as_ref() else {
+        if !left.is_null() { *left = 0.0; }
+        if !right.is_null() { *right = 0.0; }
+        return;
+    };
+    if !left.is_null() {
+        *left = f32::from_bits(p.shared.meter_in_l.load(Ordering::Relaxed));
+    }
+    if !right.is_null() {
+        *right = f32::from_bits(p.shared.meter_in_r.load(Ordering::Relaxed));
     }
 }
 

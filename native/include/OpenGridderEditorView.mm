@@ -43,6 +43,7 @@ static NSFont *MonoFont(CGFloat size, NSFontWeight weight) {
 @synthesize outputGain = _outputGain;
 @synthesize isVuMeterMode = _isVuMeterMode;
 @synthesize isVuCalibratedMinus18 = _isVuCalibratedMinus18;
+@synthesize isMeterInputMode = _isMeterInputMode;
 @synthesize rackCollapsed = _rackCollapsed;
 @synthesize consoleCollapsed = _consoleCollapsed;
 @synthesize meterCollapsed = _meterCollapsed;
@@ -72,6 +73,7 @@ static NSFont *MonoFont(CGFloat size, NSFontWeight weight) {
         _peakHoldRight = 0.0f;
         _isVuMeterMode = YES; // Default to classic 2x-wide VU meter mode (toggleable to 1x PPM)
         _isVuCalibratedMinus18 = YES; // Default: 0 VU = +4 dBu = -18 dBFS (toggleable to 0 VU = -3 dBFS)
+        _isMeterInputMode = NO; // Default: Output metering (toggleable to Input metering in both PPM & VU)
         _rackCollapsed = NO;
         _consoleCollapsed = NO;
         _meterCollapsed = NO;
@@ -196,8 +198,12 @@ static NSFont *MonoFont(CGFloat size, NSFontWeight weight) {
             _outputGain = og_native_get_param(r, 6);
         }
         float rawL = 0.0f, rawR = 0.0f;
-        og_native_get_meters(r, &rawL, &rawR);
-        if (_isBypassed) {
+        if (_isMeterInputMode) {
+            og_native_get_input_meters(r, &rawL, &rawR);
+        } else {
+            og_native_get_meters(r, &rawL, &rawR);
+        }
+        if (_isBypassed && !_isMeterInputMode) {
             _meterLeft = std::max(0.0f, _meterLeft * 0.85f);
             _meterRight = std::max(0.0f, _meterRight * 0.85f);
             _vuLeft = std::max(0.0f, _vuLeft * 0.82f);
@@ -709,6 +715,7 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
                                   CGRect bayRect,
                                   BOOL isVuMode,
                                   BOOL calMinus18,
+                                  BOOL isInputMode,
                                   float ppmL,
                                   float ppmR,
                                   float vuL,
@@ -721,18 +728,12 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
     CGContextSetRGBStrokeColor(ctx, 0.22, 0.25, 0.29, 0.85);
     StrokeRoundedRect(ctx, bayRect, 6.0, 1.0);
 
-    // Header Row: "PPM" / "VU METER (2X)" + Calibration Toggle [-18* | -3 dB] + [VU* | PPM] Mode Toggle + [◂] Clap-Close Button
-    NSDictionary *hdrAttrs = @{
-        NSFontAttributeName: SysFont(9.5, NSFontWeightBold),
-        NSForegroundColorAttributeName: [NSColor colorWithCalibratedWhite:0.82 alpha:1.0]
-    };
-    NSString *hdrTitle = isVuMode ? @"VU METER (2X)" : @"PPM";
-    [hdrTitle drawAtPoint:NSMakePoint(bayRect.origin.x + 8.0, CGRectGetMaxY(bayRect) - 20.0) withAttributes:hdrAttrs];
-
-    CGRect foldBtn = CGRectMake(CGRectGetMaxX(bayRect) - 26.0, CGRectGetMaxY(bayRect) - 22.0, 20.0, 16.0);
+    // Shared Header Controls (right-aligned so they fit identically in 128px PPM and 256px VU modes):
+    // [IN | OUT*] (46px) + [VU* | PPM] (50px) + [◂] (17px)
+    CGRect foldBtn = CGRectMake(CGRectGetMaxX(bayRect) - 21.0, CGRectGetMaxY(bayRect) - 22.0, 17.0, 16.0);
     DrawBankFoldButton(ctx, foldBtn, @"◂");
 
-    CGRect modeBtn = CGRectMake(CGRectGetMinX(foldBtn) - 62.0, CGRectGetMaxY(bayRect) - 22.0, 58.0, 16.0);
+    CGRect modeBtn = CGRectMake(CGRectGetMinX(foldBtn) - 53.0, CGRectGetMaxY(bayRect) - 22.0, 50.0, 16.0);
     CGContextSetRGBFillColor(ctx, 0.14, 0.17, 0.21, 1.0);
     FillRoundedRect(ctx, modeBtn, 3.5);
     CGContextSetRGBStrokeColor(ctx, 0.95, 0.75, 0.25, 0.85);
@@ -740,15 +741,36 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
 
     NSString *modeTxt = isVuMode ? @"VU* | PPM" : @"VU | PPM*";
     NSDictionary *modeAttrs = @{
-        NSFontAttributeName: MonoFont(8.0, NSFontWeightBold),
+        NSFontAttributeName: MonoFont(7.5, NSFontWeightBold),
         NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.95 green:0.78 blue:0.30 alpha:1.0]
     };
     NSSize mSz = [modeTxt sizeWithAttributes:modeAttrs];
     [modeTxt drawAtPoint:NSMakePoint(CGRectGetMidX(modeBtn) - mSz.width * 0.5, modeBtn.origin.y + 2.5) withAttributes:modeAttrs];
 
+    // Input / Output Source Toggle Pill: [IN* | OUT] vs [IN | OUT*]
+    CGRect ioBtn = CGRectMake(CGRectGetMinX(modeBtn) - 49.0, CGRectGetMaxY(bayRect) - 22.0, 46.0, 16.0);
+    CGContextSetRGBFillColor(ctx, 0.12, 0.17, 0.16, 1.0);
+    FillRoundedRect(ctx, ioBtn, 3.5);
+    CGContextSetRGBStrokeColor(ctx, 0.28, 0.86, 0.62, 0.85);
+    StrokeRoundedRect(ctx, ioBtn, 3.5, 1.0);
+
+    NSString *ioTxt = isInputMode ? @"IN* | OUT" : @"IN | OUT*";
+    NSDictionary *ioAttrs = @{
+        NSFontAttributeName: MonoFont(7.4, NSFontWeightBold),
+        NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.35 green:0.92 blue:0.68 alpha:1.0]
+    };
+    NSSize ioSz = [ioTxt sizeWithAttributes:ioAttrs];
+    [ioTxt drawAtPoint:NSMakePoint(CGRectGetMidX(ioBtn) - ioSz.width * 0.5, ioBtn.origin.y + 2.5) withAttributes:ioAttrs];
+
     if (isVuMode) {
+        NSDictionary *hdrAttrs = @{
+            NSFontAttributeName: SysFont(9.0, NSFontWeightBold),
+            NSForegroundColorAttributeName: [NSColor colorWithCalibratedWhite:0.82 alpha:1.0]
+        };
+        [@"VU (2X)" drawAtPoint:NSMakePoint(bayRect.origin.x + 8.0, CGRectGetMaxY(bayRect) - 20.0) withAttributes:hdrAttrs];
+
         // VU Calibration Toggle Pill: [-18* | -3 dB] (0 VU = +4 dBu = -18 dBFS vs 0 VU = -3 dBFS)
-        CGRect calBtn = CGRectMake(CGRectGetMinX(modeBtn) - 70.0, CGRectGetMaxY(bayRect) - 22.0, 66.0, 16.0);
+        CGRect calBtn = CGRectMake(CGRectGetMinX(ioBtn) - 65.0, CGRectGetMaxY(bayRect) - 22.0, 62.0, 16.0);
         CGContextSetRGBFillColor(ctx, 0.13, 0.16, 0.20, 1.0);
         FillRoundedRect(ctx, calBtn, 3.5);
         CGContextSetRGBStrokeColor(ctx, 0.40, 0.78, 0.96, 0.85);
@@ -756,20 +778,20 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
 
         NSString *calTxt = calMinus18 ? @"-18* | -3 dB" : @"-18 | -3* dB";
         NSDictionary *calAttrs = @{
-            NSFontAttributeName: MonoFont(7.8, NSFontWeightBold),
+            NSFontAttributeName: MonoFont(7.4, NSFontWeightBold),
             NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.45 green:0.82 blue:0.98 alpha:1.0]
         };
         NSSize cSz = [calTxt sizeWithAttributes:calAttrs];
         [calTxt drawAtPoint:NSMakePoint(CGRectGetMidX(calBtn) - cSz.width * 0.5, calBtn.origin.y + 2.5) withAttributes:calAttrs];
 
-        // Dual Stacked 2x-Wide Classic Analog VU Meters (CH L & CH R)
+        // Dual Stacked 2x-Wide Classic Analog VU Meters (IN/OUT CH L & CH R)
         CGFloat dialW = bayRect.size.width - 16.0;
         CGFloat dialH = (bayRect.size.height - 46.0) * 0.5;
         CGRect topDial = CGRectMake(bayRect.origin.x + 8.0, bayRect.origin.y + 14.0 + dialH, dialW, dialH - 4.0);
         CGRect botDial = CGRectMake(bayRect.origin.x + 8.0, bayRect.origin.y + 8.0, dialW, dialH - 4.0);
 
-        DrawAnalogVuDial(ctx, topDial, vuL, ppmL, calMinus18, @"CH L");
-        DrawAnalogVuDial(ctx, botDial, vuR, ppmR, calMinus18, @"CH R");
+        DrawAnalogVuDial(ctx, topDial, vuL, ppmL, calMinus18, isInputMode ? @"IN L" : @"OUT L");
+        DrawAnalogVuDial(ctx, botDial, vuR, ppmR, calMinus18, isInputMode ? @"IN R" : @"OUT R");
     } else {
         // High-Resolution Digital Stereo PPM Bargraphs with dBFS Scale & Peak Hold
         CGFloat meterTop = CGRectGetMaxY(bayRect) - 32.0;
@@ -840,7 +862,9 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
         };
         [@"L" drawAtPoint:NSMakePoint(leftBarX + 6.5, bayRect.origin.y + 7.0) withAttributes:lrAttrs];
         [@"R" drawAtPoint:NSMakePoint(rightBarX + 6.5, bayRect.origin.y + 7.0) withAttributes:lrAttrs];
-        [@"PPM" drawAtPoint:NSMakePoint(CGRectGetMidX(bayRect) - 10.0, bayRect.origin.y + 7.0) withAttributes:dbAttrs];
+        NSString *ppmSrcLbl = isInputMode ? @"IN PPM" : @"OUT PPM";
+        NSSize pSz = [ppmSrcLbl sizeWithAttributes:dbAttrs];
+        [ppmSrcLbl drawAtPoint:NSMakePoint(CGRectGetMidX(bayRect) - pSz.width * 0.5, bayRect.origin.y + 7.0) withAttributes:dbAttrs];
     }
 }
 
@@ -1188,7 +1212,7 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
         CGFloat innerW = _isVuMeterMode ? 256.0 : 128.0;
         CGFloat innerX = meterBank.origin.x + (meterBank.size.width - innerW) * 0.5;
         CGRect meterBay = CGRectMake(innerX, 44.0, innerW, bounds.size.height - 74.0);
-        DrawMasterMeteringBay(ctx, meterBay, _isVuMeterMode, _isVuCalibratedMinus18, _meterLeft, _meterRight, vuL, vuR, holdL, holdR);
+        DrawMasterMeteringBay(ctx, meterBay, _isVuMeterMode, _isVuCalibratedMinus18, _isMeterInputMode, _meterLeft, _meterRight, vuL, vuR, holdL, holdR);
     }
 
     // Footer Status Text
@@ -1437,18 +1461,24 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
         CGFloat innerW = _isVuMeterMode ? 256.0 : 128.0;
         CGFloat innerX = meterBank.origin.x + (meterBank.size.width - innerW) * 0.5;
         CGRect meterBay = CGRectMake(innerX, 44.0, innerW, bounds.size.height - 74.0);
-        CGRect meterFoldBtn = CGRectMake(CGRectGetMaxX(meterBay) - 26.0, CGRectGetMaxY(meterBay) - 22.0, 20.0, 16.0);
+        CGRect meterFoldBtn = CGRectMake(CGRectGetMaxX(meterBay) - 21.0, CGRectGetMaxY(meterBay) - 22.0, 17.0, 16.0);
         if (CGRectContainsPoint(meterFoldBtn, cp)) {
             [self setMeterCollapsed:YES];
             return;
         }
-        CGRect modeBtn = CGRectMake(CGRectGetMinX(meterFoldBtn) - 62.0, CGRectGetMaxY(meterBay) - 22.0, 58.0, 16.0);
+        CGRect modeBtn = CGRectMake(CGRectGetMinX(meterFoldBtn) - 53.0, CGRectGetMaxY(meterBay) - 22.0, 50.0, 16.0);
         if (CGRectContainsPoint(modeBtn, cp)) {
             [self setIsVuMeterMode:!_isVuMeterMode];
             return;
         }
+        CGRect ioBtn = CGRectMake(CGRectGetMinX(modeBtn) - 49.0, CGRectGetMaxY(meterBay) - 22.0, 46.0, 16.0);
+        if (CGRectContainsPoint(ioBtn, cp)) {
+            _isMeterInputMode = !_isMeterInputMode;
+            [self setNeedsDisplay:YES];
+            return;
+        }
         if (_isVuMeterMode) {
-            CGRect calBtn = CGRectMake(CGRectGetMinX(modeBtn) - 70.0, CGRectGetMaxY(meterBay) - 22.0, 66.0, 16.0);
+            CGRect calBtn = CGRectMake(CGRectGetMinX(ioBtn) - 65.0, CGRectGetMaxY(meterBay) - 22.0, 62.0, 16.0);
             if (CGRectContainsPoint(calBtn, cp)) {
                 _isVuCalibratedMinus18 = !_isVuCalibratedMinus18;
                 [self setNeedsDisplay:YES];
