@@ -135,8 +135,8 @@ if [ -d "$og_root/target/release-licenses" ]; then
     ditto "$og_root/target/release-licenses" "$og_stage/dmg/Licenses"
 fi
 
-cat > "$og_stage/dmg/INSTALL.txt" << 'EOF'
-OpenGridder 0.1.0-alpha - Multi-Format Release
+cat > "$og_stage/dmg/INSTALL.txt" << EOF
+OpenGridder $og_version - Multi-Format Release
 ==============================================
 
 Welcome to OpenGridder, the zero-JUCE audio streaming plugin network.
@@ -150,10 +150,10 @@ Included Plugins:
 
 Server Components:
 - OpenGridder Server.app: Native macOS Application installed to /Applications/
-- Windows 7 SP1+ Server: Packaged separately as OpenGridder-0.1.0-alpha-windows7-x86_64.zip
+- Windows 7 SP1+ Server: Packaged separately as OpenGridder-$og_version-windows7-x86_64.zip
 
 Quick Start:
-1. Run the OpenGridder-0.1.0-alpha-macos.pkg installer or drag OpenGridder Server.app to Applications.
+1. Run the OpenGridder-$og_version-macos.pkg installer or drag OpenGridder Server.app to Applications.
 2. Launch OpenGridder Server from Applications or Launchpad.
 3. Open your DAW and insert OpenGridder on an audio track.
 4. Select your latency profile (Profile 0: Low, Profile 1: Standard, Profile 2: High, Profile 3: Studio).

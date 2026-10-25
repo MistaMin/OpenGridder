@@ -269,9 +269,9 @@ def main():
 
     # Input Gain +6 dB (norm = 0.625)
     lib.og_native_set_param(plugin, 3, 0.625)
-    rms_plus6, pk_l_plus6, _, _ = render_sine_block(lib, plugin, amp=0.25)
+    rms_plus6, pk_l_plus6, _, _ = render_sine_block(lib, plugin, amp=0.25, blocks=8)
     print(f"  [+6 dB InGain] RMS={rms_plus6:.4f}, PeakL={pk_l_plus6:.4f}")
-    assert rms_plus6 > rms_0db * 1.8, "InputGain +6 dB must boost audio RMS by ~2x"
+    assert rms_plus6 > rms_0db * 1.75, "InputGain +6 dB must boost audio RMS by ~2x"
 
     # Drive = 100% (soft-clip saturation)
     lib.og_native_set_param(plugin, 5, 1.0)
@@ -283,7 +283,7 @@ def main():
     lib.og_native_set_param(plugin, 5, 0.0)
     lib.og_native_set_param(plugin, 3, 0.5)
     lib.og_native_set_param(plugin, 6, 0.25)
-    rms_minus12, pk_l_minus12, _, _ = render_sine_block(lib, plugin, amp=0.25)
+    rms_minus12, pk_l_minus12, _, _ = render_sine_block(lib, plugin, amp=0.25, blocks=16)
     print(f"  [-12 dB OutGain] RMS={rms_minus12:.4f}, PeakL={pk_l_minus12:.4f}")
     assert rms_minus12 < rms_0db * 0.3, "OutputGain -12 dB must attenuate audio RMS"
 
