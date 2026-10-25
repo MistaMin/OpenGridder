@@ -139,7 +139,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         self.versionLabel.backgroundColor = [NSColor clearColor];
         self.versionLabel.font = [NSFont systemFontOfSize:11 weight:NSFontWeightRegular];
         self.versionLabel.textColor = [NSColor colorWithCalibratedRed:0.60 green:0.65 blue:0.70 alpha:0.8];
-        self.versionLabel.stringValue = @"v0.2.1-alpha • macOS Universal (Apple Silicon & Intel)";
+        self.versionLabel.stringValue = @"v0.3.0-alpha • macOS Universal (Apple Silicon & Intel)";
         [plate addSubview:self.versionLabel];
 
         // Progress bar

@@ -758,7 +758,7 @@ public:
         strncpy(info->category, kVstAudioEffectClass, sizeof(info->category));
         strncpy(info->name, "OpenGridder", sizeof(info->name));
         strncpy(info->vendor, "OpenGrid Studio", sizeof(info->vendor));
-        strncpy(info->version, "0.2.1-alpha", sizeof(info->version));
+        strncpy(info->version, "0.3.0-alpha", sizeof(info->version));
         strncpy(info->sdkVersion, "VST 3.7.0", sizeof(info->sdkVersion));
         strncpy(info->subCategories, "Fx|Network", sizeof(info->subCategories));
         info->classFlags = 0;
