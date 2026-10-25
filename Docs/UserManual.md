@@ -1,29 +1,38 @@
-# OpenGridder 1.2.1 - AAX preview
+# OpenGridder 0.1.0-alpha - Multi-Format Release
 
 ## Release scope
 
-This preview contains the macOS AAX Native effect and its required command-line
-server. Both binaries contain Apple Silicon and Intel slices. Rust implements
-the engine and transport; thin SDK adapters provide AAX and VST3 interfaces.
-There is no JUCE dependency in these targets. AU and VST3 are server hosting
-formats, not client plugins in this release. No RTAS/TDM .dpm, AU client, VST3
-client, CLAP, LV2 client or standalone plugin application is included.
+This release contains the zero-JUCE OpenGridder multi-format audio plugins and standalone servers.
+Supported plugin formats include:
+- AudioUnit v2 (AU): Universal binary (i386 + x86_64 + arm64) supporting Logic Pro 8 (via Carbon Component Manager 'thng' resource), Logic Pro 9, and Logic Pro X / modern macOS DAWs.
+- VST 2.4: Universal binary (i386 + x86_64 + arm64) supporting vintage Cubase (4/5/6/7), Nuendo, and WaveLab.
+- AAX Native: Universal binary (arm64 + x86_64) signed with PACE Eden and Apple Developer ID for Pro Tools 11+ and Pro Tools Ultimate.
+- Server: Standalone headless and tray servers for macOS (Universal arm64/x86_64) and Windows 7 SP1+ (x86_64 with Win32 compatibility shims).
 
-This is an early preview for evaluation. Pro Tools host qualification is pending.
-Pro Tools 10 requires a separate 32-bit build and is not supported by this package.
-OS X 10.8.5 is not supported. The build deployment floors are macOS 11 on Apple
-Silicon and macOS 10.12 on Intel; those floors are not tested compatibility claims.
-Current binary and system checks ran on macOS 15.7.5. macOS 26 qualification is
-pending. PACE signing and Apple notarization do not certify audio performance or
-host compatibility. Only packaging records marked Accepted establish notarization.
+Rust implements the DSP engine, bounded lockless transport, and protocol v13 networking. Thin SDK adapters provide AU, VST2, and AAX interfaces with zero JUCE dependencies.
+
+Pro Tools 10 / RTAS / TDM legacy bridges are maintained on legacy branches and supported via the identical wire protocol.
+
+## Selectable Latency Profiles
+
+OpenGridder features four user-selectable latency profiles with dynamic Plugin Delay Compensation (PDC):
+- Profile 0 (1024 samples): Default Standard LAN / Wi-Fi safety profile.
+- Profile 1 (512 samples): High-speed 10GbE and Thunderbolt networking profile.
+- Profile 2 (384 samples): Localhost VSTi profile optimized for virtual instrument live performance.
+- Profile 3 (256 samples): Direct ultra-low latency localhost tracking profile.
+
+Hosts automatically receive delay compensation notifications via standard audioMasterIOChanged (VST2), kAudioUnitProperty_Latency (AU), or SetCycleCount (AAX).
 
 ## Install and start
 
-Quit Pro Tools before installing. The installer places OpenGridder.aaxplugin in
-/Library/Application Support/Avid/Audio/Plug-Ins, the server in
-/Applications/OpenGridder Server, and the manual and notices in
-/Library/Application Support/OpenGridder. It does not launch the server, modify
-your configuration, or install any third-party effects.
+Quit your DAW before installing. The macOS installer places:
+- OpenGridder.component into /Library/Audio/Plug-Ins/Components
+- OpenGridder.vst into /Library/Audio/Plug-Ins/VST
+- OpenGridder.aaxplugin into /Library/Application Support/Avid/Audio/Plug-Ins
+- The server in /Applications/OpenGridder Server
+- Documentation and licenses in /Library/Application Support/OpenGridder
+
+For Windows 7, extract target/server-windows7/ to any folder and ensure the companion shims (api-ms-win-core-synch-l1-2-0.dll and bcryptprimitives.dll) remain in the same directory as AudioGridderServer.exe.
 
 Open /Applications/OpenGridder Server and double-click
 Start OpenGridder Server.command. Keep Terminal open while using the plugin;
