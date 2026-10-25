@@ -1,0 +1,138 @@
+<?xml version='1.0' encoding='US-ASCII' standalone='yes'?>
+<!-- OpenGridder Pro Tools Control Surface Page Table Definitions -->
+<!-- Supports Focusrite Control|24, Avid C|24, ICON D-Control/D-Command, ProControl, Command|8, and Avid S6/S3 -->
+<PageTables vers='6.4.0.89'>
+	<PageTableLayouts>
+		<Plugin manID='OpGr' prodID='OGfx' plugID='OGS1'>
+			<Desc>OpenGridder Stereo by OpenGrid Studio</Desc>
+			<Layout>OpenGridderLayout</Layout>
+		</Plugin>
+		<Plugin manID='OpGr' prodID='OGfx' plugID='OGM1'>
+			<Desc>OpenGridder Mono by OpenGrid Studio</Desc>
+			<Layout>OpenGridderLayout</Layout>
+		</Plugin>
+		<Plugin manID='OpGr' prodID='OGTs' plugID='OGTb'>
+			<Desc>OpenGridder TDM 1024s LAN</Desc>
+			<Layout>OpenGridderLayout</Layout>
+		</Plugin>
+		<Plugin manID='OpGr' prodID='OGTs' plugID='OGT5'>
+			<Desc>OpenGridder TDM 512s 10GbE</Desc>
+			<Layout>OpenGridderLayout</Layout>
+		</Plugin>
+		<Plugin manID='OpGr' prodID='OGTs' plugID='OGTi'>
+			<Desc>OpenGridder TDM 384s VSTi</Desc>
+			<Layout>OpenGridderLayout</Layout>
+		</Plugin>
+		<Plugin manID='OpGr' prodID='OGTs' plugID='OGT2'>
+			<Desc>OpenGridder TDM 256s Direct</Desc>
+			<Layout>OpenGridderLayout</Layout>
+		</Plugin>
+		<PTLayout name='OpenGridderLayout'>
+			<!-- Focusrite Control|24 & Avid C|24 (24 Rotary Encoders & Scribble Strips) -->
+			<PageTable type='FrTL' pgsz='24'>
+				<Page num='1'>
+					<ID>Master Bypass</ID>
+					<ID>Remote Plugin</ID>
+					<ID>Latency Profile</ID>
+					<ID>Input Gain</ID>
+					<ID>Wet/Dry Mix</ID>
+					<ID>Drive / Sat</ID>
+					<ID>Output Trim</ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+				</Page>
+				<FirstPg cat='0'>1</FirstPg>
+				<FirstPg cat='1'>1</FirstPg>
+				<FirstPg cat='2'>1</FirstPg>
+				<FirstPg cat='4'>1</FirstPg>
+				<FirstPg cat='8'>1</FirstPg>
+				<FirstPg cat='16'>1</FirstPg>
+				<FirstPg cat='32'>1</FirstPg>
+				<FirstPg cat='64'>1</FirstPg>
+				<FirstPg cat='128'>1</FirstPg>
+				<FirstPg cat='256'>1</FirstPg>
+				<FirstPg cat='512'>1</FirstPg>
+				<FirstPg cat='1024'>1</FirstPg>
+				<FirstPg cat='2048'>1</FirstPg>
+			</PageTable>
+			<!-- Digidesign ProControl (16 Encoders & Scribble Strips) -->
+			<PageTable type='PcTL' pgsz='16'>
+				<Page num='1'>
+					<ID>Master Bypass</ID>
+					<ID>Remote Plugin</ID>
+					<ID>Latency Profile</ID>
+					<ID>Input Gain</ID>
+					<ID>Wet/Dry Mix</ID>
+					<ID>Drive / Sat</ID>
+					<ID>Output Trim</ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+					<ID> </ID>
+				</Page>
+				<FirstPg cat='0'>1</FirstPg>
+				<FirstPg cat='1'>1</FirstPg>
+			</PageTable>
+			<!-- Digidesign ICON D-Control / D-Command (8 Channel Strip Encoders) -->
+			<PageTable type='HgTL' pgsz='8'>
+				<Page num='1'>
+					<ID>Master Bypass</ID>
+					<ID>Remote Plugin</ID>
+					<ID>Latency Profile</ID>
+					<ID>Input Gain</ID>
+					<ID>Wet/Dry Mix</ID>
+					<ID>Drive / Sat</ID>
+					<ID>Output Trim</ID>
+					<ID> </ID>
+				</Page>
+				<FirstPg cat='0'>1</FirstPg>
+				<FirstPg cat='1'>1</FirstPg>
+			</PageTable>
+			<!-- Mackie HUI, Command|8, Digi 002/003 (8 Encoders) -->
+			<PageTable type='MkTL' pgsz='8'>
+				<Page num='1'>
+					<ID>Master Bypass</ID>
+					<ID>Remote Plugin</ID>
+					<ID>Latency Profile</ID>
+					<ID>Input Gain</ID>
+					<ID>Wet/Dry Mix</ID>
+					<ID>Drive / Sat</ID>
+					<ID>Output Trim</ID>
+					<ID> </ID>
+				</Page>
+				<FirstPg cat='0'>1</FirstPg>
+				<FirstPg cat='1'>1</FirstPg>
+			</PageTable>
+			<!-- Parameter Ordering & Automation Dialog Box -->
+			<PageTable type='PgTL' pgsz='1'>
+				<Page num='1'><ID>Master Bypass</ID></Page>
+				<Page num='2'><ID>Remote Plugin</ID></Page>
+				<Page num='3'><ID>Latency Profile</ID></Page>
+				<Page num='4'><ID>Input Gain</ID></Page>
+				<Page num='5'><ID>Wet/Dry Mix</ID></Page>
+				<Page num='6'><ID>Drive / Sat</ID></Page>
+				<Page num='7'><ID>Output Trim</ID></Page>
+			</PageTable>
+		</PTLayout>
+	</PageTableLayouts>
+</PageTables>

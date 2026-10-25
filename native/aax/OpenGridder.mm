@@ -342,6 +342,7 @@ AAX_Result GetEffectDescriptions(AAX_ICollection* collection) {
     result = effect->AddProcPtr(reinterpret_cast<void*>(OpenGridderAAXGUI::create), kAAX_ProcPtrID_Create_EffectGUI);
     result = describe(effect, false);
     result = describe(effect, true);
+    result = effect->AddResourceInfo(AAX_eResourceType_PageTable, "OpenGridderPages.xml");
     result = collection->AddEffect("studio.opengrid.OpenGridder.fx", effect);
     result = collection->SetManufacturerName("OpenGrid Studio");
     result = collection->AddPackageName("OpenGridder");

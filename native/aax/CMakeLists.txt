@@ -37,4 +37,5 @@ set_target_properties(OpenGridder PROPERTIES PREFIX "" SUFFIX ""
   LIBRARY_OUTPUT_DIRECTORY "${BUNDLE_DIR}/Contents/MacOS")
 file(MAKE_DIRECTORY "${BUNDLE_DIR}/Contents/Resources")
 configure_file(Info.plist.in "${BUNDLE_DIR}/Contents/Info.plist" @ONLY)
+configure_file(OpenGridderPages.xml "${BUNDLE_DIR}/Contents/Resources/OpenGridderPages.xml" COPYONLY)
 file(WRITE "${BUNDLE_DIR}/Contents/PkgInfo" "TDMwPTul")
