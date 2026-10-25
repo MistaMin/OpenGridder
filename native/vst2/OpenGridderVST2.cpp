@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
+#include <vector>
 
 namespace {
 
@@ -14,7 +15,11 @@ enum {
     kParamBypass = 0,
     kParamSelection = 1,
     kParamLatencyProfile = 2,
-    kNumParams = 3
+    kParamInputGain = 3,
+    kParamWetDryMix = 4,
+    kParamDrive = 5,
+    kParamOutputGain = 6,
+    kNumParams = 7
 };
 
 class OpenGridderVST2 {
@@ -27,6 +32,10 @@ public:
           bypass_(false),
           selection_(0),
           profile_(0),
+          inputGain_(0.5f),
+          wetDryMix_(1.0f),
+          drive_(0.0f),
+          outputGain_(0.5f),
           active_(false)
     {
         std::memset(&effect_, 0, sizeof(AEffect));
@@ -36,16 +45,16 @@ public:
         effect_.setParameter = SetParameter;
         effect_.getParameter = GetParameter;
         effect_.processReplacing = ProcessReplacing;
-        effect_.processDoubleReplacing = nullptr;
+        effect_.processDoubleReplacing = ProcessDoubleReplacing;
 
         effect_.numPrograms = 1;
         effect_.numParams = kNumParams;
         effect_.numInputs = 2;
         effect_.numOutputs = 2;
-        effect_.flags = effFlagsCanReplacing;
+        effect_.flags = effFlagsCanReplacing | effFlagsCanDoubleReplacing | effFlagsProgramChunks;
         effect_.initialDelay = targetLatencyFromProfile(profile_);
         effect_.uniqueID = 0x4F474678; // 'OGFx'
-        effect_.version = 1210;
+        effect_.version = 1350;
         effect_.object = this;
 
         createRust();
@@ -74,6 +83,12 @@ public:
         }
     }
 
+    static void ProcessDoubleReplacing(AEffect* effect, double** inputs, double** outputs, int32_t sampleFrames) {
+        if (effect && effect->object) {
+            static_cast<OpenGridderVST2*>(effect->object)->processDouble(inputs, outputs, sampleFrames);
+        }
+    }
+
     static void SetParameter(AEffect* effect, int32_t index, float parameter) {
         if (effect && effect->object) {
             static_cast<OpenGridderVST2*>(effect->object)->setParam(index, parameter);
@@ -96,12 +111,16 @@ private:
     }
 
     void createRust() {
-        cleanupRust();
+        if (rust_) return;
         uint32_t target = targetLatencyFromProfile(profile_);
-        rust_ = og_native_create(sampleRate_, blockSize_, 2, target);
+        rust_ = og_native_create(sampleRate_, std::max(blockSize_, 8192u), 2, target);
         if (rust_) {
             og_native_bypass(rust_, bypass_);
             og_native_select(rust_, selection_);
+            og_native_set_param(rust_, kParamInputGain, inputGain_);
+            og_native_set_param(rust_, kParamWetDryMix, wetDryMix_);
+            og_native_set_param(rust_, kParamDrive, drive_);
+            og_native_set_param(rust_, kParamOutputGain, outputGain_);
         }
     }
 
@@ -113,34 +132,54 @@ private:
     }
 
     void setParam(int32_t index, float value) {
+        float clamped = std::max(0.0f, std::min(1.0f, value));
         switch (index) {
             case kParamBypass:
-                bypass_ = (value >= 0.5f);
+                bypass_ = (clamped >= 0.5f);
                 if (rust_) og_native_bypass(rust_, bypass_);
                 break;
             case kParamSelection:
-                selection_ = static_cast<uint32_t>(std::max(0.0f, std::min(128.0f, value * 128.0f)));
+                selection_ = static_cast<uint32_t>(std::max(0.0f, std::min(128.0f, clamped * 128.0f)));
                 if (rust_) og_native_select(rust_, selection_);
                 break;
             case kParamLatencyProfile: {
-                profile_ = static_cast<int32_t>(std::max(0.0f, std::min(3.0f, std::round(value * 3.0f))));
+                profile_ = static_cast<int32_t>(std::max(0.0f, std::min(3.0f, std::round(clamped * 3.0f))));
                 uint32_t target = targetLatencyFromProfile(profile_);
                 effect_.initialDelay = target;
                 if (rust_) {
                     og_native_set_transport_latency(rust_, target);
+                    og_native_set_param(rust_, kParamLatencyProfile, clamped);
                 }
-                // Notify host that delay compensation changed (PDC)
                 if (audioMaster_) {
                     audioMaster_(&effect_, audioMasterIOChanged, 0, 0, nullptr, 0.0f);
                 }
                 break;
             }
+            case kParamInputGain:
+                inputGain_ = clamped;
+                if (rust_) og_native_set_param(rust_, kParamInputGain, clamped);
+                break;
+            case kParamWetDryMix:
+                wetDryMix_ = clamped;
+                if (rust_) og_native_set_param(rust_, kParamWetDryMix, clamped);
+                break;
+            case kParamDrive:
+                drive_ = clamped;
+                if (rust_) og_native_set_param(rust_, kParamDrive, clamped);
+                break;
+            case kParamOutputGain:
+                outputGain_ = clamped;
+                if (rust_) og_native_set_param(rust_, kParamOutputGain, clamped);
+                break;
             default:
                 break;
         }
     }
 
     float getParam(int32_t index) const {
+        if (rust_ && index >= kParamInputGain && index <= kParamOutputGain) {
+            return og_native_get_param(rust_, static_cast<uint32_t>(index));
+        }
         switch (index) {
             case kParamBypass:
                 return bypass_ ? 1.0f : 0.0f;
@@ -148,6 +187,14 @@ private:
                 return static_cast<float>(selection_) / 128.0f;
             case kParamLatencyProfile:
                 return static_cast<float>(profile_) / 3.0f;
+            case kParamInputGain:
+                return inputGain_;
+            case kParamWetDryMix:
+                return wetDryMix_;
+            case kParamDrive:
+                return drive_;
+            case kParamOutputGain:
+                return outputGain_;
             default:
                 return 0.0f;
         }
@@ -186,6 +233,37 @@ private:
         }
     }
 
+    void processDouble(double** inputs, double** outputs, int32_t sampleFrames) {
+        if (sampleFrames <= 0 || !outputs) return;
+
+        if (bypass_ || !rust_ || !active_) {
+            for (int ch = 0; ch < 2; ++ch) {
+                if (outputs[ch]) {
+                    if (inputs && inputs[ch]) {
+                        std::memcpy(outputs[ch], inputs[ch], sampleFrames * sizeof(double));
+                    } else {
+                        std::fill_n(outputs[ch], sampleFrames, 0.0);
+                    }
+                }
+            }
+            return;
+        }
+
+        const double* inPtrs[2] = {
+            (inputs && inputs[0]) ? inputs[0] : nullptr,
+            (inputs && inputs[1]) ? inputs[1] : ((inputs && inputs[0]) ? inputs[0] : nullptr)
+        };
+
+        double* outPtrs[2] = { outputs[0], outputs[1] };
+
+        int32_t res = og_native_process_f64(rust_, inPtrs, outPtrs, sampleFrames);
+        if (res != 0) {
+            for (int ch = 0; ch < 2; ++ch) {
+                if (outputs[ch]) std::fill_n(outputs[ch], sampleFrames, 0.0);
+            }
+        }
+    }
+
     intptr_t dispatch(int32_t opcode, int32_t index, intptr_t value, void* ptr, float opt) {
         switch (opcode) {
             case effOpen:
@@ -214,6 +292,10 @@ private:
                     if (index == kParamBypass) std::strncpy(str, "Bypass", 31);
                     else if (index == kParamSelection) std::strncpy(str, "Remote", 31);
                     else if (index == kParamLatencyProfile) std::strncpy(str, "Latency", 31);
+                    else if (index == kParamInputGain) std::strncpy(str, "In Gain", 31);
+                    else if (index == kParamWetDryMix) std::strncpy(str, "Mix", 31);
+                    else if (index == kParamDrive) std::strncpy(str, "Drive", 31);
+                    else if (index == kParamOutputGain) std::strncpy(str, "Out Gain", 31);
                     else str[0] = 0;
                     str[31] = 0;
                 }
@@ -222,6 +304,8 @@ private:
                 if (ptr) {
                     char* str = static_cast<char*>(ptr);
                     if (index == kParamLatencyProfile) std::strncpy(str, "profile", 31);
+                    else if (index == kParamInputGain || index == kParamOutputGain) std::strncpy(str, "dB", 31);
+                    else if (index == kParamWetDryMix || index == kParamDrive) std::strncpy(str, "%", 31);
                     else str[0] = 0;
                     str[31] = 0;
                 }
@@ -238,12 +322,36 @@ private:
                     } else if (index == kParamLatencyProfile) {
                         const char* names[] = {"1024s LAN", "512s 10GbE", "384s VSTi", "256s Direct"};
                         std::snprintf(str, 32, "%s", names[profile_ % 4]);
+                    } else if (index == kParamInputGain || index == kParamOutputGain) {
+                        float db = (getParam(index) * 48.0f) - 24.0f;
+                        std::snprintf(str, 32, "%+.1f", db);
+                    } else if (index == kParamWetDryMix || index == kParamDrive) {
+                        std::snprintf(str, 32, "%.0f", getParam(index) * 100.0f);
                     } else {
                         str[0] = 0;
                     }
                     str[31] = 0;
                 }
                 return 0;
+            case effGetChunk: {
+                if (!ptr || !rust_) return 0;
+                size_t len = og_native_get_state(rust_, nullptr, 0);
+                if (len == 0) return 0;
+                chunkBuffer_.resize(len + 1, 0);
+                size_t written = og_native_get_state(rust_, chunkBuffer_.data(), chunkBuffer_.size());
+                *static_cast<void**>(ptr) = chunkBuffer_.data();
+                return static_cast<intptr_t>(written);
+            }
+            case effSetChunk: {
+                if (!ptr || value <= 0 || !rust_) return 0;
+                og_native_set_state(rust_, static_cast<const uint8_t*>(ptr), static_cast<size_t>(value));
+                bypass_ = (og_native_get_param(rust_, kParamBypass) >= 0.5f);
+                inputGain_ = og_native_get_param(rust_, kParamInputGain);
+                wetDryMix_ = og_native_get_param(rust_, kParamWetDryMix);
+                drive_ = og_native_get_param(rust_, kParamDrive);
+                outputGain_ = og_native_get_param(rust_, kParamOutputGain);
+                return 1;
+            }
             case effGetEffectName:
                 if (ptr) {
                     std::strncpy(static_cast<char*>(ptr), "OpenGridder", 31);
@@ -263,14 +371,15 @@ private:
                 }
                 return 0;
             case effGetVendorVersion:
-                return 1210;
+                return 1350;
             case effGetVstVersion:
                 return 2400;
             case effCanDo:
                 if (ptr) {
                     const char* text = static_cast<const char*>(ptr);
                     if (!std::strcmp(text, "1in1out") || !std::strcmp(text, "2in2out") ||
-                        !std::strcmp(text, "receiveVstTimeInfo") || !std::strcmp(text, "bypass")) {
+                        !std::strcmp(text, "receiveVstTimeInfo") || !std::strcmp(text, "receiveVstEvents") ||
+                        !std::strcmp(text, "receiveVstMidiEvent") || !std::strcmp(text, "bypass")) {
                         return 1;
                     }
                 }
@@ -294,7 +403,12 @@ private:
     bool bypass_;
     uint32_t selection_;
     int32_t profile_;
+    float inputGain_;
+    float wetDryMix_;
+    float drive_;
+    float outputGain_;
     bool active_;
+    std::vector<uint8_t> chunkBuffer_;
 };
 
 } // anonymous namespace

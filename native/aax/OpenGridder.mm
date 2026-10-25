@@ -24,6 +24,10 @@
 namespace {
 constexpr const char* kSelection = "remote_plugin";
 constexpr const char* kLatencyProfile = "latency_profile";
+constexpr const char* kInputGain = "input_gain";
+constexpr const char* kWetDryMix = "wet_dry_mix";
+constexpr const char* kDrive = "drive";
+constexpr const char* kOutputGain = "output_gain";
 constexpr uint32_t kTransportLatency = 256;
 
 double unitValue(double value) {
@@ -90,11 +94,23 @@ public:
         select->SetNumberOfSteps(129);
         select->SetType(AAX_eParameterType_Discrete);
         mParameterManager.AddParameter(select);
-        auto* profile = new AAX_CParameter<int32_t>(kLatencyProfile, AAX_CString("Latency Profile"), 0,
+        auto* profile = new AAX_CParameter<int32_t>(kLatencyProfile, AAX_CString("Latency Profile"), 1,
             AAX_CLinearTaperDelegate<int32_t>(0, 3), AAX_CNumberDisplayDelegate<int32_t>(), false);
         profile->SetNumberOfSteps(4);
         profile->SetType(AAX_eParameterType_Discrete);
         mParameterManager.AddParameter(profile);
+        auto* inGain = new AAX_CParameter<float>(kInputGain, AAX_CString("Input Gain"), 0.0f,
+            AAX_CLinearTaperDelegate<float>(-24.0f, 24.0f), AAX_CNumberDisplayDelegate<float, 1>(), true);
+        mParameterManager.AddParameter(inGain);
+        auto* mix = new AAX_CParameter<float>(kWetDryMix, AAX_CString("Wet/Dry Mix"), 100.0f,
+            AAX_CLinearTaperDelegate<float>(0.0f, 100.0f), AAX_CNumberDisplayDelegate<float, 0>(), true);
+        mParameterManager.AddParameter(mix);
+        auto* drive = new AAX_CParameter<float>(kDrive, AAX_CString("Drive / Sat"), 0.0f,
+            AAX_CLinearTaperDelegate<float>(0.0f, 10.0f), AAX_CNumberDisplayDelegate<float, 1>(), true);
+        mParameterManager.AddParameter(drive);
+        auto* outGain = new AAX_CParameter<float>(kOutputGain, AAX_CString("Output Trim"), 0.0f,
+            AAX_CLinearTaperDelegate<float>(-24.0f, 24.0f), AAX_CNumberDisplayDelegate<float, 1>(), true);
+        mParameterManager.AddParameter(outGain);
         return Controller()->SetSignalLatency(static_cast<int32_t>(transport));
     }
     AAX_Result ResetFieldData(AAX_CFieldIndex field, void* data, uint32_t bytes) const override {
@@ -113,13 +129,12 @@ public:
                 static_cast<uint32_t>(std::lround(unitValue(value) * 128.0)));
             else if (!std::strcmp(id, cDefaultMasterBypassID)) og_native_bypass(instance_.rust, value >= 0.5);
             else if (!std::strcmp(id, kLatencyProfile)) {
-                const auto val = static_cast<uint32_t>(std::lround(unitValue(value) * 3.0));
-                uint32_t targetLatency = 1024;
-                if (val == 1) targetLatency = 512;
-                else if (val == 2) targetLatency = 384;
-                else if (val == 3) targetLatency = 256;
-                og_native_set_transport_latency(instance_.rust, targetLatency);
+                og_native_set_param(instance_.rust, 2, static_cast<float>(unitValue(value)));
             }
+            else if (!std::strcmp(id, kInputGain)) og_native_set_param(instance_.rust, 3, static_cast<float>(unitValue(value)));
+            else if (!std::strcmp(id, kWetDryMix)) og_native_set_param(instance_.rust, 4, static_cast<float>(unitValue(value)));
+            else if (!std::strcmp(id, kDrive)) og_native_set_param(instance_.rust, 5, static_cast<float>(unitValue(value)));
+            else if (!std::strcmp(id, kOutputGain)) og_native_set_param(instance_.rust, 6, static_cast<float>(unitValue(value)));
         }
         return result;
     }
@@ -208,8 +223,9 @@ public:
 
     AAX_Result GetViewSize(AAX_Point* oViewSize) const override {
         if (oViewSize) {
-            oViewSize->vert = 420.0f;
-            oViewSize->horz = 720.0f;
+            NSSize sz = mEditorView ? [mEditorView preferredViewSize] : NSMakeSize(864.0, 420.0);
+            oViewSize->vert = static_cast<float>(sz.height);
+            oViewSize->horz = static_cast<float>(sz.width);
         }
         return AAX_SUCCESS;
     }
@@ -218,7 +234,7 @@ public:
         if (!GetViewContainer()) return;
         if (GetViewContainer()->GetType() == AAX_eViewContainer_Type_NSView) {
             NSView* parentView = (__bridge NSView*)GetViewContainer()->GetPtr();
-            NSRect frame = NSMakeRect(0, 0, 720, 420);
+            NSRect frame = NSMakeRect(0, 0, 864, 420);
             mEditorView = [[OpenGridderAAXEditorView alloc] initWithFrame:frame];
             mEditorView.rustProvider = ^NativePlugin* {
                 auto* p = static_cast<Parameters*>(GetEffectParameters());
@@ -235,6 +251,14 @@ public:
                         p->SetParameterNormalizedValue(cDefaultMasterBypassID, val);
                     } else if (paramId == 1) {
                         p->SetParameterNormalizedValue(kSelection, val);
+                    } else if (paramId == 3) {
+                        p->SetParameterNormalizedValue(kInputGain, val);
+                    } else if (paramId == 4) {
+                        p->SetParameterNormalizedValue(kWetDryMix, val);
+                    } else if (paramId == 5) {
+                        p->SetParameterNormalizedValue(kDrive, val);
+                    } else if (paramId == 6) {
+                        p->SetParameterNormalizedValue(kOutputGain, val);
                     }
                 }
             };
@@ -244,8 +268,16 @@ public:
                     p->SetParameterNormalizedValue(kLatencyProfile, static_cast<double>(newProfile) / 3.0);
                 }
             };
+            OpenGridderAAXGUI* selfGui = this;
+            mEditorView.onSizeChanged = ^(CGFloat newW, CGFloat newH) {
+                if (selfGui->GetViewContainer()) {
+                    AAX_Point pt(static_cast<float>(newH), static_cast<float>(newW));
+                    selfGui->GetViewContainer()->SetViewSize(pt);
+                }
+            };
             [parentView addSubview:mEditorView];
-            AAX_Point size(420.0f, 720.0f);
+            NSSize initSz = [mEditorView preferredViewSize];
+            AAX_Point size(static_cast<float>(initSz.height), static_cast<float>(initSz.width));
             GetViewContainer()->SetViewSize(size);
         }
     }

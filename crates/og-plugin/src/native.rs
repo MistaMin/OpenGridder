@@ -3,23 +3,54 @@
 //! and reads/writes a timestamped output timeline; it never waits for the worker.
 use crate::spsc::{self, Consumer, Producer};
 use crate::{PluginMode, PluginProcessor};
-use og_common::message::PositionInfo;
+use og_common::message::{MidiEvent, PositionInfo};
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
-use std::ffi::c_char;
+use std::ffi::{c_char, CStr};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct OgMidiEvent {
+    pub sample_offset: i32,
+    pub len: u8,
+    pub data: [u8; 3],
+}
 
 pub enum NativeCommand {
     LoadPlugin { available_idx: usize, layout: String },
     UnloadPlugin { loaded_idx: usize },
     SetPluginOversampling { loaded_idx: usize, factor: i32 },
     SetPluginBypassed { loaded_idx: usize, bypassed: bool },
+    ExchangePlugins { idx_a: usize, idx_b: usize },
+    SetPreset { loaded_idx: usize, preset_idx: usize },
+    SetPluginParam { loaded_idx: usize, param_idx: i32, val: f32 },
+    StoreA,
+    StoreB,
+    ToggleAB,
+    ReconnectServer { host: String, port: u16 },
+    FetchState { reply: mpsc::SyncSender<Vec<u8>> },
+    RestoreState { data: Vec<u8> },
     EditPlugin { loaded_idx: usize, x: i32, y: i32 },
     HidePlugin,
+    Mouse {
+        ev_type: u8,
+        x: f32,
+        y: f32,
+        shift: bool,
+        ctrl: bool,
+        alt: bool,
+        delta_x: f32,
+        delta_y: f32,
+        is_smooth: bool,
+    },
+    Key {
+        key_codes: Vec<u16>,
+    },
 }
 
 #[derive(Clone, Default)]
@@ -32,6 +63,14 @@ pub struct ServerPluginMeta {
 }
 
 #[derive(Clone, Default)]
+pub struct LoadedPluginParamMeta {
+    pub idx: i32,
+    pub name: String,
+    pub default_value: f32,
+    pub current_value: f32,
+}
+
+#[derive(Clone, Default)]
 pub struct LoadedPluginMeta {
     pub id: String,
     pub name: String,
@@ -39,9 +78,12 @@ pub struct LoadedPluginMeta {
     pub oversampling_factor: i32,
     pub latency: i32,
     pub ok: bool,
+    pub presets: Vec<String>,
+    pub params: Vec<LoadedPluginParamMeta>,
 }
 
 const POOL: usize = 8;
+const MAX_MIDI_EVENTS: usize = 256;
 const MAX_PLUGIN_LATENCY: usize = 65536;
 const MAX_TRANSPORT_LATENCY: usize = 8192;
 const TRANSPORT_BITS: u32 = 14;
@@ -67,6 +109,8 @@ struct Chunk {
     start: u64,
     frames: usize,
     audio: Vec<Vec<f32>>,
+    midi_count: usize,
+    midi: [OgMidiEvent; MAX_MIDI_EVENTS],
     valid: bool,
     selection: u32,
     latency: u32,
@@ -76,6 +120,15 @@ struct Shared {
     stop: AtomicBool,
     selected: AtomicU32,
     bypass: AtomicBool,
+    profile: AtomicU32,
+    input_gain: AtomicU32,
+    wet_dry_mix: AtomicU32,
+    drive: AtomicU32,
+    output_gain: AtomicU32,
+    automation_slots: [AtomicU32; 16],
+    meter_l: AtomicU32,
+    meter_r: AtomicU32,
+    active_is_b: AtomicBool,
     active_latency: AtomicU32,
     requested_latency: AtomicU32,
     processed: AtomicU32,
@@ -84,8 +137,13 @@ struct Shared {
     names: Mutex<Vec<String>>,
     available_plugins: Mutex<Vec<ServerPluginMeta>>,
     loaded_plugins: Mutex<Vec<LoadedPluginMeta>>,
+    active_server: Mutex<String>,
+    discovered_servers: Mutex<Vec<String>>,
+    cached_state: Mutex<Vec<u8>>,
     commands: Mutex<VecDeque<NativeCommand>>,
     chain_epoch: AtomicU32,
+    screen_frame: Arc<parking_lot::Mutex<og_client::ScreenFrame>>,
+    is_editor_open: AtomicBool,
 }
 
 impl Shared {
@@ -100,6 +158,54 @@ impl Shared {
                     ))
                 });
     }
+
+    fn build_full_state(&self, processor: &mut PluginProcessor) -> Vec<u8> {
+        let raw = processor.get_state_information();
+        let mut root: serde_json::Value = serde_json::from_slice(&raw)
+            .unwrap_or_else(|_| serde_json::json!({ "version": 7, "loadedPlugins": [] }));
+        if let Some(obj) = root.as_object_mut() {
+            obj.insert("bypass".into(), serde_json::json!(self.bypass.load(Ordering::Acquire)));
+            obj.insert("selectedPlugin".into(), serde_json::json!(self.selected.load(Ordering::Acquire)));
+            obj.insert("latencyProfile".into(), serde_json::json!(self.profile.load(Ordering::Acquire)));
+            obj.insert("inputGain".into(), serde_json::json!(f32::from_bits(self.input_gain.load(Ordering::Acquire))));
+            obj.insert("wetDryMix".into(), serde_json::json!(f32::from_bits(self.wet_dry_mix.load(Ordering::Acquire))));
+            obj.insert("drive".into(), serde_json::json!(f32::from_bits(self.drive.load(Ordering::Acquire))));
+            obj.insert("outputGain".into(), serde_json::json!(f32::from_bits(self.output_gain.load(Ordering::Acquire))));
+        }
+        let bytes = serde_json::to_vec(&root).unwrap_or(raw);
+        *self.cached_state.lock().unwrap_or_else(|e| e.into_inner()) = bytes.clone();
+        bytes
+    }
+
+    fn sync_loaded_meta(&self, processor: &PluginProcessor) {
+        *self.loaded_plugins.lock().unwrap_or_else(|e| e.into_inner()) = processor
+            .loaded_plugins
+            .iter()
+            .map(|p| {
+                let mut params: Vec<LoadedPluginParamMeta> = p
+                    .params
+                    .values()
+                    .map(|prm| LoadedPluginParamMeta {
+                        idx: prm.idx,
+                        name: prm.name.clone(),
+                        default_value: prm.default_value,
+                        current_value: prm.current_value,
+                    })
+                    .collect();
+                params.sort_by_key(|prm| prm.idx);
+                LoadedPluginMeta {
+                    id: p.id.clone(),
+                    name: p.name.clone(),
+                    bypassed: p.bypassed,
+                    oversampling_factor: p.oversampling_factor,
+                    latency: p.latency,
+                    ok: p.ok,
+                    presets: p.presets.clone(),
+                    params,
+                }
+            })
+            .collect();
+    }
 }
 
 struct Callback {
@@ -111,6 +217,8 @@ struct Callback {
     wet: Vec<Vec<f32>>,
     dry_tags: Vec<u64>,
     wet_tags: Vec<u64>,
+    pending_midi_count: usize,
+    pending_midi: [OgMidiEvent; MAX_MIDI_EVENTS],
     selection: u32,
     plugin_latency: usize,
     transport_latency: usize,
@@ -142,16 +250,31 @@ impl NativePlugin {
                     start: 0,
                     frames: 0,
                     audio: vec![vec![0.0; max_frames]; channels],
+                    midi_count: 0,
+                    midi: [OgMidiEvent::default(); MAX_MIDI_EVENTS],
                     valid: false,
                     selection: 0,
                     latency: 0,
                 })
             })
             .collect();
+        let initial_srv = endpoint
+            .as_ref()
+            .map(|(h, p)| format!("{}:{}", h, p))
+            .unwrap_or_else(|| "127.0.0.1:55056".to_string());
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
             selected: AtomicU32::new(0),
             bypass: AtomicBool::new(false),
+            profile: AtomicU32::new(1),
+            input_gain: AtomicU32::new(0.5f32.to_bits()),
+            wet_dry_mix: AtomicU32::new(1.0f32.to_bits()),
+            drive: AtomicU32::new(0.0f32.to_bits()),
+            output_gain: AtomicU32::new(0.5f32.to_bits()),
+            automation_slots: std::array::from_fn(|_| AtomicU32::new(0.0f32.to_bits())),
+            meter_l: AtomicU32::new(0.0f32.to_bits()),
+            meter_r: AtomicU32::new(0.0f32.to_bits()),
+            active_is_b: AtomicBool::new(false),
             active_latency: AtomicU32::new(latency_pair(latency as u32, 0)),
             requested_latency: AtomicU32::new(latency_pair(latency as u32, 0)),
             processed: AtomicU32::new(0),
@@ -160,8 +283,13 @@ impl NativePlugin {
             names: Mutex::new(Vec::new()),
             available_plugins: Mutex::new(Vec::new()),
             loaded_plugins: Mutex::new(Vec::new()),
+            active_server: Mutex::new(initial_srv.clone()),
+            discovered_servers: Mutex::new(vec![initial_srv]),
+            cached_state: Mutex::new(Vec::new()),
             commands: Mutex::new(VecDeque::new()),
             chain_epoch: AtomicU32::new(0),
+            screen_frame: Arc::new(parking_lot::Mutex::new(og_client::ScreenFrame::default())),
+            is_editor_open: AtomicBool::new(false),
         });
         let capacity = MAX_PLUGIN_LATENCY + MAX_TRANSPORT_LATENCY + max_frames + 1;
         let mut this = Self {
@@ -177,31 +305,37 @@ impl NativePlugin {
                 wet: vec![vec![0.0; capacity]; channels],
                 dry_tags: vec![EMPTY; capacity],
                 wet_tags: vec![EMPTY; capacity],
+                pending_midi_count: 0,
+                pending_midi: [OgMidiEvent::default(); MAX_MIDI_EVENTS],
                 selection: 0,
                 plugin_latency: 0,
                 transport_latency: latency,
             }),
             worker: None,
         };
-        if let Some((host, port)) = endpoint {
+        if let Some((mut host, mut port)) = endpoint {
             this.worker = Some(
                 thread::Builder::new()
                     .name("OpenGridder native IO".into())
                     .spawn(move || {
                         let mut processor = PluginProcessor::new(PluginMode::Fx);
-                        processor.prepare_to_play(rate, max_frames);
+                        processor.prepare_to_play(rate, max_frames.min(1024));
                         let mut cfg = processor.client.config();
                         cfg.channels_in = channels as i32;
                         cfg.channels_out = channels as i32;
                         cfg.active_channels = (1 << channels) - 1;
                         processor.client.set_config(cfg);
+                        processor.client.set_screen_frame_store(shared.screen_frame.clone());
+                        let _ = shared.build_full_state(&mut processor);
                         let mut retry = Instant::now();
                         let mut applied = u32::MAX;
+                        let mut stream_errors = 0;
                         while !shared.stop.load(Ordering::Acquire) {
                             if !processor.client.is_ready() && Instant::now() >= retry {
                                 shared.status.store(1, Ordering::Release);
                                 match processor.connect_to_server(&host, port) {
                                     Ok(_) => {
+                                        processor.client.set_screen_frame_store(shared.screen_frame.clone());
                                         let srv_plugins = processor.client.available_plugins();
                                         eprintln!("[OpenGridder native IO] Connected to {}:{}! Available plugins: {}", host, port, srv_plugins.len());
                                         *shared.names.lock().unwrap_or_else(|e| e.into_inner()) =
@@ -236,9 +370,14 @@ impl NativePlugin {
                                     NativeCommand::LoadPlugin { available_idx, layout } => {
                                         let list = processor.client.available_plugins();
                                         if let Some(desc) = list.get(available_idx) {
-                                            if processor.load_plugin(desc, &layout).is_ok() {
-                                                shared.request_plugin_latency(processor.latency_samples.max(0) as u32);
-                                                chain_changed = true;
+                                            match processor.load_plugin(desc, &layout) {
+                                                Ok(_) => {
+                                                    shared.request_plugin_latency(processor.latency_samples.max(0) as u32);
+                                                    chain_changed = true;
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("[OpenGridder native IO] load_plugin({:?}) failed: {}", desc.name, e);
+                                                }
                                             }
                                         }
                                     }
@@ -262,11 +401,138 @@ impl NativePlugin {
                                         }
                                         chain_changed = true;
                                     }
+                                    NativeCommand::ExchangePlugins { idx_a, idx_b } => {
+                                        if processor.exchange_plugins(idx_a, idx_b).is_ok() {
+                                            chain_changed = true;
+                                        }
+                                    }
+                                    NativeCommand::SetPreset { loaded_idx, preset_idx } => {
+                                        let _ = processor.client.set_preset(loaded_idx as i32, preset_idx as i32);
+                                        chain_changed = true;
+                                    }
+                                    NativeCommand::SetPluginParam { loaded_idx, param_idx, val } => {
+                                        if let Some(lp) = processor.loaded_plugins.get_mut(loaded_idx) {
+                                            if let Some(prm) = lp.params.get_mut(&param_idx) {
+                                                prm.current_value = val;
+                                            }
+                                        }
+                                        let _ = processor.client.set_parameter_value(loaded_idx as i32, param_idx, val);
+                                        chain_changed = true;
+                                    }
+                                    NativeCommand::StoreA => {
+                                        processor.settings_a = String::from_utf8_lossy(&shared.build_full_state(&mut processor)).into_owned();
+                                    }
+                                    NativeCommand::StoreB => {
+                                        processor.settings_b = String::from_utf8_lossy(&shared.build_full_state(&mut processor)).into_owned();
+                                    }
+                                    NativeCommand::ToggleAB => {
+                                        if processor.active_is_b {
+                                            if processor.settings_b.is_empty() {
+                                                processor.settings_b = String::from_utf8_lossy(&shared.build_full_state(&mut processor)).into_owned();
+                                            }
+                                            processor.active_is_b = false;
+                                            let target = processor.settings_a.clone();
+                                            if !target.is_empty() {
+                                                let _ = processor.set_state_information(target.as_bytes());
+                                                if let Ok(j) = serde_json::from_str::<serde_json::Value>(&target) {
+                                                    if let Some(v) = j.get("inputGain").and_then(|v| v.as_f64()) {
+                                                        shared.input_gain.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
+                                                    }
+                                                    if let Some(v) = j.get("wetDryMix").and_then(|v| v.as_f64()) {
+                                                        shared.wet_dry_mix.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
+                                                    }
+                                                    if let Some(v) = j.get("drive").and_then(|v| v.as_f64()) {
+                                                        shared.drive.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
+                                                    }
+                                                    if let Some(v) = j.get("outputGain").and_then(|v| v.as_f64()) {
+                                                        shared.output_gain.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            if processor.settings_a.is_empty() {
+                                                processor.settings_a = String::from_utf8_lossy(&shared.build_full_state(&mut processor)).into_owned();
+                                            }
+                                            processor.active_is_b = true;
+                                            let target = processor.settings_b.clone();
+                                            if !target.is_empty() {
+                                                let _ = processor.set_state_information(target.as_bytes());
+                                                if let Ok(j) = serde_json::from_str::<serde_json::Value>(&target) {
+                                                    if let Some(v) = j.get("inputGain").and_then(|v| v.as_f64()) {
+                                                        shared.input_gain.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
+                                                    }
+                                                    if let Some(v) = j.get("wetDryMix").and_then(|v| v.as_f64()) {
+                                                        shared.wet_dry_mix.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
+                                                    }
+                                                    if let Some(v) = j.get("drive").and_then(|v| v.as_f64()) {
+                                                        shared.drive.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
+                                                    }
+                                                    if let Some(v) = j.get("outputGain").and_then(|v| v.as_f64()) {
+                                                        shared.output_gain.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        shared.active_is_b.store(processor.active_is_b, Ordering::Release);
+                                        shared.request_plugin_latency(processor.latency_samples.max(0) as u32);
+                                        chain_changed = true;
+                                    }
+                                    NativeCommand::ReconnectServer { host: new_host, port: new_port } => {
+                                        processor.client.disconnect();
+                                        host = new_host;
+                                        port = new_port;
+                                        processor.active_server = format!("{}:{}", host, port);
+                                        *shared.active_server.lock().unwrap_or_else(|e| e.into_inner()) = processor.active_server.clone();
+                                        retry = Instant::now();
+                                        shared.status.store(1, Ordering::Release);
+                                    }
+                                    NativeCommand::FetchState { reply } => {
+                                        let bytes = shared.build_full_state(&mut processor);
+                                        let _ = reply.send(bytes);
+                                    }
+                                    NativeCommand::RestoreState { data } => {
+                                        if processor.set_state_information(&data).is_ok() {
+                                            shared.request_plugin_latency(processor.latency_samples.max(0) as u32);
+                                            chain_changed = true;
+                                        }
+                                    }
                                     NativeCommand::EditPlugin { loaded_idx, x, y } => {
-                                        let _ = processor.client.edit_plugin(loaded_idx as i32, x, y);
+                                        eprintln!("[OpenGridder native IO] executing EditPlugin idx={} x={} y={}", loaded_idx, x, y);
+                                        shared.is_editor_open.store(true, Ordering::Release);
+                                        match processor.client.edit_plugin(loaded_idx as i32, x, y) {
+                                            Ok(_) => eprintln!("[OpenGridder native IO] client.edit_plugin sent successfully!"),
+                                            Err(e) => eprintln!("[OpenGridder native IO] client.edit_plugin failed: {}", e),
+                                        }
                                     }
                                     NativeCommand::HidePlugin => {
+                                        shared.is_editor_open.store(false, Ordering::Release);
                                         let _ = processor.client.hide_plugin();
+                                    }
+                                    NativeCommand::Mouse {
+                                        ev_type,
+                                        x,
+                                        y,
+                                        shift,
+                                        ctrl,
+                                        alt,
+                                        delta_x,
+                                        delta_y,
+                                        is_smooth,
+                                    } => {
+                                        let _ = processor.client.send_mouse_event(
+                                            og_common::key_and_mouse::MouseEvType::from_u8(ev_type),
+                                            x,
+                                            y,
+                                            shift,
+                                            ctrl,
+                                            alt,
+                                            delta_x,
+                                            delta_y,
+                                            is_smooth,
+                                        );
+                                    }
+                                    NativeCommand::Key { key_codes } => {
+                                        let _ = processor.client.send_key_event(&key_codes);
                                     }
                                 }
                             }
@@ -296,15 +562,8 @@ impl NativePlugin {
 
                             if chain_changed {
                                 shared.chain_epoch.fetch_add(1, Ordering::Release);
-                                *shared.loaded_plugins.lock().unwrap_or_else(|e| e.into_inner()) =
-                                    processor.loaded_plugins.iter().map(|p| LoadedPluginMeta {
-                                        id: p.id.clone(),
-                                        name: p.name.clone(),
-                                        bypassed: p.bypassed,
-                                        oversampling_factor: p.oversampling_factor,
-                                        latency: p.latency,
-                                        ok: p.ok,
-                                    }).collect();
+                                shared.sync_loaded_meta(&processor);
+                                let _ = shared.build_full_state(&mut processor);
                                 shared.status.store(
                                     if processor.loaded_plugins.is_empty() { 2 } else { 3 },
                                     Ordering::Release,
@@ -319,7 +578,17 @@ impl NativePlugin {
                                     for channel in &mut chunk.audio {
                                         channel.truncate(chunk.frames);
                                     }
-                                    let mut midi = Vec::new();
+                                    let mut midi = Vec::with_capacity(chunk.midi_count);
+                                    for i in 0..chunk.midi_count {
+                                        let ev = &chunk.midi[i];
+                                        let n = (ev.len as usize).min(3);
+                                        if n > 0 {
+                                            midi.push(MidiEvent {
+                                                sample_number: ev.sample_offset,
+                                                data: ev.data[..n].to_vec(),
+                                            });
+                                        }
+                                    }
                                     match processor.client.process_audio_f32(
                                         &mut chunk.audio,
                                         &mut midi,
@@ -330,21 +599,25 @@ impl NativePlugin {
                                                 && (delay as usize) <= MAX_PLUGIN_LATENCY =>
                                         {
                                             shared.request_plugin_latency(delay as u32);
-                                            let active =
-                                                shared.active_latency.load(Ordering::Acquire);
-                                            chunk.valid = plugin_part(active) == delay as u32
-                                                && chunk.latency == active;
+                                            chunk.valid = true;
                                             shared.processed.fetch_add(1, Ordering::Relaxed);
+                                            stream_errors = 0;
                                         }
                                         _ => {
-                                            processor.client.disconnect();
-                                            shared.status.store(0, Ordering::Release);
+                                            stream_errors += 1;
+                                            if stream_errors >= 5 {
+                                                eprintln!("[OpenGridder native IO] 5 consecutive audio stream errors, resetting client socket");
+                                                processor.client.disconnect();
+                                                shared.status.store(0, Ordering::Release);
+                                                stream_errors = 0;
+                                            }
                                         }
                                     }
                                     for channel in &mut chunk.audio {
                                         channel.resize(max_frames, 0.0);
                                     }
                                 }
+                                chunk.midi_count = 0;
                                 // A pool slot is always in exactly one of the queues or endpoint
                                 // owners. Therefore a POOL-sized return queue has room here.
                                 if outgoing.push(chunk).is_err() {
@@ -395,6 +668,27 @@ impl NativePlugin {
                 Ordering::Acquire,
             );
         }
+
+        // Local console DSP parameters (lock-free atomics)
+        let in_norm = f32::from_bits(self.shared.input_gain.load(Ordering::Relaxed));
+        let mix_norm = f32::from_bits(self.shared.wet_dry_mix.load(Ordering::Relaxed)).clamp(0.0, 1.0);
+        let drive_norm = f32::from_bits(self.shared.drive.load(Ordering::Relaxed)).clamp(0.0, 1.0);
+        let out_norm = f32::from_bits(self.shared.output_gain.load(Ordering::Relaxed));
+
+        let in_lin = if (in_norm - 0.5).abs() < 1e-6 {
+            1.0f32
+        } else {
+            10.0f32.powf((in_norm - 0.5) * 48.0 / 20.0)
+        };
+        let out_lin = if (out_norm - 0.5).abs() < 1e-6 {
+            1.0f32
+        } else {
+            10.0f32.powf((out_norm - 0.5) * 48.0 / 20.0)
+        };
+        let has_drive = drive_norm > 1e-5;
+        let drive_gain = 1.0f32 + drive_norm * 9.0f32;
+        let drive_norm_div = if has_drive { drive_gain.tanh().max(1e-5) } else { 1.0f32 };
+
         let active = self.shared.active_latency.load(Ordering::Acquire);
         let plugin_delay = plugin_part(active) as usize;
         let transport_delay = transport_part(active) as usize;
@@ -412,9 +706,11 @@ impl NativePlugin {
             let Some(chunk) = cb.receive.pop() else {
                 break;
             };
-            if chunk.valid && (chunk.selection == selection || selection == 0) && chunk.latency == active {
+            if chunk.valid && (chunk.selection == selection || selection == 0) {
+                let chunk_transport = transport_part(chunk.latency) as u64;
+                let effective_transport = if chunk_transport > 0 { chunk_transport } else { transport_delay as u64 };
                 for n in 0..chunk.frames {
-                    let target = chunk.start + n as u64 + transport_delay as u64;
+                    let target = chunk.start + n as u64 + effective_transport;
                     if target >= cb.clock && target < cb.clock + size as u64 {
                         let index = target as usize % size;
                         for ch in 0..self.channels {
@@ -431,8 +727,20 @@ impl NativePlugin {
             chunk.frames = frames;
             chunk.selection = selection;
             chunk.latency = active;
+            chunk.midi_count = cb.pending_midi_count;
+            if cb.pending_midi_count > 0 {
+                chunk.midi[..cb.pending_midi_count]
+                    .copy_from_slice(&cb.pending_midi[..cb.pending_midi_count]);
+                cb.pending_midi_count = 0;
+            }
             for ch in 0..self.channels {
-                std::ptr::copy_nonoverlapping(input[ch], chunk.audio[ch].as_mut_ptr(), frames);
+                if (in_lin - 1.0).abs() < 1e-6 {
+                    std::ptr::copy_nonoverlapping(input[ch], chunk.audio[ch].as_mut_ptr(), frames);
+                } else {
+                    for n in 0..frames {
+                        chunk.audio[ch][n] = *input[ch].add(n) * in_lin;
+                    }
+                }
             }
             if let Err(chunk) = cb.send.push(chunk) {
                 cb.free.push(chunk);
@@ -440,30 +748,60 @@ impl NativePlugin {
         }
         let bypass = self.shared.bypass.load(Ordering::Acquire);
         let mut missed = false;
+        let mut peak_l = 0.0f32;
+        let mut peak_r = 0.0f32;
         for n in 0..frames {
             let now = cb.clock + n as u64;
             let target = now + (transport_delay + plugin_delay) as u64;
             let write = target as usize % size;
             let read = now as usize % size;
             for ch in 0..self.channels {
-                cb.dry[ch][write] = *input[ch].add(n);
+                cb.dry[ch][write] = *input[ch].add(n) * in_lin;
             }
             cb.dry_tags[write] = target;
             let wet = !bypass && cb.wet_tags[read] == now;
             let dry = cb.dry_tags[read] == now;
             for ch in 0..self.channels {
-                *output[ch].add(n) = if wet {
-                    cb.wet[ch][read]
+                let mut sample = if bypass {
+                    if dry { cb.dry[ch][read] } else { 0.0 }
+                } else if wet {
+                    let w = cb.wet[ch][read];
+                    if (mix_norm - 1.0).abs() < 1e-6 || !dry {
+                        w
+                    } else {
+                        let d = cb.dry[ch][read];
+                        d * (1.0 - mix_norm) + w * mix_norm
+                    }
                 } else if dry {
                     cb.dry[ch][read]
                 } else {
                     0.0
                 };
+                if !bypass {
+                    if has_drive {
+                        sample = (sample * drive_gain).tanh() / drive_norm_div;
+                    }
+                    if (out_lin - 1.0).abs() >= 1e-6 {
+                        sample *= out_lin;
+                    }
+                }
+                *output[ch].add(n) = sample;
+                let a = sample.abs();
+                if ch == 0 {
+                    if a > peak_l { peak_l = a; }
+                } else if a > peak_r {
+                    peak_r = a;
+                }
+            }
+            if self.channels == 1 {
+                peak_r = peak_l;
             }
             missed |= !wet && !bypass;
             cb.wet_tags[read] = EMPTY;
             cb.dry_tags[read] = EMPTY;
         }
+        self.shared.meter_l.store(peak_l.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        self.shared.meter_r.store(peak_r.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
         cb.clock += frames as u64;
         if missed && self.shared.status.load(Ordering::Acquire) == 3 {
             self.shared.underruns.fetch_add(1, Ordering::Relaxed);
@@ -843,6 +1181,601 @@ pub unsafe extern "C" fn og_native_hide_plugin(handle: *mut NativePlugin) -> boo
     let mut q = p.shared.commands.lock().unwrap_or_else(|e| e.into_inner());
     q.push_back(NativeCommand::HidePlugin);
     true
+}
+
+/// # Safety
+/// Buffer pointers must be valid if not null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_get_screen_info(
+    handle: *mut NativePlugin,
+    width: *mut u32,
+    height: *mut u32,
+    scale: *mut f64,
+    frame_id: *mut u64,
+) -> bool {
+    let Some(p) = handle.as_ref() else { return false; };
+    let guard = p.shared.screen_frame.lock();
+    if guard.width == 0 || guard.height == 0 || guard.rgba.is_empty() {
+        return false;
+    }
+    if !width.is_null() { *width = guard.width; }
+    if !height.is_null() { *height = guard.height; }
+    if !scale.is_null() { *scale = guard.scale; }
+    if !frame_id.is_null() { *frame_id = guard.frame_id; }
+    true
+}
+
+/// # Safety
+/// Dest pointer must be writable for at least dest_cap bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_copy_screen_frame(
+    handle: *mut NativePlugin,
+    dest: *mut u8,
+    dest_cap: u32,
+    frame_id: *mut u64,
+) -> bool {
+    if dest.is_null() || dest_cap == 0 { return false; }
+    let Some(p) = handle.as_ref() else { return false; };
+    let guard = p.shared.screen_frame.lock();
+    if guard.rgba.is_empty() { return false; }
+    let count = guard.rgba.len().min(dest_cap as usize);
+    std::ptr::copy_nonoverlapping(guard.rgba.as_ptr(), dest, count);
+    if !frame_id.is_null() { *frame_id = guard.frame_id; }
+    true
+}
+
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_send_mouse(
+    handle: *mut NativePlugin,
+    ev_type: u8,
+    x: f32,
+    y: f32,
+    shift: bool,
+    ctrl: bool,
+    alt: bool,
+    delta_x: f32,
+    delta_y: f32,
+    is_smooth: bool,
+) {
+    if let Some(p) = handle.as_ref() {
+        let mut q = p.shared.commands.lock().unwrap_or_else(|e| e.into_inner());
+        q.push_back(NativeCommand::Mouse {
+            ev_type,
+            x,
+            y,
+            shift,
+            ctrl,
+            alt,
+            delta_x,
+            delta_y,
+            is_smooth,
+        });
+    }
+}
+
+/// # Safety
+/// Keys pointer must be valid for count u16 elements.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_send_key(
+    handle: *mut NativePlugin,
+    keys: *const u16,
+    count: u32,
+) {
+    if keys.is_null() || count == 0 { return; }
+    if let Some(p) = handle.as_ref() {
+        let key_slice = std::slice::from_raw_parts(keys, count as usize);
+        let mut q = p.shared.commands.lock().unwrap_or_else(|e| e.into_inner());
+        q.push_back(NativeCommand::Key {
+            key_codes: key_slice.to_vec(),
+        });
+    }
+}
+
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_is_editor_open(handle: *mut NativePlugin) -> bool {
+    handle
+        .as_ref()
+        .map(|p| p.shared.is_editor_open.load(Ordering::Acquire))
+        .unwrap_or(false)
+}
+
+/// Set a normalized parameter (`0.0..=1.0`).
+/// param_id: 0=Bypass, 1=Selection, 2=LatencyProfile, 3=InputGain, 4=WetDryMix, 5=Drive, 6=OutputGain, 7..22=AutomationSlots 0..15.
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_set_param(handle: *mut NativePlugin, param_id: u32, norm_val: f32) {
+    let Some(p) = handle.as_ref() else { return };
+    if !norm_val.is_finite() { return; }
+    let clamped = norm_val.clamp(0.0, 1.0);
+    match param_id {
+        0 => p.shared.bypass.store(clamped >= 0.5, Ordering::Release),
+        1 => p.shared.selected.store((clamped * 128.0).round() as u32, Ordering::Release),
+        2 => {
+            let prof = ((clamped * 3.0).round() as u32).min(3);
+            p.shared.profile.store(prof, Ordering::Release);
+            let target = match prof {
+                0 => 128,
+                1 => 256,
+                2 => 512,
+                _ => 1024,
+            };
+            og_native_set_transport_latency(handle, target);
+        }
+        3 => p.shared.input_gain.store(clamped.to_bits(), Ordering::Release),
+        4 => p.shared.wet_dry_mix.store(clamped.to_bits(), Ordering::Release),
+        5 => p.shared.drive.store(clamped.to_bits(), Ordering::Release),
+        6 => p.shared.output_gain.store(clamped.to_bits(), Ordering::Release),
+        7..=22 => {
+            let slot = (param_id - 7) as usize;
+            p.shared.automation_slots[slot].store(clamped.to_bits(), Ordering::Release);
+            let mut q = p.shared.commands.lock().unwrap_or_else(|e| e.into_inner());
+            q.push_back(NativeCommand::SetPluginParam {
+                loaded_idx: 0,
+                param_idx: slot as i32,
+                val: clamped,
+            });
+        }
+        _ => {}
+    }
+}
+
+/// Get a normalized parameter (`0.0..=1.0`).
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_get_param(handle: *mut NativePlugin, param_id: u32) -> f32 {
+    let Some(p) = handle.as_ref() else { return 0.0 };
+    match param_id {
+        0 => if p.shared.bypass.load(Ordering::Acquire) { 1.0 } else { 0.0 },
+        1 => (p.shared.selected.load(Ordering::Acquire) as f32 / 128.0).clamp(0.0, 1.0),
+        2 => (p.shared.profile.load(Ordering::Acquire) as f32 / 3.0).clamp(0.0, 1.0),
+        3 => f32::from_bits(p.shared.input_gain.load(Ordering::Acquire)),
+        4 => f32::from_bits(p.shared.wet_dry_mix.load(Ordering::Acquire)),
+        5 => f32::from_bits(p.shared.drive.load(Ordering::Acquire)),
+        6 => f32::from_bits(p.shared.output_gain.load(Ordering::Acquire)),
+        7..=22 => {
+            let slot = (param_id - 7) as usize;
+            f32::from_bits(p.shared.automation_slots[slot].load(Ordering::Acquire))
+        }
+        _ => 0.0,
+    }
+}
+
+/// Read true stereo peak levels (`0.0..=1.0`) measured on the audio thread.
+/// # Safety
+/// Handle and output pointers must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_get_meters(
+    handle: *mut NativePlugin,
+    left: *mut f32,
+    right: *mut f32,
+) {
+    let Some(p) = handle.as_ref() else {
+        if !left.is_null() { *left = 0.0; }
+        if !right.is_null() { *right = 0.0; }
+        return;
+    };
+    if !left.is_null() {
+        *left = f32::from_bits(p.shared.meter_l.load(Ordering::Relaxed));
+    }
+    if !right.is_null() {
+        *right = f32::from_bits(p.shared.meter_r.load(Ordering::Relaxed));
+    }
+}
+
+/// Swap two loaded plugin slots in the chain.
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_exchange_plugins(
+    handle: *mut NativePlugin,
+    idx_a: u32,
+    idx_b: u32,
+) -> bool {
+    let Some(p) = handle.as_ref() else { return false };
+    let mut q = p.shared.commands.lock().unwrap_or_else(|e| e.into_inner());
+    q.push_back(NativeCommand::ExchangePlugins {
+        idx_a: idx_a as usize,
+        idx_b: idx_b as usize,
+    });
+    true
+}
+
+/// Return number of presets on a loaded plugin slot.
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_num_presets(handle: *mut NativePlugin, loaded_idx: u32) -> u32 {
+    let Some(p) = handle.as_ref() else { return 0 };
+    let guard = p.shared.loaded_plugins.lock().unwrap_or_else(|e| e.into_inner());
+    guard
+        .get(loaded_idx as usize)
+        .map(|lp| lp.presets.len() as u32)
+        .unwrap_or(0)
+}
+
+/// Copy a preset name for a loaded plugin slot.
+/// # Safety
+/// Handle and buffer must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_get_preset_name(
+    handle: *mut NativePlugin,
+    loaded_idx: u32,
+    preset_idx: u32,
+    buf: *mut c_char,
+    cap: u32,
+) -> bool {
+    if buf.is_null() || cap == 0 { return false; }
+    *buf = 0;
+    let Some(p) = handle.as_ref() else { return false };
+    let guard = p.shared.loaded_plugins.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(lp) = guard.get(loaded_idx as usize) else { return false };
+    let Some(name) = lp.presets.get(preset_idx as usize) else { return false };
+    let count = name.len().min(cap as usize - 1);
+    std::ptr::copy_nonoverlapping(name.as_ptr(), buf.cast(), count);
+    *buf.add(count) = 0;
+    true
+}
+
+/// Select a preset on a loaded plugin slot.
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_set_preset(
+    handle: *mut NativePlugin,
+    loaded_idx: u32,
+    preset_idx: u32,
+) -> bool {
+    let Some(p) = handle.as_ref() else { return false };
+    let mut q = p.shared.commands.lock().unwrap_or_else(|e| e.into_inner());
+    q.push_back(NativeCommand::SetPreset {
+        loaded_idx: loaded_idx as usize,
+        preset_idx: preset_idx as usize,
+    });
+    true
+}
+
+/// Return number of parameters on a loaded plugin slot.
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_num_plugin_params(
+    handle: *mut NativePlugin,
+    loaded_idx: u32,
+) -> u32 {
+    let Some(p) = handle.as_ref() else { return 0 };
+    let guard = p.shared.loaded_plugins.lock().unwrap_or_else(|e| e.into_inner());
+    guard
+        .get(loaded_idx as usize)
+        .map(|lp| lp.params.len() as u32)
+        .unwrap_or(0)
+}
+
+/// Query parameter info for a loaded plugin slot.
+/// # Safety
+/// Handle and pointers must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_get_plugin_param_info(
+    handle: *mut NativePlugin,
+    loaded_idx: u32,
+    param_idx: u32,
+    name_buf: *mut c_char,
+    name_cap: u32,
+    default_val: *mut f32,
+    current_val: *mut f32,
+) -> bool {
+    let Some(p) = handle.as_ref() else { return false };
+    let guard = p.shared.loaded_plugins.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(lp) = guard.get(loaded_idx as usize) else { return false };
+    let Some(prm) = lp.params.get(param_idx as usize) else { return false };
+    if !name_buf.is_null() && name_cap > 0 {
+        let count = prm.name.len().min(name_cap as usize - 1);
+        std::ptr::copy_nonoverlapping(prm.name.as_ptr(), name_buf.cast(), count);
+        *name_buf.add(count) = 0;
+    }
+    if !default_val.is_null() { *default_val = prm.default_value; }
+    if !current_val.is_null() { *current_val = prm.current_value; }
+    true
+}
+
+/// Set a parameter value on a loaded plugin slot.
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_set_plugin_param(
+    handle: *mut NativePlugin,
+    loaded_idx: u32,
+    param_idx: u32,
+    val: f32,
+) -> bool {
+    let Some(p) = handle.as_ref() else { return false };
+    let real_idx = {
+        let mut guard = p.shared.loaded_plugins.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(lp) = guard.get_mut(loaded_idx as usize) {
+            if let Some(prm) = lp.params.get_mut(param_idx as usize) {
+                prm.current_value = val;
+                prm.idx
+            } else {
+                param_idx as i32
+            }
+        } else {
+            return false;
+        }
+    };
+    let mut q = p.shared.commands.lock().unwrap_or_else(|e| e.into_inner());
+    q.push_back(NativeCommand::SetPluginParam {
+        loaded_idx: loaded_idx as usize,
+        param_idx: real_idx,
+        val,
+    });
+    true
+}
+
+/// Store current chain state into slot A.
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_store_a(handle: *mut NativePlugin) {
+    if let Some(p) = handle.as_ref() {
+        let mut q = p.shared.commands.lock().unwrap_or_else(|e| e.into_inner());
+        q.push_back(NativeCommand::StoreA);
+    }
+}
+
+/// Store current chain state into slot B.
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_store_b(handle: *mut NativePlugin) {
+    if let Some(p) = handle.as_ref() {
+        let mut q = p.shared.commands.lock().unwrap_or_else(|e| e.into_inner());
+        q.push_back(NativeCommand::StoreB);
+    }
+}
+
+/// Toggle between A and B chain states.
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_toggle_ab(handle: *mut NativePlugin) {
+    if let Some(p) = handle.as_ref() {
+        let cur = p.shared.active_is_b.load(Ordering::Acquire);
+        p.shared.active_is_b.store(!cur, Ordering::Release);
+        let mut q = p.shared.commands.lock().unwrap_or_else(|e| e.into_inner());
+        q.push_back(NativeCommand::ToggleAB);
+    }
+}
+
+/// Return true if slot B is currently active.
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_is_b(handle: *mut NativePlugin) -> bool {
+    handle
+        .as_ref()
+        .map(|p| p.shared.active_is_b.load(Ordering::Acquire))
+        .unwrap_or(false)
+}
+
+/// Get active server address (`host:port`).
+/// # Safety
+/// Handle and buffer must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_get_active_server(
+    handle: *mut NativePlugin,
+    buf: *mut c_char,
+    cap: u32,
+) {
+    if buf.is_null() || cap == 0 { return; }
+    *buf = 0;
+    let Some(p) = handle.as_ref() else { return };
+    let srv = p.shared.active_server.lock().unwrap_or_else(|e| e.into_inner());
+    let count = srv.len().min(cap as usize - 1);
+    std::ptr::copy_nonoverlapping(srv.as_ptr(), buf.cast(), count);
+    *buf.add(count) = 0;
+}
+
+/// Connect to a new server (`host:port`).
+/// # Safety
+/// Handle and C-string must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_set_server(
+    handle: *mut NativePlugin,
+    host_port: *const c_char,
+) -> bool {
+    if host_port.is_null() { return false; }
+    let Some(p) = handle.as_ref() else { return false };
+    let Ok(s) = CStr::from_ptr(host_port).to_str() else { return false };
+    let (host, port) = s
+        .rsplit_once(':')
+        .and_then(|(h, pt)| pt.parse::<u16>().ok().map(|port| (h.to_string(), port)))
+        .unwrap_or_else(|| (s.to_string(), 55056));
+    let formatted = format!("{}:{}", host, port);
+    *p.shared.active_server.lock().unwrap_or_else(|e| e.into_inner()) = formatted.clone();
+    {
+        let mut list = p.shared.discovered_servers.lock().unwrap_or_else(|e| e.into_inner());
+        if !list.contains(&formatted) {
+            list.push(formatted);
+        }
+    }
+    let mut q = p.shared.commands.lock().unwrap_or_else(|e| e.into_inner());
+    q.push_back(NativeCommand::ReconnectServer { host, port });
+    true
+}
+
+/// Return number of known/discovered servers.
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_num_discovered_servers(handle: *mut NativePlugin) -> u32 {
+    let Some(p) = handle.as_ref() else { return 0 };
+    let list = p.shared.discovered_servers.lock().unwrap_or_else(|e| e.into_inner());
+    list.len() as u32
+}
+
+/// Copy discovered server string (`host:port`).
+/// # Safety
+/// Handle and buffer must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_get_discovered_server(
+    handle: *mut NativePlugin,
+    idx: u32,
+    buf: *mut c_char,
+    cap: u32,
+) -> bool {
+    if buf.is_null() || cap == 0 { return false; }
+    *buf = 0;
+    let Some(p) = handle.as_ref() else { return false };
+    let list = p.shared.discovered_servers.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(srv) = list.get(idx as usize) else { return false };
+    let count = srv.len().min(cap as usize - 1);
+    std::ptr::copy_nonoverlapping(srv.as_ptr(), buf.cast(), count);
+    *buf.add(count) = 0;
+    true
+}
+
+/// Serialize full plugin state (State Version 7 JSON including loaded plugins, oversampling,
+/// base64 plugin settings chunks, and local console parameters).
+/// If `buf` is null or `cap == 0`, refreshes state and returns required byte length.
+/// Otherwise writes up to `cap` bytes into `buf` and returns bytes written.
+/// # Safety
+/// Handle must be valid; if `buf` is non-null, it must be writable for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_get_state(
+    handle: *mut NativePlugin,
+    buf: *mut u8,
+    cap: u32,
+) -> u32 {
+    let Some(p) = handle.as_ref() else { return 0 };
+    let state_bytes = if p.worker.is_some() && !p.shared.stop.load(Ordering::Acquire) {
+        let (tx, rx) = mpsc::sync_channel(1);
+        {
+            let mut q = p.shared.commands.lock().unwrap_or_else(|e| e.into_inner());
+            q.push_back(NativeCommand::FetchState { reply: tx });
+        }
+        rx.recv_timeout(Duration::from_millis(250)).unwrap_or_else(|_| {
+            let mut dummy = PluginProcessor::new(PluginMode::Fx);
+            p.shared.build_full_state(&mut dummy)
+        })
+    } else {
+        let mut dummy = PluginProcessor::new(PluginMode::Fx);
+        p.shared.build_full_state(&mut dummy)
+    };
+    if buf.is_null() || cap == 0 {
+        return state_bytes.len() as u32;
+    }
+    let count = state_bytes.len().min(cap as usize);
+    std::ptr::copy_nonoverlapping(state_bytes.as_ptr(), buf, count);
+    count as u32
+}
+
+/// Restore full plugin state (State Version 7 JSON).
+/// # Safety
+/// Handle and `data` slice must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_set_state(
+    handle: *mut NativePlugin,
+    data: *const u8,
+    len: u32,
+) -> bool {
+    if data.is_null() || len == 0 { return false; }
+    let Some(p) = handle.as_ref() else { return false };
+    let slice = std::slice::from_raw_parts(data, len as usize);
+    let Ok(j) = serde_json::from_slice::<serde_json::Value>(slice) else { return false };
+    if let Some(byp) = j.get("bypass").and_then(|v| v.as_bool()) {
+        p.shared.bypass.store(byp, Ordering::Release);
+    }
+    if let Some(sel) = j.get("selectedPlugin").and_then(|v| v.as_u64()) {
+        p.shared.selected.store(sel as u32, Ordering::Release);
+    }
+    if let Some(prof) = j.get("latencyProfile").and_then(|v| v.as_u64()) {
+        og_native_set_param(handle, 2, (prof as f32) / 3.0);
+    }
+    if let Some(v) = j.get("inputGain").and_then(|v| v.as_f64()) {
+        p.shared.input_gain.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
+    }
+    if let Some(v) = j.get("wetDryMix").and_then(|v| v.as_f64()) {
+        p.shared.wet_dry_mix.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
+    }
+    if let Some(v) = j.get("drive").and_then(|v| v.as_f64()) {
+        p.shared.drive.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
+    }
+    if let Some(v) = j.get("outputGain").and_then(|v| v.as_f64()) {
+        p.shared.output_gain.store((v as f32).clamp(0.0, 1.0).to_bits(), Ordering::Release);
+    }
+    *p.shared.cached_state.lock().unwrap_or_else(|e| e.into_inner()) = slice.to_vec();
+    let mut q = p.shared.commands.lock().unwrap_or_else(|e| e.into_inner());
+    q.push_back(NativeCommand::RestoreState {
+        data: slice.to_vec(),
+    });
+    true
+}
+
+/// Queue a 3-byte MIDI event for the next `og_native_process` audio block without allocation.
+/// # Safety
+/// Must be called on the audio thread before `og_native_process`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_queue_midi(
+    handle: *mut NativePlugin,
+    sample_offset: i32,
+    status: u8,
+    data1: u8,
+    data2: u8,
+) {
+    let Some(p) = handle.as_ref() else { return };
+    let cb = &mut *p.audio.get();
+    if cb.pending_midi_count < MAX_MIDI_EVENTS {
+        cb.pending_midi[cb.pending_midi_count] = OgMidiEvent {
+            sample_offset: sample_offset.max(0),
+            len: 3,
+            data: [status, data1, data2],
+        };
+        cb.pending_midi_count += 1;
+    }
+}
+
+/// Process 64-bit float (`double`) planar audio buffers.
+/// # Safety
+/// Handle and planar channel buffers must be valid for `frames` samples.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_process_f64(
+    handle: *mut NativePlugin,
+    inputs: *const *const f64,
+    outputs: *const *mut f64,
+    frames: u32,
+) -> i32 {
+    let Some(plugin) = handle.as_ref() else { return -1 };
+    let f = frames as usize;
+    if f == 0 { return 0; }
+    if f > plugin.max_frames || inputs.is_null() || outputs.is_null() { return -1; }
+    let in_ch = std::slice::from_raw_parts(inputs, plugin.channels);
+    let out_ch = std::slice::from_raw_parts(outputs, plugin.channels);
+    if in_ch.iter().any(|p| p.is_null()) || out_ch.iter().any(|p| p.is_null()) {
+        return -1;
+    }
+    let mut in_f32 = [[0.0f32; 8192]; 2];
+    let mut out_f32 = [[0.0f32; 8192]; 2];
+    for ch in 0..plugin.channels.min(2) {
+        for n in 0..f {
+            in_f32[ch][n] = *in_ch[ch].add(n) as f32;
+        }
+    }
+    let in_ptrs = [in_f32[0].as_ptr(), in_f32[1].as_ptr()];
+    let out_ptrs = [out_f32[0].as_mut_ptr(), out_f32[1].as_mut_ptr()];
+    let rc = plugin.process(in_ptrs.as_ptr(), out_ptrs.as_ptr(), f);
+    if rc == 0 {
+        for ch in 0..plugin.channels.min(2) {
+            for n in 0..f {
+                *out_ch[ch].add(n) = out_f32[ch][n] as f64;
+            }
+        }
+    }
+    rc
 }
 
 #[cfg(test)]

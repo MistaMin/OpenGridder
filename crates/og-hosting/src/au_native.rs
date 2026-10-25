@@ -159,6 +159,13 @@ unsafe extern "C" {
         frames: u32,
         buffers: *mut BufferList,
     ) -> i32;
+    fn MusicDeviceMIDIEvent(
+        unit: Unit,
+        status: u32,
+        data1: u32,
+        data2: u32,
+        offset_sample_frame: u32,
+    ) -> i32;
     fn CFRelease(value: CF);
     fn CFStringGetLength(value: CF) -> isize;
     fn CFStringGetMaximumSizeForEncoding(length: isize, encoding: u32) -> isize;
@@ -676,11 +683,22 @@ impl HostedPlugin for AudioUnitPlugin {
     fn process_block_f32(
         &mut self,
         audio: &mut [Vec<f32>],
-        _midi: &mut Vec<MidiEvent>,
+        midi: &mut Vec<MidiEvent>,
         _pos: &PositionInfo,
     ) {
         if self.suspended {
             return;
+        }
+        for ev in midi.iter() {
+            if !ev.data.is_empty() {
+                let s = ev.data[0] as u32;
+                let d1 = *ev.data.get(1).unwrap_or(&0) as u32;
+                let d2 = *ev.data.get(2).unwrap_or(&0) as u32;
+                let offset = ev.sample_number.max(0) as u32;
+                unsafe {
+                    let _ = MusicDeviceMIDIEvent(self.unit, s, d1, d2, offset);
+                }
+            }
         }
         let frames = audio.first().map_or(0, Vec::len);
         if frames == 0 {
@@ -717,11 +735,22 @@ impl HostedPlugin for AudioUnitPlugin {
     fn process_block_f64(
         &mut self,
         audio: &mut [Vec<f64>],
-        _midi: &mut Vec<MidiEvent>,
+        midi: &mut Vec<MidiEvent>,
         _pos: &PositionInfo,
     ) {
         if self.suspended {
             return;
+        }
+        for ev in midi.iter() {
+            if !ev.data.is_empty() {
+                let s = ev.data[0] as u32;
+                let d1 = *ev.data.get(1).unwrap_or(&0) as u32;
+                let d2 = *ev.data.get(2).unwrap_or(&0) as u32;
+                let offset = ev.sample_number.max(0) as u32;
+                unsafe {
+                    let _ = MusicDeviceMIDIEvent(self.unit, s, d1, d2, offset);
+                }
+            }
         }
         let frames = audio.first().map_or(0, Vec::len);
         if frames == 0 {

@@ -42,7 +42,11 @@ enum {
     kParamBypass = 0,
     kParamSelection = 1,
     kParamLatencyProfile = 2,
-    kNumParams = 3
+    kParamInputGain = 3,
+    kParamWetDryMix = 4,
+    kParamDrive = 5,
+    kParamOutputGain = 6,
+    kNumParams = 7
 };
 
 struct PropertyListener {
@@ -56,12 +60,17 @@ public:
     explicit OpenGridderAUInstance(void* compInstance = nullptr)
         : compInstance_(compInstance),
           rust_(nullptr),
-          sampleRate_(44100.0),
+          sampleRate_(48000.0),
           maxFrames_(1024),
           channels_(2),
           bypass_(false),
           selection_(0),
-          profile_(0),
+          profile_(1),
+          inputGain_(0.0f),
+          wetDryMix_(100.0f),
+          drive_(0.0f),
+          outputGain_(0.0f),
+          lastLatency_(256),
           initialized_(false),
           hasConnection_(false)
     {
@@ -166,6 +175,13 @@ public:
             }
             return noErr;
         }
+
+        uint32_t curLat = og_native_latency(rust_);
+        if (curLat != lastLatency_) {
+            lastLatency_ = curLat;
+            notifyPropertyListeners(kAudioUnitProperty_Latency);
+        }
+        og_native_accept_latency(rust_, lastLatency_);
 
         int32_t res = og_native_process(rust_, inPtrs, outPtrs, inNumberFrames);
         if (res != 0) {
@@ -291,6 +307,18 @@ public:
                 CFRelease(manufNum);
 
                 CFDictionarySetValue(dict, CFSTR(kAUPresetNameKey), CFSTR("Default"));
+                if (rust_) {
+                    uint32_t stateLen = og_native_get_state(rust_, nullptr, 0);
+                    if (stateLen > 0) {
+                        std::vector<uint8_t> buf(stateLen);
+                        uint32_t written = og_native_get_state(rust_, buf.data(), stateLen);
+                        CFDataRef dataRef = CFDataCreate(kCFAllocatorDefault, buf.data(), written);
+                        if (dataRef) {
+                            CFDictionarySetValue(dict, CFSTR("OpenGridderState"), dataRef);
+                            CFRelease(dataRef);
+                        }
+                    }
+                }
                 *static_cast<CFPropertyListRef*>(outData) = dict;
                 *ioDataSize = sizeof(CFPropertyListRef);
                 return noErr;
@@ -333,9 +361,9 @@ public:
                 }
                 if (*ioDataSize < kNumParams * sizeof(AudioUnitParameterID)) return kAudioUnitErr_InvalidPropertyValue;
                 AudioUnitParameterID* params = static_cast<AudioUnitParameterID*>(outData);
-                params[0] = kParamBypass;
-                params[1] = kParamSelection;
-                params[2] = kParamLatencyProfile;
+                for (UInt32 i = 0; i < kNumParams; ++i) {
+                    params[i] = i;
+                }
                 *ioDataSize = kNumParams * sizeof(AudioUnitParameterID);
                 return noErr;
             }
@@ -365,9 +393,41 @@ public:
                     info->unit = kAudioUnitParameterUnit_Indexed;
                     info->minValue = 0.0f;
                     info->maxValue = 3.0f;
-                    info->defaultValue = 0.0f;
+                    info->defaultValue = 1.0f;
                     info->flags = kAudioUnitParameterFlag_IsWritable | kAudioUnitParameterFlag_IsReadable | kAudioUnitParameterFlag_HasCFNameString;
                     info->cfNameString = CFSTR("Latency Profile");
+                } else if (inElement == kParamInputGain) {
+                    std::strncpy(info->name, "Input Gain", sizeof(info->name));
+                    info->unit = kAudioUnitParameterUnit_Decibels;
+                    info->minValue = -24.0f;
+                    info->maxValue = 24.0f;
+                    info->defaultValue = 0.0f;
+                    info->flags = kAudioUnitParameterFlag_IsWritable | kAudioUnitParameterFlag_IsReadable | kAudioUnitParameterFlag_HasCFNameString;
+                    info->cfNameString = CFSTR("Input Gain");
+                } else if (inElement == kParamWetDryMix) {
+                    std::strncpy(info->name, "Wet/Dry Mix", sizeof(info->name));
+                    info->unit = kAudioUnitParameterUnit_Percent;
+                    info->minValue = 0.0f;
+                    info->maxValue = 100.0f;
+                    info->defaultValue = 100.0f;
+                    info->flags = kAudioUnitParameterFlag_IsWritable | kAudioUnitParameterFlag_IsReadable | kAudioUnitParameterFlag_HasCFNameString;
+                    info->cfNameString = CFSTR("Wet/Dry Mix");
+                } else if (inElement == kParamDrive) {
+                    std::strncpy(info->name, "Drive / Sat", sizeof(info->name));
+                    info->unit = kAudioUnitParameterUnit_Generic;
+                    info->minValue = 0.0f;
+                    info->maxValue = 10.0f;
+                    info->defaultValue = 0.0f;
+                    info->flags = kAudioUnitParameterFlag_IsWritable | kAudioUnitParameterFlag_IsReadable | kAudioUnitParameterFlag_HasCFNameString;
+                    info->cfNameString = CFSTR("Drive / Sat");
+                } else if (inElement == kParamOutputGain) {
+                    std::strncpy(info->name, "Output Trim", sizeof(info->name));
+                    info->unit = kAudioUnitParameterUnit_Decibels;
+                    info->minValue = -24.0f;
+                    info->maxValue = 24.0f;
+                    info->defaultValue = 0.0f;
+                    info->flags = kAudioUnitParameterFlag_IsWritable | kAudioUnitParameterFlag_IsReadable | kAudioUnitParameterFlag_HasCFNameString;
+                    info->cfNameString = CFSTR("Output Trim");
                 } else {
                     return kAudioUnitErr_InvalidParameter;
                 }
@@ -380,6 +440,9 @@ public:
                 uint32_t samples = rust_ ? og_native_latency(rust_) : targetLatencyFromProfile(profile_);
                 *static_cast<Float64*>(outData) = static_cast<Float64>(samples) / sampleRate_;
                 *ioDataSize = sizeof(Float64);
+                if (rust_) {
+                    og_native_accept_latency(rust_, samples);
+                }
                 return noErr;
             }
             case kAudioUnitProperty_SupportedNumChannels: {
@@ -455,6 +518,29 @@ public:
         switch (inID) {
             case kAudioUnitProperty_ClassInfo: {
                 if (inDataSize < sizeof(CFPropertyListRef)) return kAudioUnitErr_InvalidPropertyValue;
+                CFPropertyListRef plist = *static_cast<const CFPropertyListRef*>(inData);
+                if (plist && CFGetTypeID(plist) == CFDictionaryGetTypeID()) {
+                    CFDictionaryRef dict = static_cast<CFDictionaryRef>(plist);
+                    CFTypeRef stateVal = CFDictionaryGetValue(dict, CFSTR("OpenGridderState"));
+                    if (stateVal && CFGetTypeID(stateVal) == CFDataGetTypeID()) {
+                        CFDataRef dataRef = static_cast<CFDataRef>(stateVal);
+                        const UInt8* ptr = CFDataGetBytePtr(dataRef);
+                        CFIndex len = CFDataGetLength(dataRef);
+                        if (ptr && len > 0) {
+                            savedState_.assign(ptr, ptr + len);
+                            if (rust_) {
+                                og_native_set_state(rust_, savedState_.data(), static_cast<uint32_t>(savedState_.size()));
+                                bypass_ = og_native_get_param(rust_, kParamBypass) >= 0.5f;
+                                selection_ = static_cast<uint32_t>(og_native_get_param(rust_, kParamSelection) * 128.0f + 0.5f);
+                                profile_ = static_cast<int32_t>(og_native_get_param(rust_, kParamLatencyProfile) * 3.0f + 0.5f);
+                                inputGain_ = (og_native_get_param(rust_, kParamInputGain) - 0.5f) * 48.0f;
+                                wetDryMix_ = og_native_get_param(rust_, kParamWetDryMix) * 100.0f;
+                                drive_ = og_native_get_param(rust_, kParamDrive) * 10.0f;
+                                outputGain_ = (og_native_get_param(rust_, kParamOutputGain) - 0.5f) * 48.0f;
+                            }
+                        }
+                    }
+                }
                 return noErr;
             }
             case kAudioUnitProperty_PresentPreset: {
@@ -522,6 +608,18 @@ public:
             case kParamLatencyProfile:
                 *outValue = static_cast<AudioUnitParameterValue>(profile_);
                 return noErr;
+            case kParamInputGain:
+                *outValue = inputGain_;
+                return noErr;
+            case kParamWetDryMix:
+                *outValue = wetDryMix_;
+                return noErr;
+            case kParamDrive:
+                *outValue = drive_;
+                return noErr;
+            case kParamOutputGain:
+                *outValue = outputGain_;
+                return noErr;
             default:
                 return kAudioUnitErr_InvalidParameter;
         }
@@ -537,7 +635,7 @@ public:
         switch (inID) {
             case kParamBypass:
                 bypass_ = (inValue >= 0.5f);
-                if (rust_) og_native_bypass(rust_, bypass_);
+                if (rust_) og_native_set_param(rust_, kParamBypass, bypass_ ? 1.0f : 0.0f);
                 return noErr;
             case kParamSelection:
                 selection_ = static_cast<uint32_t>(std::max(0.0f, std::min(128.0f, inValue)));
@@ -552,6 +650,22 @@ public:
                 notifyPropertyListeners(kAudioUnitProperty_Latency);
                 return noErr;
             }
+            case kParamInputGain:
+                inputGain_ = std::max(-24.0f, std::min(24.0f, inValue));
+                if (rust_) og_native_set_param(rust_, kParamInputGain, (inputGain_ + 24.0f) / 48.0f);
+                return noErr;
+            case kParamWetDryMix:
+                wetDryMix_ = std::max(0.0f, std::min(100.0f, inValue));
+                if (rust_) og_native_set_param(rust_, kParamWetDryMix, wetDryMix_ / 100.0f);
+                return noErr;
+            case kParamDrive:
+                drive_ = std::max(0.0f, std::min(10.0f, inValue));
+                if (rust_) og_native_set_param(rust_, kParamDrive, drive_ / 10.0f);
+                return noErr;
+            case kParamOutputGain:
+                outputGain_ = std::max(-24.0f, std::min(24.0f, inValue));
+                if (rust_) og_native_set_param(rust_, kParamOutputGain, (outputGain_ + 24.0f) / 48.0f);
+                return noErr;
             default:
                 return kAudioUnitErr_InvalidParameter;
         }
@@ -700,9 +814,9 @@ public:
 
 private:
     static uint32_t targetLatencyFromProfile(int32_t profile) {
-        if (profile == 1) return 512;
-        if (profile == 2) return 384;
-        if (profile == 3) return 256;
+        if (profile == 0) return 128;
+        if (profile == 1) return 256;
+        if (profile == 2) return 512;
         return 1024;
     }
 
@@ -717,10 +831,19 @@ private:
     void createRust() {
         cleanupRust();
         uint32_t target = targetLatencyFromProfile(profile_);
-        rust_ = og_native_create(sampleRate_, maxFrames_, channels_, target);
+        lastLatency_ = target;
+        rust_ = og_native_create(sampleRate_, std::max<UInt32>(maxFrames_, 1024), channels_, target);
         if (rust_) {
             og_native_bypass(rust_, bypass_);
             og_native_select(rust_, selection_);
+            og_native_set_param(rust_, kParamInputGain, (inputGain_ + 24.0f) / 48.0f);
+            og_native_set_param(rust_, kParamWetDryMix, wetDryMix_ / 100.0f);
+            og_native_set_param(rust_, kParamDrive, drive_ / 10.0f);
+            og_native_set_param(rust_, kParamOutputGain, (outputGain_ + 24.0f) / 48.0f);
+            if (!savedState_.empty()) {
+                og_native_set_state(rust_, savedState_.data(), static_cast<uint32_t>(savedState_.size()));
+            }
+            og_native_accept_latency(rust_, lastLatency_);
         }
     }
 
@@ -739,7 +862,13 @@ private:
     bool bypass_;
     uint32_t selection_;
     int32_t profile_;
+    Float32 inputGain_;
+    Float32 wetDryMix_;
+    Float32 drive_;
+    Float32 outputGain_;
+    uint32_t lastLatency_;
     bool initialized_;
+    std::vector<uint8_t> savedState_;
     AURenderCallbackStruct inputCallback_;
     AudioStreamBasicDescription format_;
     AudioUnitConnection connection_;

@@ -37,6 +37,14 @@
     view.onParameterChanged = ^(uint32_t paramId, float normalizedValue) {
         if (paramId == 0) {
             AudioUnitSetParameter(inAudioUnit, 0, kAudioUnitScope_Global, 0, normalizedValue, 0);
+        } else if (paramId == 3) {
+            AudioUnitSetParameter(inAudioUnit, 3, kAudioUnitScope_Global, 0, (normalizedValue - 0.5f) * 48.0f, 0);
+        } else if (paramId == 4) {
+            AudioUnitSetParameter(inAudioUnit, 4, kAudioUnitScope_Global, 0, normalizedValue * 100.0f, 0);
+        } else if (paramId == 5) {
+            AudioUnitSetParameter(inAudioUnit, 5, kAudioUnitScope_Global, 0, normalizedValue * 10.0f, 0);
+        } else if (paramId == 6) {
+            AudioUnitSetParameter(inAudioUnit, 6, kAudioUnitScope_Global, 0, (normalizedValue - 0.5f) * 48.0f, 0);
         }
     };
     view.onProfileChanged = ^(int newProfile) {

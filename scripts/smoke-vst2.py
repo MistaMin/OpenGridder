@@ -91,7 +91,7 @@ def main():
     assert e.magic == kEffectMagic, f"Invalid magic: {hex(e.magic)}"
     assert e.numInputs == 2, f"Expected 2 inputs, got {e.numInputs}"
     assert e.numOutputs == 2, f"Expected 2 outputs, got {e.numOutputs}"
-    assert e.numParams == 3, f"Expected 3 parameters, got {e.numParams}"
+    assert e.numParams == 7, f"Expected 7 parameters, got {e.numParams}"
     assert e.initialDelay == 1024, f"Expected initialDelay 1024, got {e.initialDelay}"
     print(f"Verified VST2 structure: magic=VstP, inputs={e.numInputs}, outputs={e.numOutputs}, initialDelay={e.initialDelay}")
 

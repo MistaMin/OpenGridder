@@ -1,0 +1,31 @@
+=== [1/6] Loading OpenGridder C-ABI & Verifying Server Connection ===
+  Status: 2 (2=Connected), Active Server: 127.0.0.1:55056, Discovered Servers: 1, Remote Plugins: 2192
+=== [2/6] Verifying All 7 Local Console DSP Parameters & True Peak Meters ===
+  [0 dB Unity] RMS=0.1756, PeakL=0.2500, PeakR=0.2500
+  [+6 dB InGain] RMS=0.3505, PeakL=0.4988
+  [100% Drive] RMS=0.9313, PeakL=0.9999
+  [-12 dB OutGain] RMS=0.0441, PeakL=0.0628
+  [LatencyProfile] All 4 profiles (128, 256, 512, 1024) verified.
+=== [3/6] Verifying Multi-Slot Chain, Reordering, Presets, Remote Params & A/B ===
+  Found Slot 0 candidate at idx=165: name='AUDelay' id='AudioUnit-64607a6d'
+  Found Slot 1 candidate at idx=174: name='AULowpass' id='AudioUnit-6c757767'
+  Chain before swap: Slot 0 = 'AUDelay', Slot 1 = 'AULowpass'
+  Slot 0 Remote Params: 4, Presets: 0
+    Param 0: 'Dry/Wet Mix' default=0.500 current=0.500
+  Chain after swap:  Slot 0 = 'AULowpass', Slot 1 = 'AUDelay'
+  A/B Toggle 1 (is_b=True): InGain=0.75; Toggle 2 (is_b=False): InGain=0.25
+=== [4/6] Verifying Full State v7 Serialization & Cross-Instance Recall ===
+  Serialized State v7: 2 plugins, server=127.0.0.1:55056
+  Cross-instance State v7 recall verified.
+=== [5/6] Verifying MIDI Queueing & 64-Bit Float Audio Processing ===
+  64-bit float process_f64 + MIDI succeeded: RMS64=0.1793
+=== [6/6] Verifying All 6 Plugin Format Binaries (VST3, AU, AAX, VST2, CLAP, LV2) ===
+  [VST3] Loaded OpenGridder -> symbol 'GetPluginFactory' verified.
+  [AU] Loaded OpenGridder -> symbol 'OpenGridderAUFactory' verified.
+  [AAX] Loaded OpenGridder -> symbol 'ACFRegisterPlugin' verified.
+  [VST2] Loaded OpenGridder -> symbol 'VSTPluginMain' verified.
+  [CLAP] Loaded OpenGridder -> symbol 'clap_entry' verified.
+  [LV2] Loaded OpenGridder.dylib -> symbol 'lv2_descriptor' verified.
+  [LV2] lv2_descriptor(0) = 0x108e58018 verified.
+
+ALL PARITY CHECKS PASSED 100%!

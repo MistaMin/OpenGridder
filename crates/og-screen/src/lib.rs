@@ -144,32 +144,52 @@ impl ImageReader {
 
     /// Decode a `ScreenCapture` `RawMessage` into an RGBA pixel buffer.
     pub fn read_message(&mut self, msg: &RawMessage) -> Result<(u32, u32, f64, &[u8]), String> {
-        let hdr = ScreenHeader::from_bytes(&msg.payload)
-            .ok_or_else(|| "screen message too short for ScreenHeader".to_string())?;
-        if hdr.width == 0 || hdr.height == 0 || hdr.size == 0 {
-            return Ok((self.width, self.height, self.scale, &self.current_rgba));
-        }
-        let body = &msg.payload[ScreenHeader::SIZE..];
-        if body.len() < hdr.size as usize {
-            return Err("screen message payload truncated".to_string());
-        }
-        let img_bytes = &body[..hdr.size as usize];
+        let (width, height, scale, img_bytes) = if msg.payload.len() >= 32
+            && (32 + u64::from_le_bytes(msg.payload[24..32].try_into().unwrap_or([0; 8])) as usize) <= msg.payload.len()
+            && i32::from_le_bytes(msg.payload[0..4].try_into().unwrap_or([0; 4])) > 0
+            && i32::from_le_bytes(msg.payload[4..8].try_into().unwrap_or([0; 4])) > 0
+        {
+            let w = i32::from_le_bytes(msg.payload[0..4].try_into().unwrap()) as u32;
+            let h = i32::from_le_bytes(msg.payload[4..8].try_into().unwrap()) as u32;
+            let s = f64::from_le_bytes(msg.payload[16..24].try_into().unwrap());
+            let sz = u64::from_le_bytes(msg.payload[24..32].try_into().unwrap()) as usize;
+            (w, h, s, &msg.payload[32..32 + sz])
+        } else if let Some(hdr) = ScreenHeader::from_bytes(&msg.payload) {
+            if hdr.width == 0 || hdr.height == 0 || hdr.size == 0 {
+                return Ok((self.width, self.height, self.scale, &self.current_rgba));
+            }
+            let body = &msg.payload[ScreenHeader::SIZE..];
+            if body.len() < hdr.size as usize {
+                return Err("screen message payload truncated".to_string());
+            }
+            (hdr.width, hdr.height, hdr.scale, &body[..hdr.size as usize])
+        } else {
+            return Err("screen message too short for any known ScreenHeader".to_string());
+        };
 
-        let expected_raw = (hdr.width as usize) * (hdr.height as usize) * 4;
+        let expected_raw = (width as usize) * (height as usize) * 4;
         if img_bytes.len() >= 8 && &img_bytes[0..8] == b"\x89PNG\r\n\x1a\n" {
             let decoded = image::load_from_memory_with_format(img_bytes, ImageFormat::Png)
                 .map_err(|e| format!("PNG decode error: {}", e))?
                 .to_rgba8();
             self.current_rgba = decoded.into_raw();
+        } else if img_bytes.len() >= 3 && &img_bytes[0..3] == b"\xFF\xD8\xFF" {
+            let decoded = image::load_from_memory_with_format(img_bytes, ImageFormat::Jpeg)
+                .map_err(|e| format!("JPEG decode error: {}", e))?
+                .to_rgba8();
+            self.current_rgba = decoded.into_raw();
         } else if img_bytes.len() == expected_raw {
             self.current_rgba = img_bytes.to_vec();
         } else {
-            return Err("unrecognized screen payload format".to_string());
+            let decoded = image::load_from_memory(img_bytes)
+                .map_err(|e| format!("Image decode error: {}", e))?
+                .to_rgba8();
+            self.current_rgba = decoded.into_raw();
         }
 
-        self.width = hdr.width;
-        self.height = hdr.height;
-        self.scale = hdr.scale;
+        self.width = width;
+        self.height = height;
+        self.scale = scale;
         Ok((self.width, self.height, self.scale, &self.current_rgba))
     }
 }
@@ -203,5 +223,20 @@ mod tests {
 
         let (_w2, _h2, _s2, px2) = dec.read_message(&msg2).expect("decode 2");
         assert_eq!(px2[0], 250);
+    }
+
+    #[test]
+    fn test_screen_32byte_header_and_raw_rgba() {
+        let mut dec = ImageReader::new();
+        let width: i32 = 16;
+        let height: i32 = 16;
+        let scale: f64 = 1.0;
+        let raw_pixels = vec![42u8; (width * height * 4) as usize];
+        let msg = RawMessage::screen_capture(width, height, width, height, scale, &raw_pixels);
+
+        let (w, h, s, px) = dec.read_message(&msg).expect("decode 32byte header message");
+        assert_eq!((w, h, s), (16, 16, 1.0));
+        assert_eq!(px.len(), raw_pixels.len());
+        assert_eq!(px[0], 42);
     }
 }

@@ -24,11 +24,6 @@ pub extern "C" fn ModuleExit() -> bool {
     true
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn lv2_descriptor(_index: u32) -> *const c_void {
-    std::ptr::null()
-}
-
 pub const OPENGRIDDER_VST3_URI: &CStr = c"http://opengridder.org/plugins/OpenGridderFx";
 use std::ffi::CStr;
 const _USE_CCHAR: Option<*const c_char> = None;

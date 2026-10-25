@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Multi-Format Release Packaging & Notarization for OpenGridder 0.1.1-alpha
+# Multi-Format Release Packaging & Notarization for OpenGridder 0.2.0-alpha
 set -euo pipefail
 
 og_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$og_root"
 
-og_version="0.1.1-alpha"
+og_version="0.2.0-alpha"
 og_stage="$og_root/target/pkg-stage/$og_version"
 og_dist="$og_root/dist/$og_version"
 

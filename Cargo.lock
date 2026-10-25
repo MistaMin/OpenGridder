@@ -260,6 +260,8 @@ dependencies = [
  "moxcms",
  "num-traits",
  "png",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -398,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "og-client"
-version = "0.1.1-alpha"
+version = "0.2.0-alpha"
 dependencies = [
  "crossbeam-channel",
  "log",
@@ -412,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "og-common"
-version = "0.1.1-alpha"
+version = "0.2.0-alpha"
 dependencies = [
  "libc",
  "rmp-serde",
@@ -422,14 +424,14 @@ dependencies = [
 
 [[package]]
 name = "og-dsp"
-version = "0.1.1-alpha"
+version = "0.2.0-alpha"
 dependencies = [
  "og-common",
 ]
 
 [[package]]
 name = "og-goodlookinui"
-version = "0.1.1-alpha"
+version = "0.2.0-alpha"
 dependencies = [
  "og-common",
  "og-dsp",
@@ -439,7 +441,7 @@ dependencies = [
 
 [[package]]
 name = "og-hosting"
-version = "0.1.1-alpha"
+version = "0.2.0-alpha"
 dependencies = [
  "base64",
  "libc",
@@ -453,7 +455,7 @@ dependencies = [
 
 [[package]]
 name = "og-plugin"
-version = "0.1.1-alpha"
+version = "0.2.0-alpha"
 dependencies = [
  "base64",
  "log",
@@ -471,7 +473,7 @@ dependencies = [
 
 [[package]]
 name = "og-screen"
-version = "0.1.1-alpha"
+version = "0.2.0-alpha"
 dependencies = [
  "image",
  "libc",
@@ -482,7 +484,7 @@ dependencies = [
 
 [[package]]
 name = "og-server"
-version = "0.1.1-alpha"
+version = "0.2.0-alpha"
 dependencies = [
  "dirs",
  "env_logger",
@@ -501,7 +503,7 @@ dependencies = [
 
 [[package]]
 name = "og-tray"
-version = "0.1.1-alpha"
+version = "0.2.0-alpha"
 dependencies = [
  "env_logger",
  "log",
@@ -900,3 +902,18 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zune-core"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
+
+[[package]]
+name = "zune-jpeg"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
+dependencies = [
+ "zune-core",
+]

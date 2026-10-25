@@ -7,27 +7,29 @@ use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct PluginParameter {
+    #[serde(default)]
     pub idx: i32,
+    #[serde(default)]
     pub name: String,
-    #[serde(default)]
+    #[serde(default, alias = "defaultValue")]
     pub default_value: f32,
-    #[serde(default)]
+    #[serde(default, alias = "currentValue")]
     pub current_value: f32,
     #[serde(default)]
     pub category: i32,
     #[serde(default)]
     pub label: String,
-    #[serde(default)]
+    #[serde(default, alias = "numSteps")]
     pub num_steps: i32,
-    #[serde(default)]
+    #[serde(default, alias = "isBoolean")]
     pub is_boolean: bool,
-    #[serde(default)]
+    #[serde(default, alias = "isDiscrete")]
     pub is_discrete: bool,
-    #[serde(default)]
+    #[serde(default, alias = "isMeta")]
     pub is_meta: bool,
-    #[serde(default)]
+    #[serde(default, alias = "isOrientInv")]
     pub is_orient_inv: bool,
-    #[serde(default)]
+    #[serde(default, alias = "allValueStrings")]
     pub all_value_strings: Vec<String>,
 }
 

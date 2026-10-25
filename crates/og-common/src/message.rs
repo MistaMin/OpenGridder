@@ -995,7 +995,17 @@ impl RawMessage {
                 return v;
             }
         }
-        serde_json::from_str(self.as_str()).unwrap_or_else(|_| json!({}))
+        if let Ok(v) = serde_json::from_str(self.as_str()) {
+            return v;
+        }
+        let mp = self.get_msgpack();
+        if mp.is_object() || mp.is_array() {
+            return mp;
+        }
+        if let Ok(v) = rmp_serde::from_slice::<Value>(&self.payload) {
+            return v;
+        }
+        json!({})
     }
 
     pub fn from_msgpack(msg_type: MessageType, j: &Value) -> Self {
@@ -1255,8 +1265,12 @@ impl RawMessage {
     pub fn read<R: Read>(stream: &mut R) -> Result<Self, MessageError> {
         let mut hdr = [0u8; 8];
         stream.read_exact(&mut hdr).map_err(|e| {
+            let code = match e.kind() {
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => ErrorCode::Timeout,
+                _ => ErrorCode::Data,
+            };
             MessageError::new(
-                ErrorCode::Data,
+                code,
                 format!("failed to read message header: {e}"),
             )
         })?;

@@ -55,8 +55,19 @@ typedef CGFloat NSFontWeight;
     NSTimer *_meterTimer;
     float _meterLeft;
     float _meterRight;
+    float _vuLeft;
+    float _vuRight;
+    float _peakHoldLeft;
+    float _peakHoldRight;
+    BOOL _isVuMeterMode;
+    BOOL _rackCollapsed;
+    BOOL _consoleCollapsed;
+    BOOL _meterCollapsed;
+    void (^_onSizeChanged)(CGFloat, CGFloat);
     int _statusCode;
     uint32_t _latencySamples;
+    NSMenu *_cachedPluginMenu;
+    uint32_t _cachedPluginCount;
 }
 
 @property (nonatomic, assign) NativePlugin *rust;
@@ -69,11 +80,18 @@ typedef CGFloat NSFontWeight;
 @property (nonatomic, assign) float wetDryMix;   // 0..1
 @property (nonatomic, assign) float drive;       // 0..1
 @property (nonatomic, assign) float outputGain;  // 0..1
+@property (nonatomic, assign) BOOL isVuMeterMode;    // YES = Analog VU (2x width), NO = Digital PPM (1x width)
+@property (nonatomic, assign) BOOL rackCollapsed;    // YES = Plugin Selection Bank clapped closed
+@property (nonatomic, assign) BOOL consoleCollapsed; // YES = Input/WetDry/Drive/Output Bank clapped closed
+@property (nonatomic, assign) BOOL meterCollapsed;   // YES = Metering Bank clapped closed
 
 @property (nonatomic, copy) void (^onParameterChanged)(uint32_t paramId, float normalizedValue);
 @property (nonatomic, copy) void (^onProfileChanged)(int newProfile);
+@property (nonatomic, copy) void (^onSizeChanged)(CGFloat newWidth, CGFloat newHeight);
 
 - (instancetype)initWithFrame:(NSRect)frame;
+- (NSSize)preferredViewSize;
+- (void)updateLayoutSize;
 - (void)updateStatus:(int)statusCode latencySamples:(uint32_t)latency;
 - (void)showPluginMenuAtPoint:(NSPoint)pt;
 - (void)onSelectPlugin:(NSMenuItem *)sender;

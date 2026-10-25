@@ -16,9 +16,12 @@ use og_common::message::{
     HANDSHAKE_RESP_FLAG_STATE_ACK,
 };
 use og_common::server_plugin::{PluginLayout, PluginParameter, ServerPlugin};
+use og_screen::ImageReader;
 use parking_lot::Mutex;
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 pub type ScreenUpdateCallback = Box<dyn Fn(u32, u32, f64, &[u8]) + Send + Sync>;
@@ -62,6 +65,16 @@ impl Default for ClientConfig {
     }
 }
 
+/// Thread-safe screen frame buffer received from server
+#[derive(Clone, Default)]
+pub struct ScreenFrame {
+    pub width: u32,
+    pub height: u32,
+    pub scale: f64,
+    pub rgba: Vec<u8>,
+    pub frame_id: u64,
+}
+
 /// Complete AudioGridder `Client` implementation matching `Plugin/Source/Client.cpp`.
 pub struct Client {
     config: Mutex<ClientConfig>,
@@ -69,6 +82,9 @@ pub struct Client {
     cmd_in: Mutex<Option<TcpStream>>,
     audio_stream: Mutex<Option<TcpStream>>,
     screen_stream: Mutex<Option<TcpStream>>,
+    screen_frame: Arc<Mutex<Arc<Mutex<ScreenFrame>>>>,
+    screen_running: Arc<AtomicBool>,
+    screen_worker: Mutex<Option<JoinHandle<()>>>,
     plugins: Mutex<Vec<ServerPlugin>>,
     ready: AtomicBool,
     sandbox_enabled: AtomicBool,
@@ -91,6 +107,9 @@ impl Client {
             cmd_in: Mutex::new(None),
             audio_stream: Mutex::new(None),
             screen_stream: Mutex::new(None),
+            screen_frame: Arc::new(Mutex::new(Arc::new(Mutex::new(ScreenFrame::default())))),
+            screen_running: Arc::new(AtomicBool::new(false)),
+            screen_worker: Mutex::new(None),
             plugins: Mutex::new(Vec::new()),
             ready: AtomicBool::new(false),
             sandbox_enabled: AtomicBool::new(false),
@@ -212,10 +231,14 @@ impl Client {
 
         // Native adapters perform IO on a worker which must be able to stop.
         // Bound stalled peer reads/writes on every stream, including worker ports.
-        for socket in [&cmd_out, &cmd_in, &audio_sock, &screen_sock] {
+        for socket in [&cmd_out, &cmd_in, &screen_sock] {
             socket.set_read_timeout(Some(timeout)).map_err(|e| e.to_string())?;
             socket.set_write_timeout(Some(timeout)).map_err(|e| e.to_string())?;
         }
+        // Audio stream requires responsive timeouts (500ms) to prevent host playback thread stalls
+        let audio_timeout = Duration::from_millis(500);
+        audio_sock.set_read_timeout(Some(audio_timeout)).map_err(|e| e.to_string())?;
+        audio_sock.set_write_timeout(Some(audio_timeout)).map_err(|e| e.to_string())?;
 
         // Receive initial PluginList message on cmdOut
         let msg = MessageFactory::get_next_message(&mut cmd_out, None)
@@ -230,6 +253,59 @@ impl Client {
         let parsed_plugins = Self::parse_plugin_list(&msg);
         *self.plugins.lock() = parsed_plugins;
 
+        // Spawn client screen reader worker thread
+        let screen_clone = screen_sock
+            .try_clone()
+            .map_err(|e| format!("screen socket clone failed: {}", e))?;
+        let screen_running = self.screen_running.clone();
+        screen_running.store(true, Ordering::SeqCst);
+        let frame_holder = self.screen_frame.clone();
+        let screen_worker_handle = thread::Builder::new()
+            .name("OG-ScreenClient".into())
+            .spawn(move || {
+                let mut reader = ImageReader::new();
+                let mut stream = screen_clone;
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+                while screen_running.load(Ordering::Relaxed) {
+                    match RawMessage::read(&mut stream) {
+                        Ok(msg) => {
+                            if msg.msg_type_enum() == MessageType::ScreenCapture {
+                                match reader.read_message(&msg) {
+                                    Ok((w, h, s, px)) => {
+                                        if w > 0 && h > 0 && !px.is_empty() {
+                                            let store = frame_holder.lock().clone();
+                                            let mut guard = store.lock();
+                                            guard.width = w;
+                                            guard.height = h;
+                                            guard.scale = s;
+                                            guard.rgba.clear();
+                                            guard.rgba.extend_from_slice(px);
+                                            guard.frame_id = guard.frame_id.wrapping_add(1);
+                                        }
+                                    }
+                                    Err(err) => {
+                                        eprintln!("[OG-ScreenClient] reader.read_message failed: {}", err);
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            if e.code == og_common::message::ErrorCode::Timeout
+                                || e.text.contains("Resource temporarily unavailable")
+                                || e.text.contains("timed out")
+                                || e.text.contains("would block")
+                            {
+                                continue;
+                            }
+                            eprintln!("[OG-ScreenClient] stream read error: {}", e);
+                            break;
+                        }
+                    }
+                }
+            })
+            .map_err(|e| format!("failed to spawn screen worker: {}", e))?;
+        *self.screen_worker.lock() = Some(screen_worker_handle);
+
         *self.cmd_out.lock() = Some(cmd_out);
         *self.cmd_in.lock() = Some(cmd_in);
         *self.audio_stream.lock() = Some(audio_sock);
@@ -240,13 +316,37 @@ impl Client {
 
     pub fn disconnect(&self) {
         self.ready.store(false, Ordering::SeqCst);
+        self.screen_running.store(false, Ordering::SeqCst);
         if let Some(mut s) = self.cmd_out.lock().take() {
             let quit = RawMessage::new(MessageType::Quit, Vec::new());
             let _ = quit.send(&mut s);
         }
+        if let Some(sock) = self.screen_stream.lock().take() {
+            let _ = sock.shutdown(std::net::Shutdown::Both);
+        }
+        if let Some(h) = self.screen_worker.lock().take() {
+            let _ = h.join();
+        }
         *self.cmd_in.lock() = None;
         *self.audio_stream.lock() = None;
-        *self.screen_stream.lock() = None;
+    }
+
+    pub fn screen_frame_store(&self) -> Arc<Mutex<ScreenFrame>> {
+        self.screen_frame.lock().clone()
+    }
+
+    pub fn set_screen_frame_store(&self, store: Arc<Mutex<ScreenFrame>>) {
+        *self.screen_frame.lock() = store;
+    }
+
+    pub fn get_latest_screen_frame(&self) -> Option<ScreenFrame> {
+        let store = self.screen_frame.lock().clone();
+        let guard = store.lock();
+        if guard.width > 0 && guard.height > 0 && !guard.rgba.is_empty() {
+            Some(guard.clone())
+        } else {
+            None
+        }
     }
 
     fn parse_plugin_list(msg: &RawMessage) -> Vec<ServerPlugin> {

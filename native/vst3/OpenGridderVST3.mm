@@ -47,14 +47,18 @@ enum ParamIDs : ParamID {
     kParamBypass = 0,
     kParamSelection = 1,
     kParamLatencyProfile = 2,
-    kNumParams = 3
+    kParamInputGain = 3,
+    kParamWetDryMix = 4,
+    kParamDrive = 5,
+    kParamOutputGain = 6,
+    kNumParams = 7
 };
 
 inline uint32_t targetLatencyFromProfile(int profile) {
     switch (profile) {
-        case 1: return 512;
-        case 2: return 384;
-        case 3: return 256;
+        case 0: return 128;
+        case 1: return 256;
+        case 2: return 512;
         default: return 1024;
     }
 }
@@ -68,12 +72,17 @@ public:
           rust_(nullptr),
           hostContext_(nullptr),
           componentHandler_(nullptr),
-          sampleRate_(44100.0),
-          maxBlockSize_(1024),
+          sampleRate_(48000.0),
+          maxBlockSize_(8192),
           bypass_(false),
           selection_(0),
-          profile_(0),
-          active_(false)
+          profile_(1),
+          inputGain_(0.5),
+          wetDryMix_(1.0),
+          drive_(0.0),
+          outputGain_(0.5),
+          active_(false),
+          lastLatency_(targetLatencyFromProfile(1))
     {
         createRust();
     }
@@ -169,13 +178,37 @@ public:
 
     tresult PLUGIN_API setState(IBStream* state) override {
         if (!state) return kResultFalse;
-        int32 version = 0;
-        int32 count = 0;
+        int32 magicOrVer = 0;
         int32 bytesRead = 0;
-        if (state->read(&version, sizeof(version), &bytesRead) != kResultOk) return kResultFalse;
+        if (state->read(&magicOrVer, sizeof(magicOrVer), &bytesRead) != kResultOk) return kResultFalse;
+
+        if (magicOrVer == 0x4F475337) { // 'OGS7'
+            uint32_t jsonLen = 0;
+            if (state->read(&jsonLen, sizeof(jsonLen), &bytesRead) != kResultOk || jsonLen == 0 || jsonLen > 16 * 1024 * 1024) {
+                return kResultFalse;
+            }
+            std::vector<uint8_t> buf(jsonLen);
+            if (state->read(buf.data(), static_cast<int32>(jsonLen), &bytesRead) != kResultOk) {
+                return kResultFalse;
+            }
+            if (rust_) {
+                og_native_set_state(rust_, buf.data(), jsonLen);
+                bypass_ = og_native_get_param(rust_, kParamBypass) >= 0.5f;
+                selection_ = static_cast<int>(og_native_get_param(rust_, kParamSelection) * 128.0f + 0.5f);
+                profile_ = static_cast<int>(og_native_get_param(rust_, kParamLatencyProfile) * 3.0f + 0.5f);
+                inputGain_ = og_native_get_param(rust_, kParamInputGain);
+                wetDryMix_ = og_native_get_param(rust_, kParamWetDryMix);
+                drive_ = og_native_get_param(rust_, kParamDrive);
+                outputGain_ = og_native_get_param(rust_, kParamOutputGain);
+            }
+            return kResultOk;
+        }
+
+        // Legacy v1 binary state fallback
+        int32 count = 0;
         if (state->read(&count, sizeof(count), &bytesRead) != kResultOk) return kResultFalse;
 
-        int32 sel = 0, prof = 0, byp = 0;
+        int32 sel = 0, prof = 1, byp = 0;
         if (count >= 1) state->read(&byp, sizeof(byp), &bytesRead);
         if (count >= 2) state->read(&sel, sizeof(sel), &bytesRead);
         if (count >= 3) state->read(&prof, sizeof(prof), &bytesRead);
@@ -194,6 +227,19 @@ public:
 
     tresult PLUGIN_API getState(IBStream* state) override {
         if (!state) return kResultFalse;
+        if (rust_) {
+            uint32_t jsonLen = og_native_get_state(rust_, nullptr, 0);
+            if (jsonLen > 0) {
+                std::vector<uint8_t> buf(jsonLen);
+                uint32_t written = og_native_get_state(rust_, buf.data(), jsonLen);
+                int32 magic = 0x4F475337; // 'OGS7'
+                int32 bytesWritten = 0;
+                state->write(&magic, sizeof(magic), &bytesWritten);
+                state->write(&written, sizeof(written), &bytesWritten);
+                state->write(buf.data(), static_cast<int32>(written), &bytesWritten);
+                return kResultOk;
+            }
+        }
         int32 version = 1;
         int32 count = 3;
         int32 byp = bypass_ ? 1 : 0;
@@ -224,17 +270,23 @@ public:
     }
 
     tresult PLUGIN_API canProcessSampleSize(int32 symbolicSampleSize) override {
-        return (symbolicSampleSize == kSample32) ? kResultOk : kResultFalse;
+        return (symbolicSampleSize == kSample32 || symbolicSampleSize == kSample64) ? kResultOk : kResultFalse;
     }
 
     uint32 PLUGIN_API getLatencySamples() override {
+        if (rust_) {
+            uint32_t lat = og_native_latency(rust_);
+            if (lat > 0) return lat;
+        }
         return targetLatencyFromProfile(profile_);
     }
 
     tresult PLUGIN_API setupProcessing(ProcessSetup& setup) override {
         sampleRate_ = setup.sampleRate;
-        maxBlockSize_ = setup.maxSamplesPerBlock;
-        recreateRust();
+        maxBlockSize_ = std::max<uint32_t>(setup.maxSamplesPerBlock, 1024);
+        if (!rust_) {
+            createRust();
+        }
         return kResultOk;
     }
 
@@ -260,6 +312,28 @@ public:
         if (data.numSamples <= 0) return kResultOk;
         if (data.numInputs < 1 || data.numOutputs < 1) return kResultOk;
 
+        if (data.symbolicSampleSize == kSample64) {
+            double* inL = data.inputs[0].channelBuffers64[0];
+            double* inR = (data.inputs[0].numChannels > 1) ? data.inputs[0].channelBuffers64[1] : inL;
+            double* outL = data.outputs[0].channelBuffers64[0];
+            double* outR = (data.outputs[0].numChannels > 1) ? data.outputs[0].channelBuffers64[1] : outL;
+            const double* inputs[2] = { inL, inR };
+            double* outputs[2] = { outL, outR };
+            if (!rust_ || bypass_) {
+                if (outL != inL) std::memcpy(outL, inL, sizeof(double) * data.numSamples);
+                if (outR != inR) std::memcpy(outR, inR, sizeof(double) * data.numSamples);
+                return kResultOk;
+            }
+            uint32_t curLat = og_native_latency(rust_);
+            if (curLat != lastLatency_) {
+                lastLatency_ = curLat;
+                if (componentHandler_) componentHandler_->restartComponent(kLatencyChanged);
+            }
+            og_native_accept_latency(rust_, lastLatency_);
+            og_native_process_f64(rust_, inputs, outputs, static_cast<uint32_t>(data.numSamples));
+            return kResultOk;
+        }
+
         float* inL = data.inputs[0].channelBuffers32[0];
         float* inR = (data.inputs[0].numChannels > 1) ? data.inputs[0].channelBuffers32[1] : inL;
         float* outL = data.outputs[0].channelBuffers32[0];
@@ -273,6 +347,15 @@ public:
             if (outR != inR) std::memcpy(outR, inR, sizeof(float) * data.numSamples);
             return kResultOk;
         }
+
+        uint32_t curLat = og_native_latency(rust_);
+        if (curLat != lastLatency_) {
+            lastLatency_ = curLat;
+            if (componentHandler_) {
+                componentHandler_->restartComponent(kLatencyChanged);
+            }
+        }
+        og_native_accept_latency(rust_, lastLatency_);
 
         og_native_process(rust_, inputs, outputs, static_cast<uint32_t>(data.numSamples));
         return kResultOk;
@@ -322,7 +405,46 @@ public:
                 strToChar16("Latency Profile", info.title);
                 strToChar16("Latency", info.shortTitle);
                 info.stepCount = 3;
+                info.defaultNormalizedValue = 1.0 / 3.0;
+                info.flags = ParameterInfo::kCanAutomate;
+                return kResultOk;
+
+            case kParamInputGain:
+                info.id = kParamInputGain;
+                strToChar16("Input Gain", info.title);
+                strToChar16("InGain", info.shortTitle);
+                strToChar16("dB", info.units);
+                info.stepCount = 0;
+                info.defaultNormalizedValue = 0.5;
+                info.flags = ParameterInfo::kCanAutomate;
+                return kResultOk;
+
+            case kParamWetDryMix:
+                info.id = kParamWetDryMix;
+                strToChar16("Wet/Dry Mix", info.title);
+                strToChar16("Mix", info.shortTitle);
+                strToChar16("%", info.units);
+                info.stepCount = 0;
+                info.defaultNormalizedValue = 1.0;
+                info.flags = ParameterInfo::kCanAutomate;
+                return kResultOk;
+
+            case kParamDrive:
+                info.id = kParamDrive;
+                strToChar16("Drive / Sat", info.title);
+                strToChar16("Drive", info.shortTitle);
+                info.stepCount = 0;
                 info.defaultNormalizedValue = 0.0;
+                info.flags = ParameterInfo::kCanAutomate;
+                return kResultOk;
+
+            case kParamOutputGain:
+                info.id = kParamOutputGain;
+                strToChar16("Output Trim", info.title);
+                strToChar16("OutTrim", info.shortTitle);
+                strToChar16("dB", info.units);
+                info.stepCount = 0;
+                info.defaultNormalizedValue = 0.5;
                 info.flags = ParameterInfo::kCanAutomate;
                 return kResultOk;
 
@@ -341,11 +463,17 @@ public:
         } else if (id == kParamLatencyProfile) {
             int p = static_cast<int>(valueNormalized * 3.0 + 0.5);
             switch (p) {
-                case 1: snprintf(buf, sizeof(buf), "512s 10GbE"); break;
-                case 2: snprintf(buf, sizeof(buf), "384s Localhost VSTi"); break;
-                case 3: snprintf(buf, sizeof(buf), "256s Direct"); break;
-                default: snprintf(buf, sizeof(buf), "1024s LAN"); break;
+                case 0: snprintf(buf, sizeof(buf), "LOW (128)"); break;
+                case 1: snprintf(buf, sizeof(buf), "STD (256)"); break;
+                case 2: snprintf(buf, sizeof(buf), "HIGH (512)"); break;
+                default: snprintf(buf, sizeof(buf), "STUDIO (1024)"); break;
             }
+        } else if (id == kParamInputGain || id == kParamOutputGain) {
+            snprintf(buf, sizeof(buf), "%+.1f dB", (valueNormalized - 0.5) * 48.0);
+        } else if (id == kParamWetDryMix) {
+            snprintf(buf, sizeof(buf), "%.0f %%", valueNormalized * 100.0);
+        } else if (id == kParamDrive) {
+            snprintf(buf, sizeof(buf), "%.1f", valueNormalized * 10.0);
         } else {
             return kResultFalse;
         }
@@ -370,6 +498,10 @@ public:
             case kParamBypass: return bypass_ ? 1.0 : 0.0;
             case kParamSelection: return static_cast<double>(selection_) / 128.0;
             case kParamLatencyProfile: return static_cast<double>(profile_) / 3.0;
+            case kParamInputGain: return inputGain_;
+            case kParamWetDryMix: return wetDryMix_;
+            case kParamDrive: return drive_;
+            case kParamOutputGain: return outputGain_;
             default: return 0.0;
         }
     }
@@ -384,40 +516,66 @@ public:
     int profile() const { return profile_; }
     uint32_t selection() const { return static_cast<uint32_t>(selection_); }
     void setProfile(int p) { applyParameter(kParamLatencyProfile, static_cast<double>(p) / 3.0); }
-    void applyParameterFromUI(ParamID id, ParamValue val) { applyParameter(id, val); }
+    void applyParameterFromUI(ParamID id, ParamValue val) {
+        applyParameter(id, val);
+        if (componentHandler_) {
+            componentHandler_->beginEdit(id);
+            componentHandler_->performEdit(id, val);
+            componentHandler_->endEdit(id);
+        }
+    }
 
     IPlugView* PLUGIN_API createView(FIDString name) override;
 
 private:
     void applyParameter(ParamID id, ParamValue val) {
+        val = std::clamp(val, 0.0, 1.0);
         if (id == kParamBypass) {
             bypass_ = (val >= 0.5);
-            if (rust_) og_native_bypass(rust_, bypass_);
+            if (rust_) og_native_set_param(rust_, kParamBypass, static_cast<float>(val));
         } else if (id == kParamSelection) {
             selection_ = static_cast<int>(val * 128.0 + 0.5);
-            if (rust_) og_native_select(rust_, static_cast<uint32_t>(selection_));
+            if (rust_) og_native_set_param(rust_, kParamSelection, static_cast<float>(val));
         } else if (id == kParamLatencyProfile) {
             int newProfile = std::clamp(static_cast<int>(val * 3.0 + 0.5), 0, 3);
             if (newProfile != profile_) {
                 profile_ = newProfile;
                 uint32_t targetSamples = targetLatencyFromProfile(profile_);
                 if (rust_) {
-                    og_native_set_transport_latency(rust_, targetSamples);
+                    og_native_set_param(rust_, kParamLatencyProfile, static_cast<float>(val));
                     og_native_accept_latency(rust_, targetSamples);
                 }
                 if (componentHandler_) {
                     componentHandler_->restartComponent(kLatencyChanged);
                 }
             }
+        } else if (id == kParamInputGain) {
+            inputGain_ = val;
+            if (rust_) og_native_set_param(rust_, kParamInputGain, static_cast<float>(val));
+        } else if (id == kParamWetDryMix) {
+            wetDryMix_ = val;
+            if (rust_) og_native_set_param(rust_, kParamWetDryMix, static_cast<float>(val));
+        } else if (id == kParamDrive) {
+            drive_ = val;
+            if (rust_) og_native_set_param(rust_, kParamDrive, static_cast<float>(val));
+        } else if (id == kParamOutputGain) {
+            outputGain_ = val;
+            if (rust_) og_native_set_param(rust_, kParamOutputGain, static_cast<float>(val));
         }
     }
 
     void createRust() {
         if (!rust_) {
-            rust_ = og_native_create(sampleRate_, maxBlockSize_, 2, targetLatencyFromProfile(profile_));
+            lastLatency_ = targetLatencyFromProfile(profile_);
+            rust_ = og_native_create(sampleRate_, 8192, 2, lastLatency_);
             if (rust_) {
                 og_native_bypass(rust_, bypass_);
                 og_native_select(rust_, static_cast<uint32_t>(selection_));
+                og_native_set_param(rust_, kParamInputGain, static_cast<float>(inputGain_));
+                og_native_set_param(rust_, kParamWetDryMix, static_cast<float>(wetDryMix_));
+                og_native_set_param(rust_, kParamDrive, static_cast<float>(drive_));
+                og_native_set_param(rust_, kParamOutputGain, static_cast<float>(outputGain_));
+                og_native_accept_latency(rust_, lastLatency_);
             }
         }
     }
@@ -450,7 +608,12 @@ private:
     bool bypass_;
     int selection_;
     int profile_;
+    double inputGain_;
+    double wetDryMix_;
+    double drive_;
+    double outputGain_;
     bool active_;
+    uint32_t lastLatency_;
 };
 
 // --- GoodLookin VST3 Editor View Adapter ---
@@ -480,7 +643,7 @@ public:
     tresult PLUGIN_API attached(void* parent, FIDString type) override {
         if (!type || std::strcmp(type, kPlatformTypeNSView) != 0 || !parent) return kResultFalse;
         NSView* parentView = (__bridge NSView*)parent;
-        NSRect frame = NSMakeRect(0, 0, 720, 420);
+        NSRect frame = NSMakeRect(0, 0, 864, 420);
         view_ = [[OpenGridderEditorView alloc] initWithFrame:frame];
         OpenGridderVST3* c = controller_;
         view_.rustProvider = ^NativePlugin* {
@@ -496,6 +659,13 @@ public:
         };
         view_.onParameterChanged = ^(uint32_t paramId, float val) {
             c->applyParameterFromUI(paramId, val);
+        };
+        OpenGridderPlugView* selfView = this;
+        view_.onSizeChanged = ^(CGFloat newW, CGFloat newH) {
+            if (selfView->plugFrame_) {
+                ViewRect vr{0, 0, static_cast<int32>(newW), static_cast<int32>(newH)};
+                selfView->plugFrame_->resizeView(selfView, &vr);
+            }
         };
 
         [parentView addSubview:view_];
@@ -516,18 +686,22 @@ public:
     tresult PLUGIN_API onKeyUp(char16 key, int16 keyCode, int16 modifiers) override { return kResultFalse; }
     tresult PLUGIN_API getSize(ViewRect* size) override {
         if (!size) return kInvalidArgument;
-        size->left = 0; size->top = 0; size->right = 720; size->bottom = 420;
+        NSSize sz = view_ ? [view_ preferredViewSize] : NSMakeSize(864, 420);
+        size->left = 0; size->top = 0;
+        size->right = static_cast<int32>(sz.width);
+        size->bottom = static_cast<int32>(sz.height);
         return kResultOk;
     }
     tresult PLUGIN_API onSize(ViewRect* newSize) override { return kResultOk; }
     tresult PLUGIN_API onFocus(TBool state) override { return kResultOk; }
-    tresult PLUGIN_API setFrame(IPlugFrame* frame) override { return kResultOk; }
-    tresult PLUGIN_API canResize() override { return kResultFalse; }
+    tresult PLUGIN_API setFrame(IPlugFrame* frame) override { plugFrame_ = frame; return kResultOk; }
+    tresult PLUGIN_API canResize() override { return kResultTrue; }
     tresult PLUGIN_API checkSizeConstraint(ViewRect* rect) override { return kResultOk; }
 
 private:
     std::atomic<uint32> refCount_{1};
     OpenGridderVST3* controller_;
+    IPlugFrame* plugFrame_{nullptr};
     OpenGridderEditorView* view_{nil};
 };
 
@@ -584,7 +758,7 @@ public:
         strncpy(info->category, kVstAudioEffectClass, sizeof(info->category));
         strncpy(info->name, "OpenGridder", sizeof(info->name));
         strncpy(info->vendor, "OpenGrid Studio", sizeof(info->vendor));
-        strncpy(info->version, "0.1.0", sizeof(info->version));
+        strncpy(info->version, "0.2.0-alpha", sizeof(info->version));
         strncpy(info->sdkVersion, "VST 3.7.0", sizeof(info->sdkVersion));
         strncpy(info->subCategories, "Fx|Network", sizeof(info->subCategories));
         info->classFlags = 0;
