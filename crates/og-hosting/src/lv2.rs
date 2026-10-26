@@ -6,6 +6,22 @@ use crate::HostedPlugin;
 use og_common::server_plugin::{PluginLayout, ServerPlugin};
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+use libc as dl;
+
+/// LV2 binaries are not loadable on Windows; the stub reports a failed load.
+#[cfg(not(unix))]
+#[allow(non_upper_case_globals)]
+mod dl {
+    use std::os::raw::{c_char, c_int, c_void};
+    pub const RTLD_NOW: c_int = 0;
+    pub const RTLD_LOCAL: c_int = 0;
+    pub unsafe fn dlopen(_: *const c_char, _: c_int) -> *mut c_void { std::ptr::null_mut() }
+    pub unsafe fn dlsym(_: *mut c_void, _: *const c_char) -> *mut c_void { std::ptr::null_mut() }
+    pub unsafe fn dlclose(_: *mut c_void) -> c_int { 0 }
+}
+
+
 /// LV2 C ABI descriptor (`lv2.h`).
 #[repr(C)]
 pub struct LV2Descriptor {
@@ -190,7 +206,7 @@ impl Drop for Lv2HostedPlugin {
                 }
             }
             if !self.lib_handle.is_null() {
-                libc::dlclose(self.lib_handle);
+                dl::dlclose(self.lib_handle);
             }
         }
     }
@@ -358,21 +374,21 @@ pub fn instantiate_lv2(desc: &ServerPlugin) -> Result<Box<dyn HostedPlugin>, Str
         .map_err(|e| e.to_string())?;
 
     unsafe {
-        let handle = libc::dlopen(c_path.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
+        let handle = dl::dlopen(c_path.as_ptr(), dl::RTLD_NOW | dl::RTLD_LOCAL);
         if handle.is_null() {
             return Err(format!("Failed to dlopen LV2 binary {:?}", dylib_path));
         }
         let sym_name = std::ffi::CString::new("lv2_descriptor").unwrap();
-        let sym = libc::dlsym(handle, sym_name.as_ptr());
+        let sym = dl::dlsym(handle, sym_name.as_ptr());
         if sym.is_null() {
-            libc::dlclose(handle);
+            dl::dlclose(handle);
             return Err("Missing lv2_descriptor symbol".to_string());
         }
         let desc_fn: unsafe extern "C" fn(u32) -> *const LV2Descriptor =
             std::mem::transmute(sym);
         let lv2_desc = desc_fn(0);
         if lv2_desc.is_null() {
-            libc::dlclose(handle);
+            dl::dlclose(handle);
             return Err("lv2_descriptor(0) returned null".to_string());
         }
         let mut hosted = Lv2HostedPlugin {

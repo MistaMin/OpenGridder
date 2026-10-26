@@ -44,7 +44,7 @@ def parse_pe_header(filepath):
 
 def main():
     pkg_dir = sys.argv[1] if len(sys.argv) > 1 else "target/server-windows7"
-    exe_path = os.path.join(pkg_dir, "AudioGridderServer.exe")
+    exe_path = os.path.join(pkg_dir, "OpenGridderServer.exe")
     synch_dll = os.path.join(pkg_dir, "api-ms-win-core-synch-l1-2-0.dll")
     prng_dll = os.path.join(pkg_dir, "bcryptprimitives.dll")
 
@@ -56,7 +56,7 @@ def main():
 
     # Check PE header of server
     hdr = parse_pe_header(exe_path)
-    print(f"AudioGridderServer.exe PE Info: 64-bit={hdr['is_64bit']}, OS Version={hdr['major_os']}.{hdr['minor_os']}, Subsystem Version={hdr['major_subsystem']}.{hdr['minor_subsystem']}")
+    print(f"OpenGridderServer.exe PE Info: 64-bit={hdr['is_64bit']}, OS Version={hdr['major_os']}.{hdr['minor_os']}, Subsystem Version={hdr['major_subsystem']}.{hdr['minor_subsystem']}")
 
     if hdr['major_subsystem'] > 6 or (hdr['major_subsystem'] == 6 and hdr['minor_subsystem'] > 1):
         print(f"FAIL: Subsystem version {hdr['major_subsystem']}.{hdr['minor_subsystem']} exceeds Windows 7 (6.1)")
