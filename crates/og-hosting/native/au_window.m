@@ -36,6 +36,7 @@ bool og_au_show_window(AudioComponentInstance unit, const char *title_str, int x
                 [existing setFrameTopLeftPoint:NSMakePoint(x, y)];
             }
             [existing makeKeyAndOrderFront:nil];
+            [existing orderFrontRegardless];
             [NSApp activateIgnoringOtherApps:YES];
             return;
         }
@@ -103,6 +104,7 @@ bool og_au_show_window(AudioComponentInstance unit, const char *title_str, int x
         if (on_top) [window setLevel:NSFloatingWindowLevel];
         [g_auWindows setObject:window forKey:key];
         [window makeKeyAndOrderFront:nil];
+        [window orderFrontRegardless];
         [NSApp activateIgnoringOtherApps:YES];
     });
 

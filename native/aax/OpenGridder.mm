@@ -232,7 +232,8 @@ public:
 
     AAX_Result GetViewSize(AAX_Point* oViewSize) const override {
         if (oViewSize) {
-            NSSize sz = mEditorView ? [mEditorView preferredViewSize] : NSMakeSize(864.0, 420.0);
+            NSSize sz = mEditorView ? [mEditorView preferredViewSize] : NSZeroSize;
+            if (sz.width < 100.0 || sz.height < 100.0) sz = NSMakeSize(864.0, 420.0);
             oViewSize->vert = static_cast<float>(sz.height);
             oViewSize->horz = static_cast<float>(sz.width);
         }
