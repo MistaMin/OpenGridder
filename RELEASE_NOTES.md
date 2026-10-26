@@ -1,6 +1,9 @@
-# OpenGridder 0.3.1-alpha - Multi-Format Release
+# OpenGridder 0.3.2 Release
 
 ### Highlights:
+- **macOS Accessibility Authorization**: Integrated system prompt and tray menu controls for macOS Accessibility (`AXIsProcessTrustedWithOptions`) ensuring seamless synthetic mouse and keyboard event forwarding to hosted plugin windows without system event drops.
+- **Robust AU Window Teardown**: Explicit teardown and detachment of plugin Cocoa editor windows prior to AudioUnit instance disposal, completely preventing `SIGSEGV` faults during editor close or plugin unload.
+- **Pro Tools AAX Page Tables**: Bundled and PACE Eden-signed `OpenGridderPages.xml` ensuring complete control surface integration across Avid S6, S3, ICON D-Control/D-Command, and Focusrite/Avid C|24.
 - **Multi-Stream DSP Core Sharing (TDM Engine)**: Fully optimized Motorola DSP56321 assembly firmware allocating 4 concurrent stereo streams per core (8 channels per DSP, up to 72 stereo instances across an 18-core Pro Tools HD Accel card) utilizing shared on-chip 24-bit X/Y RAM ring buffering.
 - **Hardware Console Integration (Focusrite Control|24 & Avid C|24)**: Complete 24-channel rotary encoder and switch mapping via custom `FrTL` Pro Tools XML Page Tables, alongside full surface support for `HgTL` (ICON D-Control / D-Command), `PcTL` (ProControl), and `MkTL` (Command|8 / HUI).
 - **Zero-Overhead Pure-Native Architecture**: Zero-overhead pure-Rust audio streaming core paired with native C/C++/Objective-C bindings directly to Steinberg, Apple, and Avid SDKs with zero runtime bloat.

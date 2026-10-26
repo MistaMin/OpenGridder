@@ -2,6 +2,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <AudioToolbox/AUAudioUnit.h>
 #import <AudioUnit/AUCocoaUIView.h>
+#import <ApplicationServices/ApplicationServices.h>
 
 static NSMapTable *g_auWindows = nil;
 
@@ -148,6 +149,8 @@ void og_run_main_loop(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        NSDictionary *options = @{(__bridge id)kAXTrustedCheckOptionPrompt: @YES};
+        AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
         [NSApp run];
     }
 }

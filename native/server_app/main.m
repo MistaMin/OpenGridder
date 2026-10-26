@@ -1,6 +1,7 @@
 // OpenGridder Server native macOS Application with GoodLookinDri Hardware UI
 // Pure AppKit / Cocoa implementation - Zero-Overhead Pure-Native.
 #import <Cocoa/Cocoa.h>
+#import <ApplicationServices/ApplicationServices.h>
 #import <signal.h>
 #import <unistd.h>
 
@@ -141,7 +142,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         self.versionLabel.backgroundColor = [NSColor clearColor];
         self.versionLabel.font = [NSFont systemFontOfSize:12 weight:NSFontWeightRegular];
         self.versionLabel.textColor = [NSColor colorWithCalibratedRed:0.60 green:0.65 blue:0.70 alpha:0.8];
-        self.versionLabel.stringValue = @"v0.3.1-alpha • macOS Universal (Apple Silicon & Intel)";
+        self.versionLabel.stringValue = @"v0.3.2 • macOS Universal (Apple Silicon & Intel)";
         [plate addSubview:self.versionLabel];
 
         // Progress bar
@@ -288,7 +289,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         versionLabel.backgroundColor = [NSColor clearColor];
         versionLabel.font = [NSFont systemFontOfSize:11 weight:NSFontWeightRegular];
         versionLabel.textColor = [NSColor colorWithCalibratedRed:0.60 green:0.65 blue:0.70 alpha:0.8];
-        versionLabel.stringValue = @"v0.3.1-alpha • macOS Universal (Apple Silicon & Intel)";
+        versionLabel.stringValue = @"v0.3.2 • macOS Universal (Apple Silicon & Intel)";
         [plate addSubview:versionLabel];
 
         NSTextField *tagline = [[NSTextField alloc] initWithFrame:NSMakeRect(185, 486, 490, 18)];
@@ -354,7 +355,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
     NSString *rawText = 
 @"================================================================================\n"
 @"                 OPENGRIDDER — ZERO-OVERHEAD PRECISION AUDIO GRID              \n"
-@"                         Version 0.3.1-alpha • Multi-Format                    \n"
+@"                         Version 0.3.2 • Multi-Format                         \n"
 @"================================================================================\n\n"
 @"[ ARCHITECTURE & OVERVIEW ]\n"
 @"OpenGridder is an ultra-high-performance, zero-overhead, pure-native audio streaming\n"
@@ -981,6 +982,9 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
     self.logPath = [logDir stringByAppendingPathComponent:@"server.log"];
     self.serverPort = 55056;
 
+    // 1b. Request Accessibility Permissions for remote mouse/keyboard synthetic event forwarding
+    [self requestAccessibilityPermissions];
+
     // 2. Setup System Status Bar Item
     self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
     NSImage *icon = [NSImage imageNamed:@"OpenGridderServer"];
@@ -1037,6 +1041,10 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
     NSMenuItem *configItem = [[NSMenuItem alloc] initWithTitle:@"Open Config Folder..." action:@selector(openConfig:) keyEquivalent:@""];
     [configItem setTarget:self];
     [menu addItem:configItem];
+
+    NSMenuItem *accessItem = [[NSMenuItem alloc] initWithTitle:@"Accessibility Permissions..." action:@selector(openAccessibilitySettings:) keyEquivalent:@""];
+    [accessItem setTarget:self];
+    [menu addItem:accessItem];
 
     [menu addItem:[NSMenuItem separatorItem]];
 
@@ -1294,6 +1302,32 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
     NSString *cfgDir = [appSupport stringByAppendingPathComponent:@"OpenGridder"];
     [[NSFileManager defaultManager] createDirectoryAtPath:cfgDir withIntermediateDirectories:YES attributes:nil error:nil];
     [[NSWorkspace sharedWorkspace] openURL:[NSURL fileURLWithPath:cfgDir]];
+}
+
+- (void)requestAccessibilityPermissions {
+    NSDictionary *options = @{(__bridge id)kAXTrustedCheckOptionPrompt: @YES};
+    BOOL trusted = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
+    if (trusted) {
+        NSLog(@"[OpenGridder] Accessibility features are authorized.");
+    } else {
+        NSLog(@"[OpenGridder] Accessibility features requested via macOS system prompt.");
+    }
+}
+
+- (void)openAccessibilitySettings:(id)sender {
+    NSDictionary *options = @{(__bridge id)kAXTrustedCheckOptionPrompt: @YES};
+    BOOL trusted = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
+    if (trusted) {
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Accessibility Permissions Active";
+        alert.informativeText = @"OpenGridder Server is fully authorized to send synthetic mouse and keyboard events to hosted plugin windows.";
+        alert.alertStyle = NSAlertStyleInformational;
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+    } else {
+        NSURL *url = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"];
+        [[NSWorkspace sharedWorkspace] openURL:url];
+    }
 }
 
 - (void)quitApp:(id)sender {

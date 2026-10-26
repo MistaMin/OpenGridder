@@ -1,4 +1,4 @@
-# OpenGridder 0.3.1-alpha - Multi-Format Release
+# OpenGridder 0.3.2 - Multi-Format Release
 
 ## Release Scope
 
@@ -31,7 +31,7 @@ Hosts automatically receive real-time delay compensation notifications via:
 
 ## Installation and Quick Start
 
-Quit your DAW before installing. The notarized macOS installer (`OpenGridder-0.3.1-alpha-macos.pkg`) installs:
+Quit your DAW before installing. The notarized macOS installer (`OpenGridder-0.3.2-macos.pkg`) installs:
 - `OpenGridder.vst3` into `/Library/Audio/Plug-Ins/VST3`
 - `OpenGridderAUv3.appex` registered via `OpenGridder Server.app/Contents/PlugIns`
 - `OpenGridder.component` into `/Library/Audio/Plug-Ins/Components`
@@ -40,7 +40,7 @@ Quit your DAW before installing. The notarized macOS installer (`OpenGridder-0.3
 - `OpenGridder Server.app` into `/Applications`
 - Documentation and licenses into `/Library/Application Support/OpenGridder`
 
-For Windows 7 SP1+, extract `OpenGridder-0.3.1-alpha-windows7-x86_64.zip` to any folder. Ensure the companion shims (`api-ms-win-core-synch-l1-2-0.dll` and `bcryptprimitives.dll`) remain in the same directory as `OpenGridderServer.exe`.
+For Windows 7 SP1+, extract `OpenGridder-0.3.2-windows7-x86_64.zip` to any folder. Ensure the companion shims (`api-ms-win-core-synch-l1-2-0.dll` and `bcryptprimitives.dll`) remain in the same directory as `OpenGridderServer.exe`.
 
 ### Launching OpenGridder Server
 

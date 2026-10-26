@@ -42,7 +42,8 @@ python3 - "$OPENGRIDDER_LEGACY_CXX_HEADERS" "$og_cxx_headers" <<'PYHEADERS'
 import shutil,sys
 from pathlib import Path
 source,target=map(Path,sys.argv[1:])
-shutil.copytree(source,target,dirs_exist_ok=True,symlinks=True)
+if source.resolve() != target.resolve():
+    shutil.copytree(source,target,dirs_exist_ok=True,symlinks=True)
 config=target/'__config'
 text=config.read_text()
 text=text.replace('#  define _LIBCPP_NORETURN [[noreturn]]',

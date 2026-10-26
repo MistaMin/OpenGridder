@@ -6,7 +6,7 @@ The OpenGridder core is **MIT licensed** with a zero-overhead pure-native archit
 
 ---
 
-## Highlights & Features (v0.3.1-alpha)
+## Highlights & Features (v0.3.2)
 
 - **Zero-Overhead Pure-Native Architecture**: Zero framework bloat, lock-free real-time audio transport, and sub-millisecond network streaming.
 - **4-Stream TDM DSP Core Sharing**: Expanded Motorola DSP56321 allocation to 8 audio channels, allowing 4 stereo instances to share a single DSP core (up to 72 stereo instances on an 18-core Pro Tools HD Accel card).
