@@ -1,5 +1,5 @@
 //! Pure-Rust RGBA software canvas + GoodLookinUI procedural hardware rendering
-//! ported 1:1 from `GoodLookinUI/adapters/juce/GoodLookinUI.h`:
+//! ported 1:1 from `GoodLookinUI/GoodLookinUI.h`:
 //! - `draw_screw` (oxidized brass slot screws)
 //! - `draw_panel` (vintage dark green/charcoal brushed metal rack panel with 6 corner/edge screws)
 //! - `draw_key` (ivory/amber mechanical toggle key with lamp indicator)
@@ -382,7 +382,7 @@ fn rounded_rect_coverage(px: f32, py: f32, r: Rect, radius: f32) -> f32 {
     (0.5 - dist).clamp(0.0, 1.0)
 }
 
-/// Port of `goodlookinui::drawScrew` from `GoodLookinUI/adapters/juce/GoodLookinUI.h`.
+/// Port of `goodlookinui::drawScrew` from `GoodLookinUI/GoodLookinUI.h`.
 pub fn draw_screw(canvas: &mut Canvas, cx: f32, cy: f32, radius: f32) {
     canvas.fill_circle(cx, cy + 1.2, radius, Color::rgba(0, 0, 0, 140));
     canvas.fill_circle(
@@ -411,7 +411,7 @@ pub fn draw_screw(canvas: &mut Canvas, cx: f32, cy: f32, radius: f32) {
     );
 }
 
-/// Port of `goodlookinui::drawPanel` from `GoodLookinUI/adapters/juce/GoodLookinUI.h`.
+/// Port of `goodlookinui::drawPanel` from `GoodLookinUI/GoodLookinUI.h`.
 pub fn draw_panel(canvas: &mut Canvas, area: Rect) {
     canvas.clear(Color::from_argb(0xff0b0d0c));
     let outer = area.reduced(8.0);
@@ -458,7 +458,7 @@ pub fn draw_panel(canvas: &mut Canvas, area: Rect) {
     }
 }
 
-/// Port of `goodlookinui::drawKey` from `GoodLookinUI/adapters/juce/GoodLookinUI.h`.
+/// Port of `goodlookinui::drawKey` from `GoodLookinUI/GoodLookinUI.h`.
 pub fn draw_key(canvas: &mut Canvas, bounds: Rect, label: &str, active: bool, accent: Color) {
     let area = bounds.reduced(3.0);
     let bezel = Rect::new(
@@ -535,7 +535,7 @@ pub fn draw_key(canvas: &mut Canvas, bounds: Rect, label: &str, active: bool, ac
     canvas.draw_text_centered(label, label_bounds, 1, Color::from_argb(0xffd8cfbe));
 }
 
-/// Port of `goodlookinui::drawConsoleKnob` from `GoodLookinUI/adapters/juce/GoodLookinUI.h`.
+/// Port of `goodlookinui::drawConsoleKnob` from `GoodLookinUI/GoodLookinUI.h`.
 pub fn draw_console_knob(
     canvas: &mut Canvas,
     bounds: Rect,
@@ -632,7 +632,7 @@ pub fn draw_console_knob(
     canvas.draw_text_centered(value_text, badge, 1, Color::from_argb(0xffd7cebe));
 }
 
-/// Port of `goodlookinui::drawKnob` from `GoodLookinUI/adapters/juce/GoodLookinUI.h`.
+/// Port of `goodlookinui::drawKnob` from `GoodLookinUI/GoodLookinUI.h`.
 pub fn draw_knob(
     canvas: &mut Canvas,
     bounds: Rect,

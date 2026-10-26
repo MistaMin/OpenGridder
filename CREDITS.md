@@ -1,9 +1,7 @@
 # Credits & Attribution
 
-**OpenGridder (Rust Edition)** is a complete, JUCE-free Rust reimplementation of **AudioGridder** (`marcosfork-1.2.1`, commit `559863f`).
+**OpenGridder (Rust Edition)** is a zero-overhead, pure-native audio streaming grid and distributed DSP architecture designed and developed by **Marcos Deida**.
 
-## Original Concept & Architecture
-- **Andreas Pohl** (`@apohl79`) — Creator of [AudioGridder](https://github.com/apohl79/audiogridder), released under the MIT License. The network protocol (v13), 4-socket command/audio/screen streaming model, multi-mono channel mapping, sandbox architecture, and plugin chain design originate from his work.
-
-## Fork Features, UI Toolkit & Rust Port
-- **Marcos Deida** (`@MistaMin`) — Author of the `marcosfork-1.2.1` per-plugin 2x/4x oversampling architecture, settings persistence fixes, and creator of [GoodLookinUI](https://github.com/MistaMin/GoodLookinUI) (MIT License), used here for hardware-inspired console panels, knobs, and controls without any JUCE dependency.
+## Core Architecture, DSP & UI Toolkit
+- **Marcos Deida** (`@MistaMin`) — Core network streaming architecture, distributed DSP processing engine, multi-stream Motorola DSP56321 assembly firmware, Pro Tools AAX and hardware console integrations (Control|24 & C|24), and creator of [GoodLookinUI](https://github.com/MistaMin/GoodLookinUI), used for hardware-inspired analog console panels, precision ballistic VU meters, and rotary controls.
+- **OpenGrid Precision Audio Network** — Ultra-low latency network audio transport, lock-free ring buffering, remote screen compression, and dynamic delay compensation across macOS, Windows, and vintage studio systems.

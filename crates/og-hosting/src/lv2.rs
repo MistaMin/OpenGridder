@@ -1,5 +1,5 @@
 //! LV2 (`.lv2` bundle + `manifest.ttl` + `lv2_descriptor` C ABI) scanner and host.
-//! Zero JUCE dependency.
+//! Zero-overhead pure-native implementation.
 
 use crate::vst3::default_plugin_parameters;
 use crate::HostedPlugin;

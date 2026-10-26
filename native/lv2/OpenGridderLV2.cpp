@@ -1,4 +1,4 @@
-// OpenGridder LV2 Plugin Adapter (Zero-JUCE C ABI)
+// OpenGridder LV2 Plugin Adapter (Zero-Overhead C ABI)
 #include "opengridder.h"
 #include <cstdint>
 #include <cstdlib>

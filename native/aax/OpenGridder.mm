@@ -1,5 +1,5 @@
 // OpenGridder AAX plug-in adapter for Pro Tools.
-// Zero JUCE: Pure Rust core + Native Cocoa GoodLookin UI + Avid AAX SDK.
+// Zero-Overhead: Pure Rust core + Native Cocoa GoodLookin UI + Avid AAX SDK.
 #import "opengridder.h"
 #import "OpenGridderEditorView.h"
 #include "AAX_CEffectParameters.h"

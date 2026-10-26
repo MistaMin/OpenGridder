@@ -1,5 +1,5 @@
 // OpenGridder VST3 adapter for modern DAWs (Cubase, Studio One, Bitwig, Reaper).
-// Zero-JUCE implementation adhering directly to Steinberg VST 3.7 C++ interfaces.
+// Zero-Overhead implementation adhering directly to Steinberg VST 3.7 C++ interfaces.
 
 #include "pluginterfaces/base/ipluginbase.h"
 #include "pluginterfaces/base/ibstream.h"

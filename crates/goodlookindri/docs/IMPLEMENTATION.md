@@ -10,7 +10,7 @@ Development builds can carry an in-plugin editor. Testers change style, label, c
 
 Release users can scale the interface. They cannot edit typography or layout. The accepted design is a CSV file embedded in the plugin.
 
-GoodLookinDri is the Rust implementation of that model. [GoodLookinUI](https://github.com/MistaMin/GoodLookinUI) is the C++ implementation, with a JUCE painting adapter. Design files move between them. The plugin project chooses which one to link. The toolkit does not choose a plugin framework.
+GoodLookinDri is the pure-Rust implementation of that model. [GoodLookinUI](https://github.com/MistaMin/GoodLookinUI) is the C++ implementation. Design files move between them. The plugin project chooses which one to link. The toolkit does not choose a plugin framework.
 
 Target systems are whatever the host plugin already ships: Apple Silicon and Intel macOS, Windows, and Linux. Format wrappers remain the plugin's responsibility.
 
@@ -25,7 +25,7 @@ Shipped in this repository:
 
 Known limits of 0.1:
 
-- Commands approximate a few JUCE gradients. Rim strokes are a single ellipse. Gloss is a diagonal fill. Grub screws are empty, matching the C++ stubs. Text is not rasterised here.
+- Commands approximate smooth gradients. Rim strokes are a single ellipse. Gloss is a diagonal fill. Grub screws are empty, matching the C++ stubs. Text is not rasterised here.
 - There is no pixel comparison against `docs/images`.
 - Hit-testing exists for the colour wheel only. Knobs, faders, and switches do not yet report drags.
 - No window demo is included. The first host plugin is the proof of embedding.

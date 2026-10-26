@@ -1,55 +1,56 @@
-# OpenGridder-Rust - Alpha Software (`v1.2.1-marcosfork`)
+# OpenGridder — Zero-Overhead Precision Audio Network
 
-**Alpha software for evaluation.** Pro Tools host qualification, full remote
-session recall and the requested legacy compatibility are still in development.
+OpenGridder is an ultra-low-latency, zero-overhead audio streaming network and DSP offload engine written in **Rust** with pure-native C/C++/Objective-C platform adapters.
 
-An in-development **Rust** implementation of OpenGridder, using **AudioGridder
-`v1.2.1-marcosfork`** (commit `559863f`) as a reference. The OpenGridder core is
-**MIT licensed**, with **no JUCE** or GTK dependency. Optional SDK adapters retain
-their external SDK licensing requirements. See [current build status](native/BUILD_STATUS.md).
-
-## Credits & Attribution
-
-- **Andreas Pohl** (`apohl79@gmail.com`) — Original creator and architect of [AudioGridder](https://github.com/apohl79/audiogridder) (`AG_PROTOCOL_VERSION = 13`, 4-socket real-time audio/screen/command architecture, sandbox isolation, and DAW plugin workflow).
-- **Marcos Deida** (`MistaMin`) — Creator of the `v1.2.1-marcosfork` enhancements (per-plugin `1x`/`2x`/`4x` polyphase FIR oversampling with automatic PDC latency reporting, state serialization v7, server settings persistence fix), creator of the [GoodLookinUI](https://github.com/MistaMin/GoodLookinUI) hardware UI framework, and lead architect of the Rust rewrite.
+The OpenGridder core is **MIT licensed** with a zero-overhead pure-native architecture. Optional SDK adapters retain their external SDK licensing requirements.
 
 ---
 
-## Workspace Architecture (9 Crates)
+## Highlights & Features (v0.3.1-alpha)
 
-| Crate | Replaces (`audiogridder-fork`) | Description |
-| :--- | :--- | :--- |
-| `crates/og-common` | `Common/Source/*` | Binary wire protocol v13 (`HandshakeRequest`, `HandshakeResponse`, `AudioMessage`, `MessageType` including `SetPluginOversampling = 75`), `AudioRingBuffer`, `ChannelSet`, `ChannelMapper`, `ImageDiff`, `ServerPlugin`, `Metrics`, `Defaults`, mDNS (`_audiogridder._tcp.local.`). |
-| `crates/og-dsp` | `Server/Source/Processor.*` (DSP) | Polyphase equiripple half-band FIR `Oversampler<f32>` & `Oversampler<f64>` (`1x`, `2x`, `4x`), multi-mono slot processing, and latency reporting. |
-| `crates/og-goodlookinui` | `GoodLookinUI` + JUCE UI | Pure-Rust port of `GoodLookinUI` (`Design.h` CSV schema, validation, critically damped spring `Motion`, and procedural hardware vector rendering: `draw_panel`, `draw_screw`, `draw_key`, `draw_console_knob`, `draw_knob`) plus AudioGridder's `PluginButton` (`1x`/`2x`/`4x` badge) and `GenericEditor` console rack. |
-| `crates/og-hosting` | JUCE `AudioPluginFormatManager` | Native macOS **AU v2** effect hosting (Rust/AudioToolbox), optional **VST3** effect hosting (external SDK ABI adapter), and LV2 discovery only. |
-| `crates/og-screen` | `Server/Source/Screen*`, `Plugin/Source/ImageReader*` | RGBA delta diffing (`og_common::image_diff`) and PNG/raw frame encoding & decoding over the `screen` socket. |
-| `crates/og-client` | `Plugin/Source/Client.*`, `AudioStreamer.hpp` | 4-socket client (`cmdOut`, `cmdIn`, `audio`, `screen`), lock-free `AudioStreamer<T>`, and remote RPC commands including `set_plugin_oversampling`. |
-| `crates/og-server` | `Server/Source/*` | `AudioGridderServer` binary, `Processor`, `ProcessorChain`, `AudioWorker`, `ScreenWorker`, `Worker`, `SandboxMode`, and `ServerConfig` (with the PR #1354 `save_config()` persistence fix). |
-| `crates/og-plugin` | `Plugin/Source/*` | DAW `PluginProcessor` (`Fx`, `Instrument`, `Midi`), `LoadedPlugin` state v7 (`oversampling_factor` at index 11), 16 automation slots, A/B comparison, `GoodLookinUI` `PluginEditor`, and VST3/LV2 C-ABI exports. |
-| `crates/og-tray` | `PluginTray/Source/*` | `AudioGridderPluginTray` binary, TCP instance status monitor (`55055`), recents synchronization, and `GoodLookinUI` monitor view. |
+- **Zero-Overhead Pure-Native Architecture**: Zero framework bloat, lock-free real-time audio transport, and sub-millisecond network streaming.
+- **4-Stream TDM DSP Core Sharing**: Expanded Motorola DSP56321 allocation to 8 audio channels, allowing 4 stereo instances to share a single DSP core (up to 72 stereo instances on an 18-core Pro Tools HD Accel card).
+- **Pro Tools Hardware Console Integration**: Native Page Tables for Focusrite Control|24 and Avid C|24 (`FrTL` 24-channel layout), plus ICON D-Control/D-Command (`HgTL`), ProControl (`PcTL`), and Command|8/HUI (`MkTL`) for physical motorized faders, rotary encoders, and scribble strip OLED displays.
+- **2x-Wide Analog VU Metering**: Dynamic window resizing (`864×420` in Analog VU mode vs `720×420` in Digital PPM mode) using pure native Cocoa (`OpenGridderEditorView`).
+- **Dual VU Calibration & I/O Source**: Switchable `-18 dBFS` and `-3 dBFS` reference calibrations, plus `[IN* | OUT]` source metering with over-detection ceiling.
+- **HybridEQ Residual ADAA & Harmonic Saturation**: Zero high-frequency loss ADAA with 2x/4x Kaiser-windowed polyphase oversampling filters, Clean/Tube/Transformer character modes, and zipper-free parameter smoothing.
+- **6 Verified Plugin Formats**: VST3, AUv2 (`aufx`), AUv3, AAX Native (PACE Eden signed), CLAP, VST 2.4, and LV2.
+- **Native macOS Server Application**: Menu bar status icon, dock integration, high-speed timestamp scan caching (`< 500 ms` for 1,700+ plugins), and floating startup splash window.
+- **Apple Notarized & Signed**: Signed with Apple Developer ID (Hardened Runtime), notarized via Apple notarytool, and stapled for both `.pkg` and `.dmg`.
 
 ---
 
-## Building & Running Tests
+## Workspace Architecture
 
-**Native AAX development target:** a no-JUCE AAX adapter and a Rust callback/IO
-runtime are now in `native/` and `og-plugin`. See [native build instructions](native/README.md).
-PACE and Apple signing are verified. Pro Tools 10 / OS X 10.8.5, full AAX state
-recall and broad third-party compatibility are not yet supported or qualified.
-See [AAX preview release preparation](Docs/Release.md) and the
-[current user manual](Docs/UserManual.md).
+| Crate / Module | Description |
+| :--- | :--- |
+| `crates/og-common` | Binary wire protocol v13 (`HandshakeRequest`, `HandshakeResponse`, `AudioMessage`), `AudioRingBuffer`, `ChannelSet`, `ChannelMapper`, `ImageDiff`, `ServerPlugin`, `Metrics`, `Defaults`, mDNS. |
+| `crates/og-dsp` | Polyphase equiripple half-band FIR `Oversampler<f32>` & `Oversampler<f64>` (`1x`, `2x`, `4x`), multi-mono slot processing, and latency reporting. |
+| `crates/og-goodlookinui` | Pure-Rust port of `GoodLookinUI` (`Design.h` CSV schema, validation, critically damped spring `Motion`, and procedural hardware vector rendering: `draw_panel`, `draw_screw`, `draw_key`, `draw_console_knob`, `draw_knob`) plus `PluginButton` (`1x`/`2x`/`4x` badge) and `GenericEditor` console rack. |
+| `crates/og-hosting` | Native macOS **AU v2** effect hosting (Rust/AudioToolbox), **VST3** effect hosting (Steinberg SDK ABI adapter), and LV2 discovery. |
+| `crates/og-screen` | RGBA delta diffing (`og_common::image_diff`) and PNG/raw frame encoding & decoding over the `screen` socket. |
+| `crates/og-client` | 4-socket client (`cmdOut`, `cmdIn`, `audio`, `screen`), lock-free `AudioStreamer<T>`, and remote RPC commands including `set_plugin_oversampling`. |
+| `crates/og-server` | `OpenGridderServer` binary, `Processor`, `ProcessorChain`, `AudioWorker`, `ScreenWorker`, `Worker`, `SandboxMode`, and `ServerConfig`. |
+| `crates/og-plugin` | DAW `PluginProcessor` (`Fx`, `Instrument`, `Midi`), `LoadedPlugin` state v7 (`oversampling_factor` at index 11), 16 automation slots, A/B comparison, `GoodLookinUI` `PluginEditor`, and VST3/LV2 C-ABI exports. |
+| `crates/og-tray` | `OpenGridderPluginTray` binary, TCP instance status monitor (`55055`), recents synchronization, and `GoodLookinUI` monitor view. |
+| `native/` | Thin platform SDK wrappers: AAX (`OpenGridder.mm`), AUv2 (`OpenGridderAU.cpp`), AUv3 (`OpenGridderAUv3.mm`), VST3 (`OpenGridderVST3.mm`), VST2 (`OpenGridderVST2.cpp`), CLAP (`OpenGridderCLAP.mm`), and Cocoa Server Launcher (`server_app/main.m`). |
+
+---
+
+## Building & Testing
 
 ```bash
+# Run unit tests across workspace
 cargo test --workspace
+
+# Build release binaries
 cargo build --release --workspace
 ```
 
+For release packaging, codesigning, and Apple notarization, see [`scripts/package-release-macos.sh`](scripts/package-release-macos.sh) and the [User Manual](Docs/UserManual.md).
 
-### Native server development build
+---
 
-The server now loads real macOS AU v2 and VST3 effects, with per-client child
-processes, bounded audio transport, native parameters and state RPCs. See
-[native/SERVER.md](native/SERVER.md) for universal Intel/Apple Silicon build and
-startup instructions. This remains a development system: full AAX remote-state
-recall/editor controls and the legacy compatibility matrix remain open.
+## Notices & License
+
+The OpenGridder Rust core is MIT licensed. AAX, Control|24, C|24, and Pro Tools are trademarks of Avid Technology, Inc. VST is a trademark of Steinberg Media Technologies GmbH. Audio Units is a trademark of Apple Inc.

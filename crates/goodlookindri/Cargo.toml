@@ -3,7 +3,7 @@ name = "goodlookindri"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "JUCE-free Rust port of GoodLookinUI: design files, meters, spectrum, and procedural hardware drawing."
+description = "Pure-Rust port of GoodLookinUI: design files, meters, spectrum, and procedural hardware drawing."
 authors = ["Marcos Deida"]
 
 [dependencies]

@@ -17,7 +17,7 @@ void og_native_set_transport_latency(NativePlugin*, uint32_t transport);
 int32_t og_native_status(NativePlugin*);
 void og_native_name(NativePlugin*, uint32_t index, char* buffer, uint32_t capacity);
 
-// --- Extended Dynamic Slot & Plugin Management API (AudioGridder Parity) ---
+// --- Extended Dynamic Slot & Modular Plugin Management API ---
 uint32_t og_native_num_loaded_plugins(NativePlugin*);
 bool og_native_get_loaded_plugin(NativePlugin*, uint32_t idx, char* name_buf, uint32_t name_cap, bool* bypassed, uint32_t* oversampling);
 uint32_t og_native_num_available_plugins(NativePlugin*);

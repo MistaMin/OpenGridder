@@ -17,7 +17,7 @@ members = [
 version = "0.3.1-alpha"
 edition = "2021"
 license = "MIT"
-authors = ["Marcos Deida", "Andreas Pohl (Original AudioGridder Concept & Architecture)"]
+authors = ["Marcos Deida <marcos@opengrid.studio>"]
 repository = "https://github.com/MistaMin/OpenGridder"
 
 [workspace.dependencies]

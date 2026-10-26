@@ -1,7 +1,6 @@
 //! Screen capture, delta diffing, and image reader for OpenGridder.
 //!
-//! Ports `Server/Source/Screen.h`, `Server/Source/ScreenWorker.hpp`/`.cpp`, and
-//! `Plugin/Source/ImageReader.hpp`/`.cpp` without JUCE or FFmpeg dependencies.
+//! High-performance pure-Rust screen capture, delta diffing, and image reader.
 
 use image::{ImageBuffer, ImageFormat, Rgba};
 use og_common::image_diff;

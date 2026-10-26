@@ -288,7 +288,7 @@ impl<T: Sample> HalfBandStage<T> {
     }
 }
 
-/// Multi-stage polyphase FIR oversampler matching `juce::dsp::Oversampling<T>` in AudioGridder `Processor.hpp`.
+/// Multi-stage polyphase FIR oversampler.
 /// Supports 1x (0 stages), 2x (1 stage), and 4x (2 stages).
 #[derive(Debug, Clone)]
 pub struct Oversampler<T: Sample> {

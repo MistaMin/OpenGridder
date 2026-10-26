@@ -139,7 +139,7 @@ cat > "$og_stage/dmg/INSTALL.txt" << EOF
 OpenGridder $og_version - Multi-Format Release
 ==============================================
 
-Welcome to OpenGridder, the zero-JUCE audio streaming plugin network.
+Welcome to OpenGridder, the zero-overhead audio streaming plugin network.
 
 Included Plugins:
 - AAX Native: Pro Tools 11+ and Pro Tools Ultimate (Apple Silicon & Intel)

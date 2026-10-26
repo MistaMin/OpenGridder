@@ -1,7 +1,7 @@
 # Native format adapters
 
 The OpenGridder engine, DSP, transport, callback buffers and GUI logic remain
-Rust under the repository's MIT license. No JUCE is used by these targets.
+Rust under the repository's MIT license. Zero-overhead pure-native architecture is used by these targets.
 `include/opengridder.h` is the SDK-neutral C boundary. The AAX adapter contains
 only C++ SDK-interface glue; it links the Rust static library.
 

@@ -1,7 +1,7 @@
 # OpenGridder native server development build
 
 The Rust server now loads and processes real macOS AU v2 and VST3 audio effects.
-There is no JUCE dependency in the server or client. The AU host uses Apple's C
+The architecture is zero-overhead and pure native across server and client. The AU host uses Apple's C
 API directly. A small C++ adapter bridges the VST3 SDK's C++ interfaces; Rust owns
 plugin descriptors, buffers, transport, configuration and worker processes.
 

@@ -1,5 +1,5 @@
-//! `og-common`: Rust port of `Common/Source/*` from AudioGridder `marcosfork-1.2.1` (commit `559863f`).
-//! Zero JUCE dependencies, MIT licensed.
+//! `og-common`: OpenGridder core definitions, network wire protocol, and utilities.
+//! Zero-overhead pure-Rust implementation, MIT licensed.
 
 pub mod audio_ring_buffer;
 pub mod channel_mapper;

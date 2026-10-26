@@ -1,5 +1,5 @@
 // OpenGridder Server native macOS Application with GoodLookinDri Hardware UI
-// Pure AppKit / Cocoa implementation - Zero JUCE.
+// Pure AppKit / Cocoa implementation - Zero-Overhead Pure-Native.
 #import <Cocoa/Cocoa.h>
 #import <signal.h>
 #import <unistd.h>
@@ -129,7 +129,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         self.subtitleLabel.backgroundColor = [NSColor clearColor];
         self.subtitleLabel.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
         self.subtitleLabel.textColor = [NSColor colorWithCalibratedRed:0.95 green:0.75 blue:0.25 alpha:1.0]; // GoodLookin Amber
-        self.subtitleLabel.stringValue = @"Zero-JUCE Audio Streaming Grid • GoodLookin UI Engine";
+        self.subtitleLabel.stringValue = @"Zero-Overhead Precision Audio Grid • GoodLookin UI Engine";
         [plate addSubview:self.subtitleLabel];
 
         // Version & Arch
@@ -175,7 +175,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         footer.backgroundColor = [NSColor clearColor];
         footer.font = [NSFont systemFontOfSize:10 weight:NSFontWeightLight];
         footer.textColor = [NSColor colorWithCalibratedRed:0.45 green:0.48 blue:0.52 alpha:0.8];
-        footer.stringValue = @"AudioGridder concept by Andreas Pohl • GoodLookin hardware UI by Marcos Deida";
+        footer.stringValue = @"OpenGrid Network Architecture • GoodLookin Hardware UI by Marcos Deida";
         [plate addSubview:footer];
     }
     return self;

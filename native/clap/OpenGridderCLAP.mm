@@ -1,4 +1,4 @@
-// OpenGridder CLAP Plugin Adapter (Zero-JUCE C ABI + Cocoa NSView GUI)
+// OpenGridder CLAP Plugin Adapter (Zero-Overhead C ABI + Cocoa NSView GUI)
 #define OG_BUILD_CLAP 1
 #define OPENGRIDDER_VIEW_CLASS_NAME OpenGridderCLAPEditorView
 #define OPENGRIDDER_REMOTE_VIEW_CLASS_NAME OpenGridderCLAPRemoteView

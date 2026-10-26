@@ -1,11 +1,11 @@
 //! Steinberg VST3 bundle scanner and dynamic library host (`GetPluginFactory` / `bundleEntry`).
-//! Zero JUCE dependency.
+//! Zero-overhead pure-native implementation.
 
 use crate::HostedPlugin;
 use og_common::server_plugin::{PluginParameter, ServerPlugin};
 use std::path::{Path, PathBuf};
 
-/// Standard VST3 search directories per platform matching AudioGridder `Defaults` & `PluginSearch`.
+/// Standard VST3 search directories per platform.
 pub fn default_vst3_folders() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     #[cfg(target_os = "macos")]

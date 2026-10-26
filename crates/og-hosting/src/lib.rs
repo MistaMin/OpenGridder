@@ -1,8 +1,7 @@
 //! `og-hosting`: Native plugin discovery and hosting for **AudioUnit (AU)**, **VST3**, and **LV2**
-//! with zero JUCE dependencies.
+//! with zero-overhead pure-native architecture.
 //!
-//! Replaces `juce::AudioPluginInstance`, `juce::AudioPluginFormatManager`, and `juce::KnownPluginList`
-//! used in AudioGridder `Server/Source/Processor.hpp` and `Server/Source/Server.cpp`.
+//! Replaces external framework wrappers with direct C/C++ ABI integration.
 
 pub mod au;
 #[cfg(target_os = "macos")]
@@ -30,8 +29,7 @@ struct SerializedPluginState {
     pub parameters: Vec<f32>,
 }
 
-/// Trait representing a loaded plugin instance (AU, VST3, or LV2), matching the full surface area
-/// of `juce::AudioPluginInstance` used by `Processor` in `Server/Source/Processor.hpp`.
+/// Trait representing a loaded plugin instance (AU, VST3, or LV2).
 pub trait HostedPlugin: Send {
     fn descriptor(&self) -> &ServerPlugin;
     fn name(&self) -> &str;

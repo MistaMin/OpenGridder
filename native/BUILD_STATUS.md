@@ -1,7 +1,7 @@
 # OpenGridder native development build — 24 October 2026
 
 Project: `MistaMin/OpenGridder-Rust`. Rust engine and audio transport, with
-SDK-only C++ AAX/VST3 adapters. No JUCE is compiled or linked by these targets.
+SDK-only C++ AAX/VST3 adapters. Zero-overhead pure-native architecture across all targets.
 
 The server now performs real AU/VST3 hosting; see [SERVER.md](SERVER.md) for
 build/start instructions, architecture and remaining limits.

@@ -28,7 +28,7 @@ fn run() -> Result<(), String> {
     }
     if args.iter().any(|a| a == "--version" || a == "-v") {
         println!(
-            "OpenGridder Server {} (Rust / no JUCE; AU={}, VST3={})",
+            "OpenGridder Server {} (Zero-Overhead Pure-Native Rust; AU={}, VST3={})",
             AUDIOGRIDDER_VERSION,
             cfg!(target_os = "macos"),
             vst3::hosting_available()

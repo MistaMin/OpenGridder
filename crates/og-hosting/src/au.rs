@@ -1,5 +1,5 @@
 //! macOS AudioUnit (`AudioToolbox` + `CoreFoundation`) native C FFI scanner and host.
-//! Zero JUCE dependency.
+//! Zero-overhead pure-native implementation.
 
 use crate::HostedPlugin;
 use og_common::server_plugin::{PluginLayout, ServerPlugin};

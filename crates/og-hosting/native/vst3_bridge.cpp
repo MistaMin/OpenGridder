@@ -1,4 +1,4 @@
-// OpenGridder's C ABI adapter for the external Steinberg VST3 SDK. No JUCE.
+// OpenGridder's C ABI adapter for the external Steinberg VST3 SDK. Zero-overhead pure-native.
 // Audio transport, catalog, buffer ownership and host policy are implemented in Rust.
 #include <CoreFoundation/CoreFoundation.h>
 #include "pluginterfaces/base/ipluginbase.h"

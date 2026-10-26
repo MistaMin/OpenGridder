@@ -1,5 +1,5 @@
 //! Raw C-ABI plugin format entry points for VST3 (`GetPluginFactory` / `bundleEntry`) and
-//! LV2 (`lv2_descriptor`) so `og-plugin` compiles as a native zero-JUCE `cdylib`.
+//! LV2 (`lv2_descriptor`) so `og-plugin` compiles as a native zero-overhead `cdylib`.
 
 use std::ffi::c_void;
 use std::os::raw::c_char;

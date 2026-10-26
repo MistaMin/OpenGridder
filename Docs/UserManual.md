@@ -1,18 +1,19 @@
-# OpenGridder 0.1.1-alpha - Multi-Format Release
+# OpenGridder 0.3.1-alpha - Multi-Format Release
 
-## Release scope
+## Release Scope
 
-This release contains the zero-JUCE OpenGridder multi-format audio plugins and native applications.
+This release contains the Zero-Overhead OpenGridder multi-format audio plugins and native applications.
 Supported formats include:
 - **AudioUnit v3 (AUv3)**: Modern macOS App Extension (`OpenGridderAUv3.appex`) embedded inside `OpenGridder Server.app`, compatible with Logic Pro, GarageBand, and all modern AUv3 hosts.
 - **AudioUnit v2 (AUv2)**: Universal binary (i386 + x86_64 + arm64) supporting Logic Pro 8 (via Carbon Component Manager 'thng' resource), Logic Pro 9 (32-bit and 64-bit), and modern macOS DAWs.
 - **VST3**: Universal binary (`OpenGridder.vst3`, arm64 + x86_64) supporting Steinberg Cubase, Nuendo, PreSonus Studio One, Bitwig Studio, and Cockos Reaper.
 - **VST 2.4**: Universal binary (i386 + x86_64 + arm64) supporting vintage Cubase (4/5/6/7), Nuendo, and legacy Mac DAWs.
 - **AAX Native**: Universal binary (arm64 + x86_64) signed with PACE Eden and Apple Developer ID for Pro Tools 11+ and Pro Tools Ultimate.
+- **TDM HD Accel**: Digidesign/Avid DSP56321 hardware card bridge supporting up to 4 concurrent stereo streams per DSP core (72 stereo instances per 18-core HD Accel card).
 - **OpenGridder Server App**: Native macOS Application (`OpenGridder Server.app`) featuring system menu bar status controls, dock integration, log viewer, and background daemon lifecycle.
 - **Windows 7 Server**: x86_64 server package with custom Win32 synchronization and cryptographic forwarder shims (`WaitOnAddress`, `ProcessPrng`).
 
-Rust implements the DSP engine, bounded lockless transport, and protocol v13 networking. Thin SDK adapters provide AUv3, AUv2, VST3, VST2, and AAX interfaces with **zero JUCE dependencies**.
+Rust implements the DSP engine, bounded lockless transport, and protocol v13 networking. Thin SDK adapters provide AUv3, AUv2, VST3, VST2, and AAX interfaces with **zero-overhead pure-native architecture**.
 
 ## Selectable Latency Profiles
 
@@ -30,7 +31,7 @@ Hosts automatically receive real-time delay compensation notifications via:
 
 ## Installation and Quick Start
 
-Quit your DAW before installing. The notarized macOS installer (`OpenGridder-0.1.0-alpha-macos.pkg`) installs:
+Quit your DAW before installing. The notarized macOS installer (`OpenGridder-0.3.1-alpha-macos.pkg`) installs:
 - `OpenGridder.vst3` into `/Library/Audio/Plug-Ins/VST3`
 - `OpenGridderAUv3.appex` registered via `OpenGridder Server.app/Contents/PlugIns`
 - `OpenGridder.component` into `/Library/Audio/Plug-Ins/Components`
@@ -39,7 +40,7 @@ Quit your DAW before installing. The notarized macOS installer (`OpenGridder-0.1
 - `OpenGridder Server.app` into `/Applications`
 - Documentation and licenses into `/Library/Application Support/OpenGridder`
 
-For Windows 7 SP1+, extract `OpenGridder-0.1.0-alpha-windows7-x86_64.zip` to any folder. Ensure the companion shims (`api-ms-win-core-synch-l1-2-0.dll` and `bcryptprimitives.dll`) remain in the same directory as `AudioGridderServer.exe`.
+For Windows 7 SP1+, extract `OpenGridder-0.3.1-alpha-windows7-x86_64.zip` to any folder. Ensure the companion shims (`api-ms-win-core-synch-l1-2-0.dll` and `bcryptprimitives.dll`) remain in the same directory as `OpenGridderServer.exe`.
 
 ### Launching OpenGridder Server
 
@@ -73,26 +74,53 @@ For a separate studio computer on the local network:
 
 ## Controls and Hardware Interface
 
-OpenGridder features a custom zero-JUCE hardware console interface designed with **GoodLookinDri**, rendering native high-performance Cocoa views across AudioUnit v3, AudioUnit v2, and VST3.
+OpenGridder features a custom zero-overhead hardware console interface designed with **GoodLookinDri**, rendering native high-performance Cocoa views across AudioUnit v3, AudioUnit v2, and VST3.
 
-### Client Plugin Interface (720x420 Hardware Chassis)
-The plugin interface mimics a dark brushed anodized analog console rack with corner hex fasteners, split into two functional sections:
+### Precision Console UI & Hardware Controls
 
-#### 1. Left Control Panel (Routing & Profile)
-- **Status LED Dot**: Real-time connection indicator (Green = connected, Red = offline / searching).
-- **Server Address Readout**: Displays the bound server IP and port (`127.0.0.1:55056`).
-- **Latency Profile Buttons (PDC)**: Four tactile buttons (`Low 128`, `Std 256`, `High 512`, `Studio 1024`). Clicking instantly switches the network streaming buffer size and notifies the host DAW to update its plugin delay compensation without audio drops.
-- **Plugin Slot Selectors**: 4 dedicated slot buttons (`Slot 0` through `Slot 3`).
-- **Oversampling Badges**: Clickable `1x`, `2x`, `4x` oversampling badges on each slot to toggle high-precision DSP oversampling on remote processors.
-- **Master Bypass Switch**: Heavy-duty master bypass toggle button (`MASTER: ACTIVE` / `MASTER BYPASS: ENGAGED`). Passes sample-accurate dry audio while preserving PDC alignment in the host timeline.
+#### 1. 2x-Wide Analog VU Metering
+- **Dynamic Resize**: Expand from 720×420 (Digital PPM bargraph) to 864×420 (Analog Dual VU Dials) with calibrated ballistic needles.
+- **Dual VU Calibration Reference**: Clickable `[-18* | -3 dB]` pill toggle.
+  - `-18 dBFS` mode: Dial face prints `0 VU = +4 dBu = -18 dBFS` with SMPTE standard needle ballistics.
+  - `-3 dBFS` mode: Dial face prints `0 VU = -3 dBFS` with broadcast needle ballistics.
+- **Stereo Input/Output Metering Source**: Clickable `[IN* | OUT]` pill toggle. Allows monitoring post-Input Gain input metering or post-Output Trim output metering with 2.0 ceiling for over-detection.
 
-#### 2. Right Hardware Console Strip (Processing & Telemetry)
-- **Input Gain Knob**: Continuous rotary controller adjusting incoming audio gain from -12.0 dB to +12.0 dB (default: 0.0 dB). Drag vertically to adjust.
-- **Wet/Dry Mix Knob**: Continuous rotary controller blending dry and remote DSP wet return from 0% to 100% (default: 100%).
-- **Drive / Saturation Knob**: Rotary drive controller scaling harmonic warming from 1.0x to 10.0x (default: 2.0x).
-- **Output Trim Knob**: Continuous rotary controller trimming master output levels from -12.0 dB to +12.0 dB (default: 0.0 dB).
-- **Dual 20-Segment LED VU Meters**: Calibrated stereo LED ladder meters (-48 dBFS to +3 dBFS) with green/yellow/red gradient thresholds and dynamic peak hold indicators.
-- **Telemetry Readout**: Real-time display of roundtrip packet delay and active buffer compensation in samples.
+#### 2. Three Collapsible Hardware Banks
+- **PLUGINS Bank**: Can collapse to a 36px vertical anodized strip with status LED indicator.
+- **CONSOLE I/O & DRIVE Bank**: Can collapse to a 36px vertical anodized strip.
+- **METER Bank**: Can collapse to a 36px vertical strip with audio activity LED.
+
+#### 3. Console Drive & Harmonic Saturation DSP
+- **HybridEQ Residual ADAA**: High-frequency loss-free anti-derivative anti-aliasing. Splits signal into linear path (first-order all-pass with 0.5-sample group delay and 0.000 dB loss to Nyquist) and residual ADAA path.
+- **2x & 4x Linear-Phase Oversampling**: Polyphase Kaiser-windowed FIR oversampling filters with fixed integer group delay automatically compensated against transport delay.
+- **3 Character Modes**: `CLEAN` (symmetric odd harmonics), `Tb TUBE` (asymmetric even harmonics with ~8 Hz DC blocker), and `Tr XFMR` (low-frequency-weighted core saturation with ~8 Hz DC blocker).
+- **Per-Sample Parameter Smoothing**: 10 ms one-pole filter on Input Gain, Wet/Dry, Drive, and Output Trim to eliminate zipper noise.
+
+---
+
+## Pro Tools Hardware Surface Integration (Control|24 & C|24)
+
+OpenGridder includes native Pro Tools Page Table definitions (`FrTL`, `HgTL`, `PcTL`, `MkTL`):
+- **Digidesign Control|24 & Avid C|24**: Direct mapping across all 24 rotary encoders and scribble strip LCD displays.
+  - Channel 1: `Master Bypass`
+  - Channel 2: `Remote Plugin`
+  - Channel 3: `Latency Profile`
+  - Channel 4: `Input Gain`
+  - Channel 5: `Wet/Dry Mix`
+  - Channel 6: `Drive / Sat`
+  - Channel 7: `Output Trim`
+- **ICON D-Control / D-Command**: 8-encoder channel strip mapping (`HgTL`).
+- **Digidesign ProControl**: 16-fader motorized surface mapping (`PcTL`).
+- **Mackie HUI, Command|8, Digi 002/003**: 8-encoder mapping (`MkTL`).
+
+---
+
+## TDM 4-Stream Multi-Instance DSP Core Sharing
+
+OpenGridder TDM supports running up to 4 concurrent stereo instances on a single Motorola DSP56321 core:
+- **8-Channel Time-Slot Routing**: Channels 0–7 mapped across 4 independent stereo tracks.
+- **Core Density**: Increases card capacity from 18 stereo instances to **72 stereo instances** on a standard 18-core Pro Tools HD Accel card.
+- **Independent Stream Lifecycle**: Inserting, bypassing, or removing an instance on one track never disrupts or clicks active streams on neighboring tracks.
 
 ---
 
@@ -100,6 +128,7 @@ The plugin interface mimics a dark brushed anodized analog console rack with cor
 
 ### Startup Splash Window
 Upon launching **OpenGridder Server.app**, a hardware-styled floating splash screen appears:
+- **Subtitle**: `Zero-Overhead Precision Audio Grid • GoodLookin UI Engine`
 - **Real-Time Progress Bar**: Shows plugin indexing progress across system audio units and VST3 directories.
 - **Dynamic Status Label**: Displays the current plugin name and file path being scanned.
 - **High-Speed Timestamp Caching**: Re-scanning skips unchanged `.vst3` and `.component` bundles by comparing file modification timestamps against `plugin_cache.json`. A library of over 1,700 plugins loads in less than 0.5 seconds on subsequent launches.
@@ -120,8 +149,8 @@ Each client chain runs in an isolated child server worker process by default to 
 
 ## Legacy Compatibility and Vintage Mac Support
 
-A separate legacy archive (`OpenGridder-0.1.0-alpha-legacy-vintage-mac.zip`) is available for vintage systems running OS X 10.6 Snow Leopard through 10.14 Mojave, containing 32-bit `i386` slices for Logic Pro 8/9 and vintage Cubase.
+A separate legacy archive (`OpenGridder-0.3.1-alpha-legacy-vintage-mac.zip`) is available for vintage systems running OS X 10.6 Snow Leopard through 10.14 Mojave, containing 32-bit `i386` slices for Logic Pro 8/9 and vintage Cubase.
 
 ## Notices
 
-The OpenGridder Rust core is MIT licensed. AAX and Pro Tools are trademarks of Avid Technology, Inc. VST is a trademark of Steinberg Media Technologies GmbH. Audio Units is a trademark of Apple Inc.
+The OpenGridder Rust core is MIT licensed. AAX, Control|24, C|24, and Pro Tools are trademarks of Avid Technology, Inc. VST is a trademark of Steinberg Media Technologies GmbH. Audio Units is a trademark of Apple Inc.

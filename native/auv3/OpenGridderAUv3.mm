@@ -1,5 +1,5 @@
 // OpenGridder AUv3 (Audio Unit v3) Extension
-// Native Apple AudioToolbox implementation - Zero JUCE.
+// Native Apple AudioToolbox implementation - Zero-Overhead Pure-Native.
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreAudioKit/CoreAudioKit.h>

@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > **STATUS**: **v0.2.1-alpha** on branch `perf/tdm-optimization`.
-> All stabilization items (`S1`–`S9`), complete AudioGridder 1.3.5 feature parity (`F1`–`F6`), Three-Way Parameters (`P1`–`P7`), 2x-Wide Analog VU Metering (`864×420`), 3-Bank Collapsible Hardware UI, Dual VU Calibration (`-18 dBFS` / `-3 dBFS`), Input/Output Metering Source Toggles (`[IN* | OUT]`), HybridEQ-matched Residual ADAA + 2x/4x Oversampled Drive Saturation, and TDM 64-frame Q1.23 bridge are **100% implemented, unit-tested, PACE-signed, and deployed**.
+> All stabilization items (`S1`–`S9`), complete modular plugin network feature parity (`F1`–`F6`), Three-Way Parameters (`P1`–`P7`), 2x-Wide Analog VU Metering (`864×420`), 3-Bank Collapsible Hardware UI, Dual VU Calibration (`-18 dBFS` / `-3 dBFS`), Input/Output Metering Source Toggles (`[IN* | OUT]`), HybridEQ-matched Residual ADAA + 2x/4x Oversampled Drive Saturation, and TDM 64-frame Q1.23 bridge are **100% implemented, unit-tested, PACE-signed, and deployed**.
 >
 > The next phase is to execute the **Make-Plugin-Release** skill (`/Users/marcosdeida/.gemini/config/skills/Make-Plugin-Release/SKILL.md`) to package, codesign, notarize, and produce official macOS distribution packages and installer DMGs.
 
