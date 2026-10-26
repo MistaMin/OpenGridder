@@ -619,6 +619,13 @@ impl AudioUnitPlugin {
 impl Drop for AudioUnitPlugin {
     fn drop(&mut self) {
         self.release_resources();
+        #[cfg(target_os = "macos")]
+        unsafe {
+            extern "C" {
+                fn og_au_destroy_window(unit: Unit);
+            }
+            og_au_destroy_window(self.unit);
+        }
         unsafe {
             AudioComponentInstanceDispose(self.unit);
         }

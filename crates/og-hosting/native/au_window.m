@@ -119,6 +119,31 @@ void og_au_hide_window(AudioComponentInstance unit) {
     });
 }
 
+// Tear down the editor window/view before the AudioUnit instance is disposed.
+// Plugin views keep timers and main-queue blocks that dereference the unit; leaving
+// them alive after disposal crashes the process (SIGSEGV on the main thread).
+void og_au_destroy_window(AudioComponentInstance unit) {
+    if (!unit || !g_auWindows) return;
+    void (^work)(void) = ^{
+        NSValue *key = [NSValue valueWithPointer:(const void *)unit];
+        NSWindow *window = [g_auWindows objectForKey:key];
+        if (window) {
+            [window orderOut:nil];
+            [window setContentView:[[NSView alloc] initWithFrame:NSZeroRect]];
+            [window close];
+            [g_auWindows removeObjectForKey:key];
+        }
+    };
+    if ([NSThread isMainThread]) {
+        work();
+        return;
+    }
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_main_queue(), ^{ work(); dispatch_semaphore_signal(done); });
+    // Bounded wait: never deadlock if the main loop has already stopped.
+    dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
+}
+
 void og_run_main_loop(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
