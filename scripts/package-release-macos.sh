@@ -245,42 +245,9 @@ FINAL_DMG="$og_dist/OpenGridder-$og_version-macos.dmg"
     "$og_application" \
     "$og_notary_profile"
 
-echo "=== [7/7] Packaging Windows 7 Server & Vintage Mac ZIPs ==="
+echo "=== [7/7] Packaging Windows 7 Server ZIP ==="
 WIN7_ZIP="$og_dist/OpenGridder-$og_version-windows7-x86_64.zip"
 (cd "$og_win7_dir" && zip -r -9 "$WIN7_ZIP" .)
-
-# Legacy Vintage Mac Bundle (i386 + x86_64 for Logic 8/9 & vintage Cubase on OS X 10.6-10.14)
-LEGACY_DIR="$og_stage/legacy-mac"
-mkdir -p "$LEGACY_DIR/Components" "$LEGACY_DIR/VST" "$LEGACY_DIR/Documentation"
-ditto "$og_au" "$LEGACY_DIR/Components/OpenGridder.component"
-ditto "$og_vst2" "$LEGACY_DIR/VST/OpenGridder.vst"
-ditto "$og_root/target/server-universal/OpenGridderServer" "$LEGACY_DIR/OpenGridderServer"
-cp "$og_root/output/pdf/OpenGridder-User-Manual.pdf" "$LEGACY_DIR/Documentation/"
-
-cat > "$LEGACY_DIR/README-Vintage-Mac.txt" << 'EOF'
-OpenGridder Vintage Mac OS X Package (i386 + x86_64)
-===================================================
-
-Supported Vintage Systems:
-- OS X 10.6 (Snow Leopard), 10.7 (Lion), 10.8 (Mountain Lion),
-  10.9 (Mavericks), 10.10 (Yosemite), 10.11 (El Capitan), 10.14 (Mojave).
-
-Included Plugins:
-- Components/OpenGridder.component:
-  Universal AudioUnit (i386 + x86_64) containing the Carbon Component Manager
-  'thng' resource for Logic Pro 8 (32-bit), Logic Pro 9 (32-bit/64-bit), and modern DAWs.
-  Installation: Copy to /Library/Audio/Plug-Ins/Components/
-
-- VST/OpenGridder.vst:
-  Universal VST 2.4 plugin (i386 + x86_64) for Cubase 4/5/6/7, Nuendo 3/4/5, and WaveLab.
-  Installation: Copy to /Library/Audio/Plug-Ins/VST/
-
-- OpenGridderServer:
-  Universal CLI server for hosting and streaming.
-EOF
-
-LEGACY_ZIP="$og_dist/OpenGridder-$og_version-legacy-vintage-mac.zip"
-(cd "$LEGACY_DIR" && zip -r -9 "$LEGACY_ZIP" .)
 
 echo "=== Computing SHA256 Checksums ==="
 (cd "$og_dist" && shasum -a 256 *.pkg *.dmg *.zip > SHA256SUMS)

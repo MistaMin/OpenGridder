@@ -14,7 +14,7 @@ args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
 out = args.output.resolve()
 out.mkdir(parents=True, exist_ok=True)
-shutil.copy2(root / 'LICENSE', out / 'OpenGridder-MIT.txt')
+shutil.copy2(root / 'LICENSE', out / 'OpenGridder-LICENSE.txt')
 shutil.copy2(root / 'THIRD_PARTY_LICENSES.md', out / 'THIRD_PARTY_LICENSES.md')
 for name, sdk in [('AAX-SDK', args.aax_sdk), ('VST3-SDK', args.vst3_sdk)]:
     target = out / 'third-party' / name
