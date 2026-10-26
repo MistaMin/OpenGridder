@@ -10,6 +10,7 @@ pub mod key_and_mouse;
 pub mod mdns;
 pub mod message;
 pub mod metrics;
+pub mod realtime;
 pub mod server_plugin;
 pub mod utils;
 pub mod version;

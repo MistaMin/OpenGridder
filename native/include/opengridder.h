@@ -38,6 +38,8 @@ void og_native_send_mouse(NativePlugin*, uint8_t ev_type, float x, float y, bool
 void og_native_send_key(NativePlugin*, const uint16_t* keys, uint32_t count);
 bool og_native_is_editor_open(NativePlugin*);
 bool og_native_is_server_local_mode(NativePlugin*);
+// Host renders faster than real time (bounce): wait for the server instead of falling back to dry audio.
+void og_native_set_offline(NativePlugin*, bool offline);
 
 // --- Local Console DSP Parameters & Real-Time Peak Meters (Phase 1) ---
 // param_id: 0=Bypass, 1=Selection, 2=LatencyProfile, 3=InputGain, 4=WetDryMix, 5=Drive, 6=OutputGain, 7..22=AutomationSlots 0..15, 23=DriveCharacter (0 Clean, 0.5 Tb, 1 Tr), 24=DriveQuality (0 ADAA, 0.5 2x, 1 4x)

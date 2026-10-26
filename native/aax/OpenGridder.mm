@@ -217,6 +217,10 @@ public:
             if (Controller()->GetSignalLatency(&acknowledged) == AAX_SUCCESS && acknowledged >= 0)
                 og_native_accept_latency(instance_.rust, static_cast<uint32_t>(acknowledged));
         }
+        if (type == AAX_eNotificationEvent_EnteringOfflineMode)
+            og_native_set_offline(instance_.rust, true);
+        else if (type == AAX_eNotificationEvent_ExitingOfflineMode)
+            og_native_set_offline(instance_.rust, false);
         return AAX_CEffectParameters::NotificationReceived(type, data, size);
     }
 private:

@@ -149,6 +149,8 @@ struct Shared {
     chain_epoch: AtomicU32,
     screen_frame: Arc<parking_lot::Mutex<og_client::ScreenFrame>>,
     is_editor_open: AtomicBool,
+    /// Set by the host adapter when it renders faster than real time (bounce).
+    offline: AtomicBool,
     server_local_mode: AtomicBool,
 }
 
@@ -250,6 +252,13 @@ struct Callback {
     g_mix: Vec<f32>,
     g_drive: Vec<f32>,
     g_out: Vec<f32>,
+    /// Clock value at which the current wet/dry alignment started (reset on any re-alignment).
+    epoch_start: u64,
+    last_callback: Option<std::time::Instant>,
+    fast_callbacks: u32,
+    slow_callbacks: u32,
+    auto_offline: bool,
+    wait_timeouts: u32,
 }
 
 /// Opaque handle. Only one audio thread may process it at a time; control
@@ -260,6 +269,7 @@ pub struct NativePlugin {
     worker: Option<JoinHandle<()>>,
     channels: usize,
     max_frames: usize,
+    rate: f64,
 }
 
 impl NativePlugin {
@@ -322,6 +332,7 @@ impl NativePlugin {
             chain_epoch: AtomicU32::new(0),
             screen_frame: Arc::new(parking_lot::Mutex::new(og_client::ScreenFrame::default())),
             is_editor_open: AtomicBool::new(false),
+            offline: AtomicBool::new(false),
             server_local_mode: AtomicBool::new(false),
         });
         let capacity = MAX_PLUGIN_LATENCY + MAX_TRANSPORT_LATENCY + max_frames + 1;
@@ -329,6 +340,7 @@ impl NativePlugin {
             shared: shared.clone(),
             channels,
             max_frames,
+            rate,
             audio: UnsafeCell::new(Callback {
                 send,
                 receive,
@@ -354,6 +366,12 @@ impl NativePlugin {
                 g_mix: vec![1.0; max_frames],
                 g_drive: vec![0.0; max_frames],
                 g_out: vec![1.0; max_frames],
+                epoch_start: 0,
+                last_callback: None,
+                fast_callbacks: 0,
+                slow_callbacks: 0,
+                auto_offline: false,
+                wait_timeouts: 0,
             }),
             worker: None,
         };
@@ -362,6 +380,7 @@ impl NativePlugin {
                 thread::Builder::new()
                     .name("OpenGridder native IO".into())
                     .spawn(move || {
+                        og_common::realtime::prioritize_audio_thread();
                         let mut processor = PluginProcessor::new(PluginMode::Fx);
                         processor.prepare_to_play(rate, max_frames.min(1024));
                         let mut cfg = processor.client.config();
@@ -677,6 +696,37 @@ if let Some(v) = j.get("outputGain").and_then(|v| v.as_f64()) {
         this
     }
 
+    /// Move every returned chunk into the wet ring and recycle it.
+    fn absorb(
+        cb: &mut Callback,
+        channels: usize,
+        selection: u32,
+        transport_delay: usize,
+        drive_lat: usize,
+    ) {
+        let size = cb.dry_tags.len();
+        for _ in 0..POOL {
+            let Some(chunk) = cb.receive.pop() else {
+                break;
+            };
+            if chunk.valid && (chunk.selection == selection || selection == 0) {
+                let chunk_transport = transport_part(chunk.latency) as u64;
+                let effective_transport = if chunk_transport > 0 { chunk_transport } else { transport_delay as u64 };
+                for n in 0..chunk.frames {
+                    let target = chunk.start + n as u64 + effective_transport.saturating_sub(drive_lat as u64);
+                    if target >= cb.clock && target < cb.clock + size as u64 {
+                        let index = target as usize % size;
+                        for ch in 0..channels {
+                            cb.wet[ch][index] = chunk.audio[ch][n];
+                        }
+                        cb.wet_tags[index] = target;
+                    }
+                }
+            }
+            cb.free.push(chunk);
+        }
+    }
+
     unsafe fn process(
         &self,
         inputs: *const *const f32,
@@ -764,30 +814,13 @@ if let Some(v) = j.get("outputGain").and_then(|v| v.as_f64()) {
             cb.drive_latency = drive_lat;
             cb.wet_tags.fill(EMPTY);
             cb.dry_tags.fill(EMPTY);
+            cb.epoch_start = cb.clock;
+            cb.wait_timeouts = 0;
             cb.selection = selection;
             cb.plugin_latency = plugin_delay;
             cb.transport_latency = transport_delay;
         }
-        for _ in 0..POOL {
-            let Some(chunk) = cb.receive.pop() else {
-                break;
-            };
-            if chunk.valid && (chunk.selection == selection || selection == 0) {
-                let chunk_transport = transport_part(chunk.latency) as u64;
-                let effective_transport = if chunk_transport > 0 { chunk_transport } else { transport_delay as u64 };
-                for n in 0..chunk.frames {
-                    let target = chunk.start + n as u64 + effective_transport.saturating_sub(drive_lat as u64);
-                    if target >= cb.clock && target < cb.clock + size as u64 {
-                        let index = target as usize % size;
-                        for ch in 0..self.channels {
-                            cb.wet[ch][index] = chunk.audio[ch][n];
-                        }
-                        cb.wet_tags[index] = target;
-                    }
-                }
-            }
-            cb.free.push(chunk);
-        }
+        Self::absorb(cb, self.channels, selection, transport_delay, drive_lat);
         if let Some(mut chunk) = cb.free.pop() {
             chunk.start = cb.clock;
             chunk.frames = frames;
@@ -806,6 +839,49 @@ if let Some(v) = j.get("outputGain").and_then(|v| v.as_f64()) {
             }
             if let Err(chunk) = cb.send.push(chunk) {
                 cb.free.push(chunk);
+            }
+        }
+        // Offline bounce renders faster than real time: waiting for the server keeps the
+        // wet signal aligned instead of falling back to delayed dry audio.
+        let block_secs = frames as f64 / self.rate.max(8000.0);
+        let now_instant = std::time::Instant::now();
+        if let Some(prev) = cb.last_callback {
+            let gap = now_instant.duration_since(prev).as_secs_f64();
+            if gap < block_secs * 0.3 {
+                cb.fast_callbacks = cb.fast_callbacks.saturating_add(1);
+                cb.slow_callbacks = 0;
+            } else if gap > block_secs * 0.8 {
+                cb.slow_callbacks = cb.slow_callbacks.saturating_add(1);
+                cb.fast_callbacks = 0;
+            }
+            if cb.fast_callbacks >= 4 {
+                cb.auto_offline = true;
+            } else if cb.slow_callbacks >= 8 {
+                cb.auto_offline = false;
+            }
+        }
+        cb.last_callback = Some(now_instant);
+        let offline = self.shared.offline.load(Ordering::Acquire) || cb.auto_offline;
+        if offline
+            && !self.shared.bypass.load(Ordering::Acquire)
+            && self.shared.status.load(Ordering::Acquire) == 3
+            && cb.wait_timeouts < 3
+        {
+            let last = cb.clock + frames as u64 - 1;
+            let lead = transport_delay.saturating_sub(drive_lat) as u64;
+            if last >= cb.epoch_start + lead {
+                let deadline = now_instant + std::time::Duration::from_millis(250);
+                let index = last as usize % size;
+                while cb.wet_tags[index] != last {
+                    if std::time::Instant::now() >= deadline {
+                        cb.wait_timeouts += 1;
+                        break;
+                    }
+                    Self::absorb(cb, self.channels, selection, transport_delay, drive_lat);
+                    if cb.wet_tags[index] != last {
+                        std::thread::yield_now();
+                    }
+                }
             }
         }
         let bypass = self.shared.bypass.load(Ordering::Acquire);
@@ -1012,6 +1088,17 @@ pub unsafe extern "C" fn og_native_process(
 pub unsafe extern "C" fn og_native_destroy(handle: *mut NativePlugin) {
     if !handle.is_null() {
         let _ = catch_unwind(AssertUnwindSafe(|| drop(Box::from_raw(handle))));
+    }
+}
+
+/// Tell the plugin the host is rendering offline (bounce), so it waits for the server.
+///
+/// # Safety
+/// Live handle, not concurrently destroyed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_set_offline(handle: *mut NativePlugin, offline: bool) {
+    if let Some(p) = handle.as_ref() {
+        p.shared.offline.store(offline, Ordering::Release);
     }
 }
 
@@ -2102,6 +2189,55 @@ mod tests {
             plugin.shared.active_latency.load(Ordering::Acquire),
             latency_pair(1024, 18)
         );
+    }
+
+    #[test]
+    fn offline_render_waits_for_server_instead_of_dry_fallback() {
+        use og_common::server_plugin::ServerPlugin;
+        use og_hosting::vst3::default_plugin_parameters;
+        use og_server::{Server, ServerConfig};
+        let server = Server::new(ServerConfig::default());
+        let mut desc = ServerPlugin::new(
+            "Native Test Gain",
+            "OpenGridder",
+            "OpenGridder:Gain",
+            "OpenGridder:Gain",
+            "OpenGridder",
+            "Fx",
+            false,
+            vec!["Stereo".into()],
+        );
+        desc.parameters = default_plugin_parameters();
+        desc.parameters[0].current_value = 1.0;
+        desc.parameters[0].default_value = 1.0;
+        server.add_known_plugin(desc);
+        let port = server.start("127.0.0.1", 0).unwrap();
+        let plugin = NativePlugin::new(48000.0, 1024, 2, 256, Some(("127.0.0.1".into(), port)));
+        plugin.shared.selected.store(1, Ordering::Release);
+        plugin.shared.offline.store(true, Ordering::Release);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while plugin.shared.status.load(Ordering::Acquire) != 3 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(plugin.shared.status.load(Ordering::Acquire), 3);
+        let input = [0.25f32; 128];
+        let mut left = [0.0f32; 128];
+        let mut right = [0.0f32; 128];
+        let (mut processed_blocks, mut dry_blocks) = (0, 0);
+        // Back-to-back callbacks with no pacing, as in a bounce.
+        for block in 0..400 {
+            let ins = [input.as_ptr(), input.as_ptr()];
+            let outs = [left.as_mut_ptr(), right.as_mut_ptr()];
+            assert_eq!(unsafe { plugin.process(ins.as_ptr(), outs.as_ptr(), 128) }, 0);
+            if block >= 20 {
+                processed_blocks += 1;
+                if left.iter().any(|&v| (v - 0.5).abs() > 1e-5) {
+                    dry_blocks += 1;
+                }
+            }
+        }
+        assert!(processed_blocks > 0);
+        assert_eq!(dry_blocks, 0, "offline render must be fully processed, not dry or silent");
     }
 
     #[test]

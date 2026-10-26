@@ -5,7 +5,16 @@ use og_hosting::{au, vst3};
 use og_server::{SandboxMode, Server, ServerConfig};
 use std::path::PathBuf;
 
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn og_begin_latency_critical_activity();
+}
+
 fn run() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        og_begin_latency_critical_activity();
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("--chain-worker") {
         #[cfg(unix)]

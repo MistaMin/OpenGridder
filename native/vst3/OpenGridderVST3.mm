@@ -287,6 +287,7 @@ public:
         if (!rust_) {
             createRust();
         }
+        og_native_set_offline(rust_, setup.processMode == Vst::kOffline);
         return kResultOk;
     }
 

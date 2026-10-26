@@ -27,6 +27,7 @@ impl AudioWorker {
         let handle = thread::Builder::new()
             .name("OG-AudioWorker".to_string())
             .spawn(move || {
+                og_common::realtime::prioritize_audio_thread();
                 let mut stream = &*audio_stream;
                 let mut msg = AudioMessage::new();
                 let mut buf_f32: Vec<Vec<f32>> = Vec::new();

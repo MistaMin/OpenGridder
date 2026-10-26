@@ -224,3 +224,13 @@ void og_post_key_event(uint16_t key_code, bool is_down) {
         CFRelease(ev);
     }
 }
+
+/// Server processes have no window, so macOS may throttle them (App Nap, timer
+/// coalescing). Audio streaming needs the opposite: opt out for the process lifetime.
+void og_begin_latency_critical_activity(void) {
+    static id activity;
+    if (activity) return;
+    activity = [[NSProcessInfo processInfo]
+        beginActivityWithOptions:(NSActivityUserInitiated | NSActivityLatencyCritical)
+                          reason:@"OpenGridder real-time audio streaming"];
+}
