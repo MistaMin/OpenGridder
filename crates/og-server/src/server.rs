@@ -32,13 +32,13 @@ pub struct ServerConfig {
     pub id: i32,
     #[serde(default = "default_server_name")]
     pub name: String,
-    #[serde(rename = "AU", default = "default_true")]
+    #[serde(rename = "AU", default = "default_true", deserialize_with = "lenient_bool")]
     pub au: bool,
-    #[serde(rename = "VST3", default = "default_true")]
+    #[serde(rename = "VST3", default = "default_true", deserialize_with = "lenient_bool")]
     pub vst3: bool,
-    #[serde(rename = "VST2", default = "default_true")]
+    #[serde(rename = "VST2", default = "default_true", deserialize_with = "lenient_bool")]
     pub vst2: bool,
-    #[serde(rename = "LV2", default = "default_true")]
+    #[serde(rename = "LV2", default = "default_true", deserialize_with = "lenient_bool")]
     pub lv2: bool,
     #[serde(rename = "VST3Folders", default)]
     pub vst3_folders: Vec<String>,
@@ -48,21 +48,37 @@ pub struct ServerConfig {
     pub lv2_folders: Vec<String>,
     #[serde(default)]
     pub sandbox_mode: i32,
-    #[serde(rename = "ScreenLocalMode", default)]
+    #[serde(rename = "ScreenLocalMode", default, deserialize_with = "lenient_bool")]
     pub screen_local_mode: bool,
-    #[serde(rename = "ScreenCapturingOff", default)]
+    #[serde(rename = "ScreenCapturingOff", default, deserialize_with = "lenient_bool")]
     pub screen_capturing_off: bool,
-    #[serde(rename = "ScreenDiffDetection", default = "default_true")]
+    #[serde(rename = "ScreenDiffDetection", default = "default_true", deserialize_with = "lenient_bool")]
     pub screen_diff_detection: bool,
-    #[serde(rename = "PluginWindowsOnTop", default)]
+    #[serde(rename = "PluginWindowsOnTop", default, deserialize_with = "lenient_bool")]
     pub plugin_windows_on_top: bool,
     #[serde(rename = "ScreenQuality", default = "default_screen_quality")]
     pub screen_quality: f32,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_true", deserialize_with = "lenient_bool")]
     pub scan_for_plugins: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_bool")]
     pub crash_reporting: bool,
 }
+
+/// The server app stores toggles as JSON integers (0/1); accept both forms so one
+/// integer never invalidates the whole configuration file.
+fn lenient_bool<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum BoolOrInt {
+        Bool(bool),
+        Int(i64),
+    }
+    Ok(match BoolOrInt::deserialize(deserializer)? {
+        BoolOrInt::Bool(value) => value,
+        BoolOrInt::Int(value) => value != 0,
+    })
+}
+
 
 fn default_screen_quality() -> f32 {
     0.9
@@ -766,4 +782,18 @@ pub fn plugin_cache_file() -> PathBuf {
         }
     }
     PathBuf::from("plugin_cache.json")
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::ServerConfig;
+
+    #[test]
+    fn integer_toggles_do_not_invalidate_config() {
+        let cfg: ServerConfig =
+            serde_json::from_str(r#"{"AU": 1, "VST3": 0, "ScreenLocalMode": 1, "ScanForPlugins": 1}"#)
+                .unwrap();
+        assert!(cfg.au && cfg.screen_local_mode && cfg.scan_for_plugins);
+        assert!(!cfg.vst3);
+    }
 }
