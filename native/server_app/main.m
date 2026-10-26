@@ -142,7 +142,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         self.versionLabel.backgroundColor = [NSColor clearColor];
         self.versionLabel.font = [NSFont systemFontOfSize:12 weight:NSFontWeightRegular];
         self.versionLabel.textColor = [NSColor colorWithCalibratedRed:0.60 green:0.65 blue:0.70 alpha:0.8];
-        self.versionLabel.stringValue = @"v0.3.2 • macOS Universal (Apple Silicon & Intel)";
+        self.versionLabel.stringValue = @"v1.0 BETA • macOS Universal (Apple Silicon & Intel)";
         [plate addSubview:self.versionLabel];
 
         // Progress bar
@@ -289,7 +289,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         versionLabel.backgroundColor = [NSColor clearColor];
         versionLabel.font = [NSFont systemFontOfSize:11 weight:NSFontWeightRegular];
         versionLabel.textColor = [NSColor colorWithCalibratedRed:0.60 green:0.65 blue:0.70 alpha:0.8];
-        versionLabel.stringValue = @"v0.3.2 • macOS Universal (Apple Silicon & Intel)";
+        versionLabel.stringValue = @"v1.0 BETA • macOS Universal (Apple Silicon & Intel)";
         [plate addSubview:versionLabel];
 
         NSTextField *tagline = [[NSTextField alloc] initWithFrame:NSMakeRect(185, 486, 490, 18)];
@@ -355,7 +355,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
     NSString *rawText = 
 @"================================================================================\n"
 @"                 OPENGRIDDER — ZERO-OVERHEAD PRECISION AUDIO GRID              \n"
-@"                         Version 0.3.2 • Multi-Format                         \n"
+@"                         Version 1.0 BETA • Multi-Format                         \n"
 @"================================================================================\n\n"
 @"[ ARCHITECTURE & OVERVIEW ]\n"
 @"OpenGridder is an ultra-high-performance, zero-overhead, pure-native audio streaming\n"

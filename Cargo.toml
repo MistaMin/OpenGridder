@@ -14,9 +14,10 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.2"
+version = "1.0.0-beta.1"
 edition = "2021"
-license = "MIT"
+license = "LicenseRef-OpenGridder-Proprietary"
+publish = false
 authors = ["Marcos Deida <marcos@opengrid.studio>"]
 repository = "https://github.com/MistaMin/OpenGridder"
 

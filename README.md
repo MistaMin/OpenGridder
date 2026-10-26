@@ -2,14 +2,13 @@
 
 OpenGridder is an ultra-low-latency, zero-overhead audio streaming network and DSP offload engine written in **Rust** with pure-native C/C++/Objective-C platform adapters.
 
-The OpenGridder core is **MIT licensed** with a zero-overhead pure-native architecture. Optional SDK adapters retain their external SDK licensing requirements.
+OpenGridder is **closed-source, proprietary software** (see `LICENSE`). Third-party components keep their own licences (see `THIRD_PARTY_LICENSES.md`).
 
 ---
 
-## Highlights & Features (v0.3.2)
+## Highlights & Features (v1.0 BETA)
 
 - **Zero-Overhead Pure-Native Architecture**: Zero framework bloat, lock-free real-time audio transport, and sub-millisecond network streaming.
-- **4-Stream TDM DSP Core Sharing**: Expanded Motorola DSP56321 allocation to 8 audio channels, allowing 4 stereo instances to share a single DSP core (up to 72 stereo instances on an 18-core Pro Tools HD Accel card).
 - **Pro Tools Hardware Console Integration**: Native Page Tables for Focusrite Control|24 and Avid C|24 (`FrTL` 24-channel layout), plus ICON D-Control/D-Command (`HgTL`), ProControl (`PcTL`), and Command|8/HUI (`MkTL`) for physical motorized faders, rotary encoders, and scribble strip OLED displays.
 - **2x-Wide Analog VU Metering**: Dynamic window resizing (`864×420` in Analog VU mode vs `720×420` in Digital PPM mode) using pure native Cocoa (`OpenGridderEditorView`).
 - **Dual VU Calibration & I/O Source**: Switchable `-18 dBFS` and `-3 dBFS` reference calibrations, plus `[IN* | OUT]` source metering with over-detection ceiling.
@@ -53,4 +52,4 @@ For release packaging, codesigning, and Apple notarization, see [`scripts/packag
 
 ## Notices & License
 
-The OpenGridder Rust core is MIT licensed. AAX, Control|24, C|24, and Pro Tools are trademarks of Avid Technology, Inc. VST is a trademark of Steinberg Media Technologies GmbH. Audio Units is a trademark of Apple Inc.
+OpenGridder is proprietary software; see `LICENSE`. AAX, Control|24, C|24, and Pro Tools are trademarks of Avid Technology, Inc. VST is a trademark of Steinberg Media Technologies GmbH. Audio Units is a trademark of Apple Inc.

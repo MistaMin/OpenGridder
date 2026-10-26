@@ -1,10 +1,18 @@
-# OpenGridder 0.3.2 Release
+# OpenGridder 1.0 BETA Release
+
+### New in 1.0 BETA:
+- **Real plugin editors for hosted VST3 plugins**: double-click a slot and the plugin's own GUI opens in a native window in front of the host, instead of a generic parameter panel.
+- **Copy-protected plugins load**: the server allows PACE-wrapped effects to initialise.
+- **Config tolerance**: server settings stored as 1/0 no longer disable Local Mode.
+- **AAX editor sizing and window raising** fixes for Pro Tools.
+- OpenGridder is now closed-source proprietary software (see LICENSE). This is a BETA: Pro Tools and other host qualification is still in progress.
+
+### Carried over from 0.3.2:
 
 ### Highlights:
 - **macOS Accessibility Authorization**: Integrated system prompt and tray menu controls for macOS Accessibility (`AXIsProcessTrustedWithOptions`) ensuring seamless synthetic mouse and keyboard event forwarding to hosted plugin windows without system event drops.
 - **Robust AU Window Teardown**: Explicit teardown and detachment of plugin Cocoa editor windows prior to AudioUnit instance disposal, completely preventing `SIGSEGV` faults during editor close or plugin unload.
 - **Pro Tools AAX Page Tables**: Bundled and PACE Eden-signed `OpenGridderPages.xml` ensuring complete control surface integration across Avid S6, S3, ICON D-Control/D-Command, and Focusrite/Avid C|24.
-- **Multi-Stream DSP Core Sharing (TDM Engine)**: Fully optimized Motorola DSP56321 assembly firmware allocating 4 concurrent stereo streams per core (8 channels per DSP, up to 72 stereo instances across an 18-core Pro Tools HD Accel card) utilizing shared on-chip 24-bit X/Y RAM ring buffering.
 - **Hardware Console Integration (Focusrite Control|24 & Avid C|24)**: Complete 24-channel rotary encoder and switch mapping via custom `FrTL` Pro Tools XML Page Tables, alongside full surface support for `HgTL` (ICON D-Control / D-Command), `PcTL` (ProControl), and `MkTL` (Command|8 / HUI).
 - **Zero-Overhead Pure-Native Architecture**: Zero-overhead pure-Rust audio streaming core paired with native C/C++/Objective-C bindings directly to Steinberg, Apple, and Avid SDKs with zero runtime bloat.
 - **GoodLookin Hardware Console UI**: 3-bank collapsible brushed anodized aluminum rack, 2x-wide precision analog ballistic VU meters (`864×420`), dual VU calibration (`-18 dBFS` broadcast / `-3 dBFS` headroom), and real-time `[IN | OUT]` metering source toggles.

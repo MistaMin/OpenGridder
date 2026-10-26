@@ -1,7 +1,7 @@
 //! Port of `Common/Source/Version.hpp` from `marcosfork-1.2.1` (commit `559863f`).
 
-pub const OPENGRIDDER_VERSION: &str = "0.3.2";
-pub const OPENGRIDDER_VERSION_NUM: &str = "0.3.2";
+pub const OPENGRIDDER_VERSION: &str = "1.0.0-beta.1";
+pub const OPENGRIDDER_VERSION_NUM: &str = "1.0.0-beta.1";
 pub const OPENGRIDDER_BUILD_DATE: &str = "2026-10-26";
 
 pub const AUDIOGRIDDER_VERSION: &str = OPENGRIDDER_VERSION;
