@@ -9,7 +9,6 @@ Supported formats include:
 - **VST3**: Universal binary (`OpenGridder.vst3`, arm64 + x86_64) supporting Steinberg Cubase, Nuendo, PreSonus Studio One, Bitwig Studio, and Cockos Reaper.
 - **VST 2.4**: Universal binary (i386 + x86_64 + arm64) supporting vintage Cubase (4/5/6/7), Nuendo, and legacy Mac DAWs.
 - **AAX Native**: Universal binary (arm64 + x86_64) signed with PACE Eden and Apple Developer ID for Pro Tools 11+ and Pro Tools Ultimate.
-- **TDM HD Accel**: Digidesign/Avid DSP56321 hardware card bridge supporting up to 4 concurrent stereo streams per DSP core (72 stereo instances per 18-core HD Accel card).
 - **OpenGridder Server App**: Native macOS Application (`OpenGridder Server.app`) featuring system menu bar status controls, dock integration, log viewer, and background daemon lifecycle.
 - **Windows 7 Server**: x86_64 server package with custom Win32 synchronization and cryptographic forwarder shims (`WaitOnAddress`, `ProcessPrng`).
 
@@ -53,6 +52,14 @@ For command-line server operation or custom plugin scoping, run directly:
 ```bash
 "/Applications/OpenGridder Server.app/Contents/MacOS/OpenGridderServer" --au AudioUnit:aufx:lpas:appl
 ```
+
+## Hosted Plugin Editors
+
+Double-click a plugin slot in the OpenGridder rack to open that plugin's own editor.
+- With **Screen Local Mode** on (the default when the server runs on the same Mac), the server opens the plugin's real window in front of your DAW. Close it with its close button.
+- When the server runs on another machine, or Local Mode is off, OpenGridder shows a generic parameter panel for the slot instead.
+- Copy-protected plugins (for example iLok-protected effects) load normally; the server allows their protection layer to initialise.
+- VST3 plugins show their real editor. Audio Unit plugins open their Cocoa editor.
 
 ## Connecting Remote Studio Machines
 
@@ -115,15 +122,6 @@ OpenGridder includes native Pro Tools Page Table definitions (`FrTL`, `HgTL`, `P
 
 ---
 
-## TDM 4-Stream Multi-Instance DSP Core Sharing
-
-OpenGridder TDM supports running up to 4 concurrent stereo instances on a single Motorola DSP56321 core:
-- **8-Channel Time-Slot Routing**: Channels 0–7 mapped across 4 independent stereo tracks.
-- **Core Density**: Increases card capacity from 18 stereo instances to **72 stereo instances** on a standard 18-core Pro Tools HD Accel card.
-- **Independent Stream Lifecycle**: Inserting, bypassing, or removing an instance on one track never disrupts or clicks active streams on neighboring tracks.
-
----
-
 ## Server Tools and Splash Screen
 
 ### Startup Splash Window
@@ -149,8 +147,8 @@ Each client chain runs in an isolated child server worker process by default to 
 
 ## Legacy Compatibility and Vintage Mac Support
 
-A separate legacy archive (`OpenGridder-0.3.1-alpha-legacy-vintage-mac.zip`) is available for vintage systems running OS X 10.6 Snow Leopard through 10.14 Mojave, containing 32-bit `i386` slices for Logic Pro 8/9 and vintage Cubase.
+Legacy 32-bit builds are not part of the 1.0 BETA download.
 
 ## Notices
 
-The OpenGridder Rust core is MIT licensed. AAX, Control|24, C|24, and Pro Tools are trademarks of Avid Technology, Inc. VST is a trademark of Steinberg Media Technologies GmbH. Audio Units is a trademark of Apple Inc.
+OpenGridder 1.0 BETA is proprietary, closed-source software; see the LICENSE file. AAX, Control|24, C|24, and Pro Tools are trademarks of Avid Technology, Inc. VST is a trademark of Steinberg Media Technologies GmbH. Audio Units is a trademark of Apple Inc.
