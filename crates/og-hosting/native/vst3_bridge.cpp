@@ -6,6 +6,7 @@
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "pluginterfaces/vst/ivstmessage.h"
+#include "pluginterfaces/gui/iplugview.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
 #include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "public.sdk/source/vst/hosting/parameterchanges.h"
@@ -17,6 +18,8 @@
 #include <vector>
 using namespace Steinberg;
 using namespace Steinberg::Vst;
+// The SDK sources we compile do not define this IID.
+DEF_CLASS_IID(Steinberg::IPlugFrame)
 
 namespace {
 void check(tresult status, const char* operation) { if (status != kResultOk) throw std::runtime_error(std::string(operation) + " (VST3 result " + std::to_string(status) + ")"); }
@@ -90,6 +93,26 @@ public:
     }
     tresult PLUGIN_API tell(int64* position) override { if (!position) return kInvalidArgument; *position = cursor; return kResultOk; }
 };
+// Host side of IPlugFrame: forwards plugin-initiated editor resizes to the window owner.
+class Frame : public IPlugFrame {
+public:
+    void (*resize)(void*, int, int) = nullptr;
+    void* user = nullptr;
+    tresult PLUGIN_API queryInterface(const TUID id, void** obj) override {
+        if (!obj) return kInvalidArgument;
+        *obj = nullptr;
+        if (FUnknownPrivate::iidEqual(id, IPlugFrame::iid) || FUnknownPrivate::iidEqual(id, FUnknown::iid)) { *obj = static_cast<IPlugFrame*>(this); return kResultOk; }
+        return kNoInterface;
+    }
+    uint32 PLUGIN_API addRef() override { return 1; }
+    uint32 PLUGIN_API release() override { return 1; }
+    tresult PLUGIN_API resizeView(IPlugView* view, ViewRect* rect) override {
+        if (!view || !rect) return kInvalidArgument;
+        if (resize) resize(user, rect->getWidth(), rect->getHeight());
+        view->onSize(rect);
+        return kResultOk;
+    }
+};
 struct Instance {
     Module module;
     Host host;
@@ -98,6 +121,8 @@ struct Instance {
     IEditController* controller = nullptr;
     IConnectionPoint* componentConnection = nullptr;
     IConnectionPoint* controllerConnection = nullptr;
+    IPlugView* view = nullptr;
+    Frame frame;
     bool initialized = false, separateController = false, active = false, processing = false;
     ParameterChanges changes;
     std::vector<ParameterInfo> parameters;
@@ -106,7 +131,12 @@ struct Instance {
     std::vector<std::vector<float*>> inputPointers;
     int channels = 0, maxFrames = 0;
     double rate = 48000;
+    void closeView() {
+        if (!view) return;
+        view->removed(); view->setFrame(nullptr); view->release(); view = nullptr;
+    }
     ~Instance() {
+        closeView();
         stop();
         if (componentConnection && controllerConnection) { componentConnection->disconnect(controllerConnection); controllerConnection->disconnect(componentConnection); }
         if (componentConnection) componentConnection->release();
@@ -282,4 +312,25 @@ int og_vst3_set_state(void* handle, const uint8* bytes, size_t length) noexcept 
         p.changes.clearQueue(); return 0;
     } catch (...) { return -1; }
 }
+// Editor hosting. All view calls must run on the main thread; the window owner guarantees that.
+int og_vst3_view_open(void* handle, int* width, int* height, void (*resize)(void*, int, int), void* user) noexcept {
+    try {
+        auto& p = *static_cast<Instance*>(handle);
+        if (!p.controller) return -1;
+        if (p.view) { ViewRect r{}; if (p.view->getSize(&r) == kResultOk) { *width = r.getWidth(); *height = r.getHeight(); } return 0; }
+        p.view = p.controller->createView(ViewType::kEditor);
+        if (!p.view) return -1;
+        if (p.view->isPlatformTypeSupported(kPlatformTypeNSView) != kResultTrue) { p.view->release(); p.view = nullptr; return -1; }
+        p.frame.resize = resize; p.frame.user = user;
+        p.view->setFrame(&p.frame);
+        ViewRect r{};
+        if (p.view->getSize(&r) != kResultOk) r = ViewRect(0, 0, 640, 360);
+        *width = r.getWidth(); *height = r.getHeight();
+        return 0;
+    } catch (...) { return -1; }
+}
+int og_vst3_view_attach(void* handle, void* nsview) noexcept {
+    try { auto& p = *static_cast<Instance*>(handle); return p.view && p.view->attached(nsview, kPlatformTypeNSView) == kResultOk ? 0 : -1; } catch (...) { return -1; }
+}
+void og_vst3_view_close(void* handle) noexcept { try { static_cast<Instance*>(handle)->closeView(); } catch (...) {} }
 }

@@ -65,6 +65,15 @@ unsafe extern "C" {
     fn og_vst3_get_state(handle: *mut c_void, bytes: *mut *mut u8, length: *mut usize) -> i32;
     fn og_vst3_free_state(bytes: *mut u8);
     fn og_vst3_set_state(handle: *mut c_void, bytes: *const u8, length: usize) -> i32;
+    fn og_vst3_show_window(
+        handle: *mut c_void,
+        title: *const c_char,
+        x: i32,
+        y: i32,
+        on_top: bool,
+    ) -> bool;
+    fn og_vst3_hide_window(handle: *mut c_void);
+    fn og_vst3_destroy_window(handle: *mut c_void);
 }
 fn c_text(bytes: &[c_char]) -> String {
     let bytes: Vec<_> = bytes
@@ -117,7 +126,7 @@ pub fn scan_bundle(path: &Path) -> Result<Vec<ServerPlugin>, String> {
         );
         desc.version = c_text(&class.version);
         desc.module_path = module_path.clone();
-        desc.has_editor = false;
+        desc.has_editor = true;
         desc.presets.clear();
         plugins.push(desc);
     }
@@ -202,7 +211,7 @@ impl Vst3Plugin {
                 ..Default::default()
             });
         }
-        plugin.desc.has_editor = false;
+        plugin.desc.has_editor = true;
         plugin.desc.presets.clear();
         Ok(plugin)
     }
@@ -270,6 +279,8 @@ impl Vst3Plugin {
 impl Drop for Vst3Plugin {
     fn drop(&mut self) {
         unsafe {
+            // The editor view references the controller, so it goes first.
+            og_vst3_destroy_window(self.handle);
             og_vst3_destroy(self.handle);
         }
     }
@@ -478,7 +489,17 @@ impl HostedPlugin for Vst3Plugin {
         Ok(())
     }
     fn has_editor(&self) -> bool {
-        false
+        true
+    }
+    fn show_editor(&mut self, x: i32, y: i32, on_top: bool) -> bool {
+        let title = CString::new(self.desc.name.clone()).unwrap_or_default();
+        unsafe { og_vst3_show_window(self.handle, title.as_ptr(), x, y, on_top) }
+    }
+    fn hide_editor(&mut self) {
+        unsafe { og_vst3_hide_window(self.handle) }
+    }
+    fn is_editor_open(&self) -> bool {
+        true
     }
     fn editor_size(&self) -> (u32, u32) {
         (640, 360)

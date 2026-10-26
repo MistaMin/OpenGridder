@@ -4,6 +4,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=OPENGRIDDER_VST3_SDK");
     println!("cargo:rerun-if-changed=native/vst3_bridge.cpp");
     println!("cargo:rerun-if-changed=native/au_window.m");
+    println!("cargo:rerun-if-changed=native/vst3_window.m");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         return;
     }
@@ -100,6 +101,25 @@ fn main() {
         );
         objects.push(object);
     }
+    // Cocoa window host for VST3 editors; it calls the bridge's og_vst3_view_* entry points.
+    let window_object = out.join("vst3-window.o");
+    let window_status = Command::new("clang")
+        .args([
+            "-fobjc-arc",
+            "-O2",
+            "-fPIC",
+            "-arch",
+            arch,
+            if arch == "x86_64" { "-mmacosx-version-min=10.12" } else { "-mmacosx-version-min=11.0" },
+            "-c",
+            "native/vst3_window.m",
+            "-o",
+        ])
+        .arg(&window_object)
+        .status()
+        .expect("clang failed to compile vst3_window.m");
+    assert!(window_status.success(), "vst3_window.m compilation failed");
+    objects.push(window_object);
     let archive = out.join("libog_vst3_host.a");
     assert!(Command::new("ar")
         .arg("crs")
