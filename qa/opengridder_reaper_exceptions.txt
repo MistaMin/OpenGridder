@@ -1,0 +1,5 @@
+# OpenGridder REAPER QA Exceptions
+audio:Remote Plugin # Index selector for remote chain slots; does not alter dry sound on its own
+audio:Latency Profile # Sets PDC latency (128/256/512/1024); PDC delay is compensated by host
+visual:Remote Plugin # Menu/list selector displayed in remote rack popup
+visual:Latency Profile # Profile selector button in toolbar

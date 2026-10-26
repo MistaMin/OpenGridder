@@ -31,7 +31,7 @@ public:
           blockSize_(1024),
           bypass_(false),
           selection_(0),
-          profile_(0),
+          profile_(1),
           inputGain_(0.5f),
           wetDryMix_(1.0f),
           drive_(0.0f),
@@ -104,9 +104,9 @@ public:
 
 private:
     static uint32_t targetLatencyFromProfile(int32_t profile) {
-        if (profile == 1) return 512;
-        if (profile == 2) return 384;
-        if (profile == 3) return 256;
+        if (profile == 0) return 128;
+        if (profile == 1) return 256;
+        if (profile == 2) return 512;
         return 1024;
     }
 
@@ -147,8 +147,9 @@ private:
                 uint32_t target = targetLatencyFromProfile(profile_);
                 effect_.initialDelay = target;
                 if (rust_) {
-                    og_native_set_transport_latency(rust_, target);
                     og_native_set_param(rust_, kParamLatencyProfile, clamped);
+                    og_native_set_transport_latency(rust_, target);
+                    og_native_accept_latency(rust_, og_native_latency(rust_));
                 }
                 if (audioMaster_) {
                     audioMaster_(&effect_, audioMasterIOChanged, 0, 0, nullptr, 0.0f);

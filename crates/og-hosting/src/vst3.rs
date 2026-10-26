@@ -76,6 +76,19 @@ pub fn inspect_vst3_bundle(bundle_path: &Path) -> Option<ServerPlugin> {
 }
 
 pub fn inspect_vst3_classes(bundle_path: &Path) -> Vec<ServerPlugin> {
+    // 1. Fast path: If moduleinfo.json exists (VST 3.7+ standardized), inspect without launching a process
+    let module_candidates = [
+        bundle_path.join("Contents/Resources/moduleinfo.json"),
+        bundle_path.join("Contents/moduleinfo.json"),
+        bundle_path.join("moduleinfo.json"),
+    ];
+    if module_candidates.iter().any(|c| c.is_file()) {
+        let fast_plugins = crate::bundle_inspect::inspect_bundle(bundle_path, "VST3");
+        if !fast_plugins.is_empty() {
+            return fast_plugins;
+        }
+    }
+
     #[cfg(og_vst3_host)]
     {
         let result = if let Some(executable) = std::env::var_os("OPENGRIDDER_VST3_PROBE") {
@@ -83,19 +96,13 @@ pub fn inspect_vst3_classes(bundle_path: &Path) -> Vec<ServerPlugin> {
         } else {
             crate::vst3_native::scan_bundle(bundle_path)
         };
-        match result {
-            Ok(plugins) => plugins,
-            Err(error) => {
-                log::warn!("Could not scan {}: {error}", bundle_path.display());
-                Vec::new()
+        if let Ok(plugins) = result {
+            if !plugins.is_empty() {
+                return plugins;
             }
         }
     }
-    #[cfg(not(og_vst3_host))]
-    {
-        let _ = bundle_path;
-        Vec::new()
-    }
+    crate::bundle_inspect::inspect_bundle(bundle_path, "VST3")
 }
 
 pub fn default_plugin_parameters() -> Vec<PluginParameter> {
@@ -168,6 +175,10 @@ fn probe_bundle(executable: &std::ffi::OsStr, bundle: &Path) -> Result<Vec<Serve
         .arg("--probe-vst3")
         .arg(bundle)
         .env_remove("OPENGRIDDER_VST3_PROBE")
+        .env("CI", "1")
+        .env("HEADLESS", "1")
+        .env("NSUnbufferedIO", "YES")
+        .env("COCOA_MENUS_DONT_TAKEOVER", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -181,7 +192,8 @@ fn probe_bundle(executable: &std::ffi::OsStr, bundle: &Path) -> Result<Vec<Serve
             .read_to_end(&mut bytes)
             .map(|_| bytes)
     });
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // Tight 2.5-second deadline: prevents hanging scans on copy protection or modal dialogs
+    let deadline = Instant::now() + Duration::from_millis(2500);
     let result = loop {
         match child.try_wait() {
             Ok(Some(status)) => {

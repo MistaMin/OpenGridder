@@ -54,7 +54,7 @@ pub fn ladder_colour(db: f32) -> Color {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VuFace { Cream, Black }
 
-fn juce_arc(scene: &mut Scene, c: Point, rad: f32, from: f32, to: f32, color: Color, width: f32) {
+fn radial_arc(scene: &mut Scene, c: Point, rad: f32, from: f32, to: f32, color: Color, width: f32) {
     let k = -std::f32::consts::FRAC_PI_2;
     scene.stroke_arc(c, rad, from + k, to + k, color, width);
 }
@@ -99,8 +99,8 @@ pub fn draw_vu_meter(scene: &mut Scene, r: Rect, needle: f32, face: VuFace) {
     let ink = if cream { Color(0xff1c1812) } else { Color(0xffffb347) };
     let red = if cream { Color(0xffc0281c) } else { Color(0xffff6a3a) };
     let pivot = Point::new(cx, py);
-    juce_arc(scene, pivot, radius, angle_for(0.0), angle_for(vu_position_for_db(0.0)), ink, h * 0.025);
-    juce_arc(scene, pivot, radius, angle_for(vu_position_for_db(0.0)), angle_for(1.0), red, h * 0.07);
+    radial_arc(scene, pivot, radius, angle_for(0.0), angle_for(vu_position_for_db(0.0)), ink, h * 0.025);
+    radial_arc(scene, pivot, radius, angle_for(vu_position_for_db(0.0)), angle_for(1.0), red, h * 0.07);
     const MARKS: [(f32, &str, bool); 11] = [
         (-20.0, "20", true), (-10.0, "10", true), (-7.0, "7", true), (-5.0, "5", true), (-3.0, "3", true),
         (-2.0, "2", false), (-1.0, "1", false), (0.0, "0", true), (1.0, "1", false), (2.0, "2", false), (3.0, "3", true),
@@ -141,7 +141,7 @@ pub fn draw_ppm(scene: &mut Scene, r: Rect, level01: f32) {
     let span = 0.62f32.min((f.w * 0.43) / radius);
     let ang = |p: f32| -span + 2.0 * span * p;
     let pt = |a: f32, rad: f32| Point::new(cx + a.sin() * rad, py - a.cos() * rad);
-    juce_arc(scene, Point::new(cx, py), radius, ang(0.0), ang(1.0), Color(0xff1b1d1c), h * 0.025);
+    radial_arc(scene, Point::new(cx, py), radius, ang(0.0), ang(1.0), Color(0xff1b1d1c), h * 0.025);
     for i in 1..=7 {
         let p = (i - 1) as f32 / 6.0;
         let a = ang(p);

@@ -161,7 +161,7 @@ pub fn scan_audiounits() -> Vec<ServerPlugin> {
                         },
                         outputs: vec!["Stereo".to_string()],
                     }],
-                    has_editor: false,
+                    has_editor: true,
                     scoped_id: format!("AudioUnit:{}", id),
                 });
             }

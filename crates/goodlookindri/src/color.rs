@@ -1,5 +1,5 @@
 //! Straight-alpha sRGB `0xAARRGGBB`, matching GoodLookinUI.
-//! `brighter` / `darker` follow JUCE `Colour`: move toward white, or scale toward black.
+//! `brighter` / `darker` provide analog tinting: move toward white, or scale toward black.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Color(pub u32);
@@ -19,7 +19,7 @@ impl Color {
     }
     pub fn alpha_f(self) -> f32 { self.a() as f32 / 255.0 }
 
-    /// JUCE `Colour::brighter(amount)`: each channel moves toward 255 by `amount`.
+    /// Each channel moves toward 255 by `amount`.
     pub fn brighter(self, amount: f32) -> Self {
         let amt = amount.max(0.0);
         let ch = |c: u8| {
@@ -28,7 +28,7 @@ impl Color {
         };
         Color::rgba(ch(self.r()), ch(self.g()), ch(self.b()), self.a() as u32)
     }
-    /// JUCE `Colour::darker(amount)`: each channel is multiplied by `1 - amount`.
+    /// Each channel is multiplied by `1 - amount`.
     pub fn darker(self, amount: f32) -> Self {
         let amt = amount.clamp(0.0, 1.0);
         let ch = |c: u8| (c as f32 * (1.0 - amt)).clamp(0.0, 255.0).round() as u32;
@@ -39,7 +39,7 @@ impl Color {
         let ch = |a: u8, b: u8| (a as f32 * (1.0 - t) + b as f32 * t).round() as u32;
         Color::rgba(ch(self.r(), other.r()), ch(self.g(), other.g()), ch(self.b(), other.b()), ch(self.a(), other.a()))
     }
-    /// JUCE perceived brightness in 0..1.
+    /// Standard perceived photometric brightness in 0..1.
     pub fn perceived_brightness(self) -> f32 {
         let r = self.r() as f32 / 255.0;
         let g = self.g() as f32 / 255.0;

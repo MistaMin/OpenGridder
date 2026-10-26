@@ -84,7 +84,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
 @implementation SplashWindowController
 
 - (instancetype)init {
-    NSRect frame = NSMakeRect(0, 0, 640, 320);
+    NSRect frame = NSMakeRect(0, 0, 720, 380);
     NSWindow *window = [[NSWindow alloc] initWithContentRect:frame
                                                    styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskFullSizeContentView
                                                      backing:NSBackingStoreBuffered
@@ -102,8 +102,10 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         plate.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
         [window setContentView:plate];
 
-        // Logo
-        NSImageView *logoView = [[NSImageView alloc] initWithFrame:NSMakeRect(40, 185, 80, 80)];
+        // Prominent Logo (145x145 with high-DPI scaling)
+        NSImageView *logoView = [[NSImageView alloc] initWithFrame:NSMakeRect(35, 195, 145, 145)];
+        [logoView setImageScaling:NSImageScaleProportionallyUpOrDown];
+        [logoView setImageAlignment:NSImageAlignCenter];
         NSImage *icon = [NSImage imageNamed:@"OpenGridderServer"];
         if (!icon) {
             NSString *iconPath = [[NSBundle mainBundle] pathForResource:@"OpenGridderServer" ofType:@"icns"];
@@ -113,37 +115,37 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         [plate addSubview:logoView];
 
         // Title
-        self.titleLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(140, 225, 460, 36)];
+        self.titleLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(195, 285, 480, 40)];
         self.titleLabel.editable = NO;
         self.titleLabel.bordered = NO;
         self.titleLabel.backgroundColor = [NSColor clearColor];
-        self.titleLabel.font = [NSFont systemFontOfSize:24 weight:NSFontWeightBold];
+        self.titleLabel.font = [NSFont systemFontOfSize:28 weight:NSFontWeightBold];
         self.titleLabel.textColor = [NSColor colorWithCalibratedRed:0.95 green:0.95 blue:0.97 alpha:1.0];
         self.titleLabel.stringValue = @"OPENGRIDDER SERVER";
         [plate addSubview:self.titleLabel];
 
         // Subtitle
-        self.subtitleLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(140, 200, 460, 24)];
+        self.subtitleLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(195, 255, 480, 26)];
         self.subtitleLabel.editable = NO;
         self.subtitleLabel.bordered = NO;
         self.subtitleLabel.backgroundColor = [NSColor clearColor];
-        self.subtitleLabel.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
+        self.subtitleLabel.font = [NSFont systemFontOfSize:14 weight:NSFontWeightMedium];
         self.subtitleLabel.textColor = [NSColor colorWithCalibratedRed:0.95 green:0.75 blue:0.25 alpha:1.0]; // GoodLookin Amber
         self.subtitleLabel.stringValue = @"Zero-Overhead Precision Audio Grid • GoodLookin UI Engine";
         [plate addSubview:self.subtitleLabel];
 
         // Version & Arch
-        self.versionLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(140, 180, 460, 18)];
+        self.versionLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(195, 228, 480, 22)];
         self.versionLabel.editable = NO;
         self.versionLabel.bordered = NO;
         self.versionLabel.backgroundColor = [NSColor clearColor];
-        self.versionLabel.font = [NSFont systemFontOfSize:11 weight:NSFontWeightRegular];
+        self.versionLabel.font = [NSFont systemFontOfSize:12 weight:NSFontWeightRegular];
         self.versionLabel.textColor = [NSColor colorWithCalibratedRed:0.60 green:0.65 blue:0.70 alpha:0.8];
         self.versionLabel.stringValue = @"v0.3.1-alpha • macOS Universal (Apple Silicon & Intel)";
         [plate addSubview:self.versionLabel];
 
         // Progress bar
-        self.progressBar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(40, 110, 560, 14)];
+        self.progressBar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(45, 140, 630, 16)];
         self.progressBar.indeterminate = NO;
         self.progressBar.minValue = 0.0;
         self.progressBar.maxValue = 1.0;
@@ -151,7 +153,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         [plate addSubview:self.progressBar];
 
         // Status message
-        self.statusLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(40, 75, 450, 26)];
+        self.statusLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(45, 95, 510, 28)];
         self.statusLabel.editable = NO;
         self.statusLabel.bordered = NO;
         self.statusLabel.backgroundColor = [NSColor clearColor];
@@ -161,7 +163,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         [plate addSubview:self.statusLabel];
 
         // Skip / Cancel button
-        self.cancelButton = [[NSButton alloc] initWithFrame:NSMakeRect(500, 72, 100, 28)];
+        self.cancelButton = [[NSButton alloc] initWithFrame:NSMakeRect(575, 92, 100, 32)];
         self.cancelButton.bezelStyle = NSBezelStyleRounded;
         self.cancelButton.title = @"Skip Scan";
         self.cancelButton.target = self;
@@ -169,11 +171,11 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         [plate addSubview:self.cancelButton];
 
         // Footer note
-        NSTextField *footer = [[NSTextField alloc] initWithFrame:NSMakeRect(40, 24, 560, 16)];
+        NSTextField *footer = [[NSTextField alloc] initWithFrame:NSMakeRect(45, 26, 630, 18)];
         footer.editable = NO;
         footer.bordered = NO;
         footer.backgroundColor = [NSColor clearColor];
-        footer.font = [NSFont systemFontOfSize:10 weight:NSFontWeightLight];
+        footer.font = [NSFont systemFontOfSize:11 weight:NSFontWeightLight];
         footer.textColor = [NSColor colorWithCalibratedRed:0.45 green:0.48 blue:0.52 alpha:0.8];
         footer.stringValue = @"OpenGrid Network Architecture • GoodLookin Hardware UI by Marcos Deida";
         [plate addSubview:footer];
@@ -213,6 +215,246 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         self.onCancel();
     }
     [self.window orderOut:nil];
+}
+
+@end
+
+#pragma mark - About Window Controller
+
+@interface AboutWindowController : NSWindowController
+@property (strong, nonatomic) NSTextView *textView;
+@property (strong, nonatomic) NSScrollView *scrollView;
+@property (strong, nonatomic) NSTimer *scrollTimer;
+@property (assign, nonatomic) BOOL autoScrollEnabled;
+@property (strong, nonatomic) NSButton *scrollToggleButton;
+@property (assign, nonatomic) NSTimeInterval lastUserInteraction;
+- (void)loadContent;
+- (void)startScrollTimer;
+- (void)stopScrollTimer;
+@end
+
+@implementation AboutWindowController
+
+- (instancetype)init {
+    NSRect frame = NSMakeRect(0, 0, 720, 640);
+    NSWindow *window = [[NSWindow alloc] initWithContentRect:frame
+                                                   styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
+                                                     backing:NSBackingStoreBuffered
+                                                       defer:NO];
+    window.title = @"About OpenGridder Server";
+    [window center];
+    self = [super initWithWindow:window];
+    if (self) {
+        _autoScrollEnabled = YES;
+        _lastUserInteraction = 0;
+
+        GoodLookinPlateView *plate = [[GoodLookinPlateView alloc] initWithFrame:frame];
+        plate.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        [window setContentView:plate];
+
+        // Header matching Splash Screen with Prominent 135x135 Logo
+        NSImageView *logoView = [[NSImageView alloc] initWithFrame:NSMakeRect(35, 475, 135, 135)];
+        [logoView setImageScaling:NSImageScaleProportionallyUpOrDown];
+        [logoView setImageAlignment:NSImageAlignCenter];
+        NSImage *icon = [NSImage imageNamed:@"OpenGridderServer"];
+        if (!icon) {
+            NSString *iconPath = [[NSBundle mainBundle] pathForResource:@"OpenGridderServer" ofType:@"icns"];
+            if (iconPath) icon = [[NSImage alloc] initWithContentsOfFile:iconPath];
+        }
+        logoView.image = icon;
+        [plate addSubview:logoView];
+
+        NSTextField *titleLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(185, 560, 490, 36)];
+        titleLabel.editable = NO;
+        titleLabel.bordered = NO;
+        titleLabel.backgroundColor = [NSColor clearColor];
+        titleLabel.font = [NSFont systemFontOfSize:26 weight:NSFontWeightBold];
+        titleLabel.textColor = [NSColor colorWithCalibratedRed:0.95 green:0.95 blue:0.97 alpha:1.0];
+        titleLabel.stringValue = @"OPENGRIDDER SERVER";
+        [plate addSubview:titleLabel];
+
+        NSTextField *subtitleLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(185, 532, 490, 24)];
+        subtitleLabel.editable = NO;
+        subtitleLabel.bordered = NO;
+        subtitleLabel.backgroundColor = [NSColor clearColor];
+        subtitleLabel.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
+        subtitleLabel.textColor = [NSColor colorWithCalibratedRed:0.95 green:0.75 blue:0.25 alpha:1.0]; // GoodLookin Amber
+        subtitleLabel.stringValue = @"Zero-Overhead Precision Audio Grid • GoodLookin UI Engine";
+        [plate addSubview:subtitleLabel];
+
+        NSTextField *versionLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(185, 508, 490, 20)];
+        versionLabel.editable = NO;
+        versionLabel.bordered = NO;
+        versionLabel.backgroundColor = [NSColor clearColor];
+        versionLabel.font = [NSFont systemFontOfSize:11 weight:NSFontWeightRegular];
+        versionLabel.textColor = [NSColor colorWithCalibratedRed:0.60 green:0.65 blue:0.70 alpha:0.8];
+        versionLabel.stringValue = @"v0.3.1-alpha • macOS Universal (Apple Silicon & Intel)";
+        [plate addSubview:versionLabel];
+
+        NSTextField *tagline = [[NSTextField alloc] initWithFrame:NSMakeRect(185, 486, 490, 18)];
+        tagline.editable = NO;
+        tagline.bordered = NO;
+        tagline.backgroundColor = [NSColor clearColor];
+        tagline.font = [NSFont systemFontOfSize:10 weight:NSFontWeightLight];
+        tagline.textColor = [NSColor colorWithCalibratedRed:0.45 green:0.75 blue:0.85 alpha:0.8];
+        tagline.stringValue = @"Motorola DSP56321 4-Stream TDM Engine • Focusrite Control|24 & Avid C|24";
+        [plate addSubview:tagline];
+
+        // Recessed Container for Scrolling Text
+        NSRect scrollFrame = NSMakeRect(45, 75, 630, 390);
+        self.scrollView = [[NSScrollView alloc] initWithFrame:scrollFrame];
+        self.scrollView.borderType = NSBezelBorder;
+        self.scrollView.hasVerticalScroller = YES;
+        self.scrollView.hasHorizontalScroller = NO;
+        self.scrollView.autohidesScrollers = NO;
+
+        self.textView = [[NSTextView alloc] initWithFrame:self.scrollView.bounds];
+        self.textView.editable = NO;
+        self.textView.selectable = YES;
+        self.textView.backgroundColor = [NSColor colorWithCalibratedRed:0.08 green:0.09 blue:0.11 alpha:1.0];
+        self.textView.textColor = [NSColor colorWithCalibratedRed:0.88 green:0.90 blue:0.92 alpha:1.0];
+        self.textView.font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
+        self.textView.textContainerInset = NSMakeSize(16, 16);
+
+        // Populate text content with README & CREDITS
+        [self loadContent];
+
+        self.scrollView.documentView = self.textView;
+        [plate addSubview:self.scrollView];
+
+        // Bottom Controls
+        self.scrollToggleButton = [[NSButton alloc] initWithFrame:NSMakeRect(45, 25, 140, 30)];
+        self.scrollToggleButton.bezelStyle = NSBezelStyleRounded;
+        self.scrollToggleButton.title = @"Auto-Scroll: ON";
+        self.scrollToggleButton.target = self;
+        self.scrollToggleButton.action = @selector(toggleAutoScroll:);
+        [plate addSubview:self.scrollToggleButton];
+
+        NSButton *repoBtn = [[NSButton alloc] initWithFrame:NSMakeRect(195, 25, 160, 30)];
+        repoBtn.bezelStyle = NSBezelStyleRounded;
+        repoBtn.title = @"GitHub Repository";
+        repoBtn.target = self;
+        repoBtn.action = @selector(openGitHub:);
+        [plate addSubview:repoBtn];
+
+        NSButton *closeBtn = [[NSButton alloc] initWithFrame:NSMakeRect(575, 25, 100, 30)];
+        closeBtn.bezelStyle = NSBezelStyleRounded;
+        closeBtn.title = @"Close";
+        closeBtn.target = self;
+        closeBtn.action = @selector(closeClicked:);
+        [plate addSubview:closeBtn];
+
+        // Start Auto-Scroll timer
+        [self startScrollTimer];
+    }
+    return self;
+}
+
+- (void)loadContent {
+    NSString *rawText = 
+@"================================================================================\n"
+@"                 OPENGRIDDER — ZERO-OVERHEAD PRECISION AUDIO GRID              \n"
+@"                         Version 0.3.1-alpha • Multi-Format                    \n"
+@"================================================================================\n\n"
+@"[ ARCHITECTURE & OVERVIEW ]\n"
+@"OpenGridder is an ultra-high-performance, zero-overhead, pure-native audio streaming\n"
+@"grid and distributed DSP processing engine. It seamlessly bridges studio DAWs\n"
+@"with remote and local DSP resources with sub-millisecond precision, lock-free\n"
+@"ring buffering, and hardware-inspired analog console ergonomics.\n\n"
+@"[ KEY SYSTEM FEATURES ]\n"
+@"• Multi-Stream DSP Core Sharing (Motorola DSP56321 TDM Engine):\n"
+@"  Expanded assembly firmware executes 4 concurrent stereo streams per DSP core\n"
+@"  (8 audio channels per core, up to 72 stereo instances per 18-core Pro Tools HD\n"
+@"  Accel card) using internal 24-bit 64k RAM ring buffering.\n\n"
+@"• Hardware Console Integration (Focusrite Control|24 & Avid C|24):\n"
+@"  Native 24-channel rotary encoder and motorized fader mapping via custom 'FrTL'\n"
+@"  Pro Tools XML Page Tables, plus ICON D-Control/D-Command ('HgTL'), ProControl\n"
+@"  ('PcTL'), and Command|8/HUI ('MkTL') tactile console control.\n\n"
+@"• Zero-Overhead Pure-Native Architecture:\n"
+@"  Pure Rust audio streaming core paired with native C/C++/Objective-C bindings\n"
+@"  directly to Steinberg VST3, Apple AudioUnit, and Avid AAX SDKs with zero\n"
+@"  runtime bloat and zero intermediate wrapper overhead.\n\n"
+@"• GoodLookin Hardware Console UI:\n"
+@"  3-bank collapsible brushed anodized aluminum rack, 2x-wide precision analog\n"
+@"  ballistic VU meters (864x420), dual VU calibration (-18 dBFS European broadcast\n"
+@"  and -3 dBFS headroom test), and real-time [IN | OUT] source toggles.\n\n"
+@"• Residual ADAA & Polyphase Oversampling:\n"
+@"  HybridEQ-matched non-linear drive saturation with anti-derivative anti-aliasing\n"
+@"  (ADAA) and selectable 1x, 2x, and 4x linear-phase polyphase oversampling.\n\n"
+@"• Universal Format Support:\n"
+@"  AAX Native, AudioUnit v2 (Component Manager 'thng' & Cocoa UI), AudioUnit v3\n"
+@"  (macOS App Extension), VST 3.7 Universal, VST 2.4, CLAP, and LV2.\n\n"
+@"================================================================================\n"
+@"                            CREDITS & ATTRIBUTION                              \n"
+@"================================================================================\n\n"
+@"• Marcos Deida (@MistaMin)\n"
+@"  Lead Architect & Developer: Core network streaming architecture, distributed\n"
+@"  DSP processing engine, multi-stream Motorola DSP56321 assembly firmware, Pro Tools\n"
+@"  AAX and hardware console integrations (Control|24 & C|24), and creator of\n"
+@"  GoodLookinUI, used for hardware-inspired analog console panels, precision\n"
+@"  ballistic VU meters, and rotary controls.\n\n"
+@"• OpenGrid Precision Audio Network\n"
+@"  Ultra-low latency network audio transport, lock-free ring buffering, remote\n"
+@"  screen compression, and dynamic delay compensation across modern macOS,\n"
+@"  Windows, and vintage studio systems.\n\n"
+@"================================================================================\n"
+@"                   (c) 2026 Marcos Deida • studio.opengrid                     \n"
+@"================================================================================\n";
+
+    self.textView.string = rawText;
+}
+
+- (void)startScrollTimer {
+    [self stopScrollTimer];
+    self.scrollTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 / 30.0
+                                                        target:self
+                                                      selector:@selector(scrollTick:)
+                                                      userInfo:nil
+                                                       repeats:YES];
+}
+
+- (void)stopScrollTimer {
+    if (self.scrollTimer) {
+        [self.scrollTimer invalidate];
+        self.scrollTimer = nil;
+    }
+}
+
+- (void)scrollTick:(NSTimer *)timer {
+    if (!self.autoScrollEnabled) return;
+    if ([[NSDate date] timeIntervalSince1970] - self.lastUserInteraction < 2.5) return;
+
+    NSClipView *clip = self.scrollView.contentView;
+    NSPoint current = clip.bounds.origin;
+    CGFloat maxY = self.textView.bounds.size.height - clip.bounds.size.height;
+    if (maxY <= 0) return;
+
+    if (current.y >= maxY - 2.0) {
+        current.y = 0;
+        self.lastUserInteraction = [[NSDate date] timeIntervalSince1970] + 1.5;
+    } else {
+        current.y += 0.6;
+    }
+    [clip scrollToPoint:current];
+    [self.scrollView reflectScrolledClipView:clip];
+}
+
+- (void)toggleAutoScroll:(id)sender {
+    self.autoScrollEnabled = !self.autoScrollEnabled;
+    self.scrollToggleButton.title = self.autoScrollEnabled ? @"Auto-Scroll: ON" : @"Auto-Scroll: OFF";
+}
+
+- (void)openGitHub:(id)sender {
+    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://github.com/MistaMin/OpenGridder-Rust"]];
+}
+
+- (void)closeClicked:(id)sender {
+    [self stopScrollTimer];
+    [self.window orderOut:nil];
+}
+
+- (void)windowWillClose:(NSNotification *)notification {
+    [self stopScrollTimer];
 }
 
 @end
@@ -353,6 +595,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
     NSMutableArray *filtered = [NSMutableArray array];
     NSInteger auCount = 0;
     NSInteger vst3Count = 0;
+    NSInteger vst2Count = 0;
 
     for (NSDictionary *p in self.allPlugins) {
         NSString *name = p[@"name"] ?: @"";
@@ -362,10 +605,11 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
 
         if ([fmt containsString:@"AudioUnit"] || [fmt containsString:@"AU"]) auCount++;
         else if ([fmt containsString:@"VST3"]) vst3Count++;
+        else if ([fmt containsString:@"VST2"] || [fmt isEqualToString:@"VST"]) vst2Count++;
 
         if (seg == 1 && ![fmt containsString:@"AudioUnit"] && ![fmt containsString:@"AU"]) continue;
         if (seg == 2 && ![fmt containsString:@"VST3"]) continue;
-        if (seg == 3 && ![fmt containsString:@"VST2"] && ![fmt containsString:@"VST"]) continue;
+        if (seg == 3 && ([fmt containsString:@"VST3"] || (![fmt containsString:@"VST2"] && ![fmt isEqualToString:@"VST"]))) continue;
 
         if (search.length > 0) {
             NSString *full = [NSString stringWithFormat:@"%@ %@ %@ %@", name, vendor, fmt, cat].lowercaseString;
@@ -376,8 +620,8 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
     self.filteredPlugins = filtered;
     [self.tableView reloadData];
 
-    self.countLabel.stringValue = [NSString stringWithFormat:@"Showing %ld of %ld plugins (%ld AudioUnits, %ld VST3)",
-                                  (long)self.filteredPlugins.count, (long)self.allPlugins.count, (long)auCount, (long)vst3Count];
+    self.countLabel.stringValue = [NSString stringWithFormat:@"Showing %ld of %ld plugins (%ld AudioUnits, %ld VST3, %ld VST2)",
+                                  (long)self.filteredPlugins.count, (long)self.allPlugins.count, (long)auCount, (long)vst3Count, (long)vst2Count];
 }
 
 - (void)controlTextDidChange:(NSNotification *)obj {
@@ -425,8 +669,16 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
     } else if ([identifier isEqualToString:@"format"]) {
         cell.font = [NSFont systemFontOfSize:11 weight:NSFontWeightMedium];
         NSString *fmt = p[@"type"] ?: @"AudioUnit";
-        cell.textColor = [fmt containsString:@"VST3"] ? [NSColor colorWithCalibratedRed:0.4 green:0.8 blue:1.0 alpha:1.0] : [NSColor colorWithCalibratedRed:1.0 green:0.8 blue:0.4 alpha:1.0];
-        cell.stringValue = fmt;
+        if ([fmt containsString:@"VST3"]) {
+            cell.textColor = [NSColor colorWithCalibratedRed:0.35 green:0.80 blue:1.0 alpha:1.0]; // Cyan
+            cell.stringValue = @"VST3";
+        } else if ([fmt containsString:@"VST2"] || [fmt isEqualToString:@"VST"]) {
+            cell.textColor = [NSColor colorWithCalibratedRed:0.95 green:0.55 blue:0.95 alpha:1.0]; // Magenta
+            cell.stringValue = @"VST2";
+        } else {
+            cell.textColor = [NSColor colorWithCalibratedRed:1.0 green:0.80 blue:0.35 alpha:1.0]; // Amber
+            cell.stringValue = @"AudioUnit";
+        }
     } else if ([identifier isEqualToString:@"company"]) {
         cell.font = [NSFont systemFontOfSize:11 weight:NSFontWeightRegular];
         cell.textColor = [NSColor colorWithCalibratedWhite:0.85 alpha:1.0];
@@ -445,6 +697,264 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
 
 @end
 
+#pragma mark - Server Settings Window Controller
+
+@interface SettingsWindowController : NSWindowController
+@property (strong, nonatomic) NSPopUpButton *captureModePopup;
+@property (strong, nonatomic) NSButton *diffDetectionCheck;
+@property (strong, nonatomic) NSButton *alwaysOnTopCheck;
+@property (strong, nonatomic) NSButton *auCheck;
+@property (strong, nonatomic) NSButton *vst3Check;
+@property (strong, nonatomic) NSButton *vst2Check;
+@property (strong, nonatomic) NSButton *lv2Check;
+@property (strong, nonatomic) NSTextField *serverNameField;
+@property (strong, nonatomic) NSTextField *serverIdField;
+@property (strong, nonatomic) NSButton *scanAtStartupCheck;
+@property (strong, nonatomic) NSString *configPath;
+@property (weak, nonatomic) id delegate;
+- (void)loadCurrentSettings;
+- (void)saveAndApply;
+@end
+
+@implementation SettingsWindowController
+
+- (instancetype)init {
+    NSRect frame = NSMakeRect(0, 0, 540, 500);
+    NSWindow *win = [[NSWindow alloc] initWithContentRect:frame
+                                                styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable)
+                                                  backing:NSBackingStoreBuffered
+                                                    defer:NO];
+    win.title = @"OpenGridder Server Settings";
+    win.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
+
+    self = [super initWithWindow:win];
+    if (self) {
+        NSString *home = NSHomeDirectory();
+        self.configPath = [home stringByAppendingPathComponent:@".audiogridder/audiogridderserver.cfg"];
+        [self buildUI];
+    }
+    return self;
+}
+
+- (void)buildUI {
+    NSView *content = self.window.contentView;
+    content.wantsLayer = YES;
+
+    CGFloat y = 450.0;
+
+    // Header Title
+    NSTextField *hdr = [NSTextField labelWithString:@"Server Preferences"];
+    hdr.frame = NSMakeRect(24, y, 400, 24);
+    hdr.font = [NSFont systemFontOfSize:16 weight:NSFontWeightBold];
+    hdr.textColor = [NSColor colorWithCalibratedRed:1.0 green:0.75 blue:0.25 alpha:1.0]; // Amber
+    [content addSubview:hdr];
+
+    y -= 38.0;
+
+    // Section 1: Screen Capturing & Local Mode
+    NSTextField *sec1 = [NSTextField labelWithString:@"SCREEN CAPTURING & DISPLAY MODE"];
+    sec1.frame = NSMakeRect(24, y, 480, 18);
+    sec1.font = [NSFont systemFontOfSize:11 weight:NSFontWeightBold];
+    sec1.textColor = [NSColor colorWithCalibratedWhite:0.65 alpha:1.0];
+    [content addSubview:sec1];
+
+    y -= 28.0;
+    NSTextField *capLbl = [NSTextField labelWithString:@"Capture Mode:"];
+    capLbl.frame = NSMakeRect(28, y, 100, 20);
+    capLbl.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
+    capLbl.textColor = [NSColor whiteColor];
+    [content addSubview:capLbl];
+
+    self.captureModePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(135, y - 2, 375, 24) pullsDown:NO];
+    [self.captureModePopup addItemWithTitle:@"Local Mode (Direct Native Window, Zero-Overhead)"];
+    [self.captureModePopup addItemWithTitle:@"Native Diff Stream (Remote LAN / Software Capture)"];
+    [self.captureModePopup addItemWithTitle:@"Disabled (Headless Audio Server / No Display)"];
+    [content addSubview:self.captureModePopup];
+
+    y -= 26.0;
+    self.diffDetectionCheck = [NSButton checkboxWithTitle:@"Enable Screen Diff Detection (Reduces LAN bandwidth)" target:nil action:nil];
+    self.diffDetectionCheck.frame = NSMakeRect(135, y, 375, 20);
+    self.diffDetectionCheck.font = [NSFont systemFontOfSize:11 weight:NSFontWeightRegular];
+    [content addSubview:self.diffDetectionCheck];
+
+    y -= 24.0;
+    self.alwaysOnTopCheck = [NSButton checkboxWithTitle:@"Keep Plugin Windows Always On Top in Local Mode" target:nil action:nil];
+    self.alwaysOnTopCheck.frame = NSMakeRect(135, y, 375, 20);
+    self.alwaysOnTopCheck.font = [NSFont systemFontOfSize:11 weight:NSFontWeightRegular];
+    [content addSubview:self.alwaysOnTopCheck];
+
+    y -= 36.0;
+
+    // Section 2: Plugin Formats
+    NSTextField *sec2 = [NSTextField labelWithString:@"HOSTED PLUGIN FORMATS"];
+    sec2.frame = NSMakeRect(24, y, 480, 18);
+    sec2.font = [NSFont systemFontOfSize:11 weight:NSFontWeightBold];
+    sec2.textColor = [NSColor colorWithCalibratedWhite:0.65 alpha:1.0];
+    [content addSubview:sec2];
+
+    y -= 26.0;
+    self.auCheck = [NSButton checkboxWithTitle:@"AudioUnit (AU)" target:nil action:nil];
+    self.auCheck.frame = NSMakeRect(28, y, 115, 20);
+    [content addSubview:self.auCheck];
+
+    self.vst3Check = [NSButton checkboxWithTitle:@"VST3" target:nil action:nil];
+    self.vst3Check.frame = NSMakeRect(150, y, 80, 20);
+    [content addSubview:self.vst3Check];
+
+    self.vst2Check = [NSButton checkboxWithTitle:@"VST2" target:nil action:nil];
+    self.vst2Check.frame = NSMakeRect(240, y, 80, 20);
+    [content addSubview:self.vst2Check];
+
+    self.lv2Check = [NSButton checkboxWithTitle:@"LV2" target:nil action:nil];
+    self.lv2Check.frame = NSMakeRect(330, y, 80, 20);
+    [content addSubview:self.lv2Check];
+
+    y -= 36.0;
+
+    // Section 3: Server Coordination
+    NSTextField *sec3 = [NSTextField labelWithString:@"SERVER IDENTIFICATION & STARTUP"];
+    sec3.frame = NSMakeRect(24, y, 480, 18);
+    sec3.font = [NSFont systemFontOfSize:11 weight:NSFontWeightBold];
+    sec3.textColor = [NSColor colorWithCalibratedWhite:0.65 alpha:1.0];
+    [content addSubview:sec3];
+
+    y -= 28.0;
+    NSTextField *nameLbl = [NSTextField labelWithString:@"Server Name:"];
+    nameLbl.frame = NSMakeRect(28, y, 100, 20);
+    nameLbl.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
+    nameLbl.textColor = [NSColor whiteColor];
+    [content addSubview:nameLbl];
+
+    self.serverNameField = [[NSTextField alloc] initWithFrame:NSMakeRect(135, y, 260, 22)];
+    [content addSubview:self.serverNameField];
+
+    y -= 28.0;
+    NSTextField *idLbl = [NSTextField labelWithString:@"Server ID:"];
+    idLbl.frame = NSMakeRect(28, y, 100, 20);
+    idLbl.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
+    idLbl.textColor = [NSColor whiteColor];
+    [content addSubview:idLbl];
+
+    self.serverIdField = [[NSTextField alloc] initWithFrame:NSMakeRect(135, y, 60, 22)];
+    [content addSubview:self.serverIdField];
+
+    NSTextField *portHelp = [NSTextField labelWithString:@"(Base Port 55056 + Server ID)"];
+    portHelp.frame = NSMakeRect(205, y + 2, 250, 18);
+    portHelp.font = [NSFont systemFontOfSize:11 weight:NSFontWeightRegular];
+    portHelp.textColor = [NSColor colorWithCalibratedWhite:0.65 alpha:1.0];
+    [content addSubview:portHelp];
+
+    y -= 26.0;
+    self.scanAtStartupCheck = [NSButton checkboxWithTitle:@"Scan for new & updated plugins on server startup" target:nil action:nil];
+    self.scanAtStartupCheck.frame = NSMakeRect(135, y, 375, 20);
+    self.scanAtStartupCheck.font = [NSFont systemFontOfSize:11 weight:NSFontWeightRegular];
+    [content addSubview:self.scanAtStartupCheck];
+
+    // Bottom Action Buttons
+    NSButton *cancelBtn = [[NSButton alloc] initWithFrame:NSMakeRect(320, 20, 90, 30)];
+    cancelBtn.title = @"Cancel";
+    cancelBtn.bezelStyle = NSBezelStyleRounded;
+    cancelBtn.target = self;
+    cancelBtn.action = @selector(onCancel:);
+    [content addSubview:cancelBtn];
+
+    NSButton *saveBtn = [[NSButton alloc] initWithFrame:NSMakeRect(420, 20, 100, 30)];
+    saveBtn.title = @"Save & Apply";
+    saveBtn.bezelStyle = NSBezelStyleRounded;
+    saveBtn.keyEquivalent = @"\r";
+    saveBtn.target = self;
+    saveBtn.action = @selector(onSave:);
+    [content addSubview:saveBtn];
+}
+
+- (void)loadCurrentSettings {
+    NSDictionary *cfg = nil;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:self.configPath]) {
+        NSData *data = [NSData dataWithContentsOfFile:self.configPath];
+        if (data) {
+            cfg = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        }
+    }
+
+    BOOL slm = cfg ? [cfg[@"ScreenLocalMode"] boolValue] : YES;
+    BOOL sco = cfg ? [cfg[@"ScreenCapturingOff"] boolValue] : NO;
+    if (slm) {
+        [self.captureModePopup selectItemAtIndex:0]; // Local Mode
+    } else if (sco) {
+        [self.captureModePopup selectItemAtIndex:2]; // Disabled
+    } else {
+        [self.captureModePopup selectItemAtIndex:1]; // Remote LAN
+    }
+
+    self.diffDetectionCheck.state = (!cfg || [cfg[@"ScreenDiffDetection"] boolValue]) ? NSControlStateValueOn : NSControlStateValueOff;
+    self.alwaysOnTopCheck.state = (cfg && [cfg[@"PluginWindowsOnTop"] boolValue]) ? NSControlStateValueOn : NSControlStateValueOff;
+
+    self.auCheck.state = (!cfg || [cfg[@"AU"] boolValue]) ? NSControlStateValueOn : NSControlStateValueOff;
+    self.vst3Check.state = (!cfg || [cfg[@"VST3"] boolValue]) ? NSControlStateValueOn : NSControlStateValueOff;
+    self.vst2Check.state = (!cfg || [cfg[@"VST2"] boolValue]) ? NSControlStateValueOn : NSControlStateValueOff;
+    self.lv2Check.state = (!cfg || [cfg[@"LV2"] boolValue]) ? NSControlStateValueOn : NSControlStateValueOff;
+
+    NSString *name = cfg[@"NAME"] ?: [[NSHost currentHost] localizedName];
+    self.serverNameField.stringValue = name ?: @"OpenGridder Server";
+    self.serverIdField.stringValue = [NSString stringWithFormat:@"%ld", (long)[cfg[@"ID"] integerValue]];
+    self.scanAtStartupCheck.state = (!cfg || [cfg[@"ScanForPlugins"] boolValue]) ? NSControlStateValueOn : NSControlStateValueOff;
+}
+
+- (void)onCancel:(id)sender {
+    [self.window close];
+}
+
+- (void)onSave:(id)sender {
+    [self saveAndApply];
+    [self.window close];
+}
+
+- (void)saveAndApply {
+    NSMutableDictionary *cfg = [NSMutableDictionary dictionary];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:self.configPath]) {
+        NSData *data = [NSData dataWithContentsOfFile:self.configPath];
+        if (data) {
+            NSDictionary *existing = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            if (existing) [cfg addEntriesFromDictionary:existing];
+        }
+    }
+
+    NSInteger modeIdx = self.captureModePopup.indexOfSelectedItem;
+    cfg[@"ScreenLocalMode"] = @(modeIdx == 0);
+    cfg[@"ScreenCapturingOff"] = @(modeIdx == 2);
+    cfg[@"ScreenDiffDetection"] = @(self.diffDetectionCheck.state == NSControlStateValueOn);
+    cfg[@"PluginWindowsOnTop"] = @(self.alwaysOnTopCheck.state == NSControlStateValueOn);
+
+    cfg[@"AU"] = @(self.auCheck.state == NSControlStateValueOn);
+    cfg[@"VST3"] = @(self.vst3Check.state == NSControlStateValueOn);
+    cfg[@"VST2"] = @(self.vst2Check.state == NSControlStateValueOn);
+    cfg[@"LV2"] = @(self.lv2Check.state == NSControlStateValueOn);
+
+    cfg[@"NAME"] = self.serverNameField.stringValue ?: @"OpenGridder Server";
+    cfg[@"ID"] = @([self.serverIdField.stringValue integerValue]);
+    cfg[@"ScanForPlugins"] = @(self.scanAtStartupCheck.state == NSControlStateValueOn);
+
+    NSString *dir = [self.configPath stringByDeletingLastPathComponent];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+
+    NSData *outData = [NSJSONSerialization dataWithJSONObject:cfg options:NSJSONWritingPrettyPrinted error:nil];
+    if (outData) {
+        [outData writeToFile:self.configPath atomically:YES];
+    }
+
+    // Also write to old config path ~/.audiogridderserver if needed
+    NSString *oldPath = [NSHomeDirectory() stringByAppendingPathComponent:@".audiogridderserver"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:oldPath]) {
+        [outData writeToFile:oldPath atomically:YES];
+    }
+
+    if ([self.delegate respondsToSelector:@selector(restartServer:)]) {
+        [self.delegate performSelector:@selector(restartServer:) withObject:nil];
+    }
+}
+
+@end
+
 #pragma mark - Main Application Delegate
 
 @interface OpenGridderAppDelegate : NSObject <NSApplicationDelegate>
@@ -454,7 +964,9 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
 @property (strong, nonatomic) NSMenuItem *statusMenuItem;
 @property (strong, nonatomic) NSMenuItem *pluginCountMenuItem;
 @property (strong, nonatomic) SplashWindowController *splashController;
+@property (strong, nonatomic) AboutWindowController *aboutController;
 @property (strong, nonatomic) PluginListWindowController *pluginListController;
+@property (strong, nonatomic) SettingsWindowController *settingsController;
 @property (strong, nonatomic) NSArray<NSDictionary *> *catalog;
 @property (nonatomic) NSInteger serverPort;
 @end
@@ -484,6 +996,16 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
     self.statusItem.button.title = @" OpenGridder";
 
     NSMenu *menu = [[NSMenu alloc] initWithTitle:@"OpenGridder Server"];
+    NSMenuItem *aboutItem = [[NSMenuItem alloc] initWithTitle:@"About OpenGridder Server..." action:@selector(showAbout:) keyEquivalent:@""];
+    [aboutItem setTarget:self];
+    [menu addItem:aboutItem];
+
+    NSMenuItem *settingsItem = [[NSMenuItem alloc] initWithTitle:@"Server Settings..." action:@selector(showSettings:) keyEquivalent:@","];
+    [settingsItem setTarget:self];
+    [menu addItem:settingsItem];
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
     self.statusMenuItem = [[NSMenuItem alloc] initWithTitle:@"OpenGridder Server: Starting..." action:nil keyEquivalent:@""];
     [self.statusMenuItem setEnabled:NO];
     [menu addItem:self.statusMenuItem];
@@ -528,11 +1050,34 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
 
     self.statusItem.menu = menu;
 
+    // Standard Application Menu Bar
+    NSMenu *mainMenu = [[NSMenu alloc] init];
+    NSMenuItem *appMenuItem = [[NSMenuItem alloc] init];
+    [mainMenu addItem:appMenuItem];
+    NSMenu *appMenu = [[NSMenu alloc] initWithTitle:@"OpenGridder Server"];
+    NSMenuItem *appAboutItem = [[NSMenuItem alloc] initWithTitle:@"About OpenGridder Server" action:@selector(showAbout:) keyEquivalent:@""];
+    [appAboutItem setTarget:self];
+    [appMenu addItem:appAboutItem];
+    NSMenuItem *appSettingsItem = [[NSMenuItem alloc] initWithTitle:@"Preferences..." action:@selector(showSettings:) keyEquivalent:@","];
+    [appSettingsItem setTarget:self];
+    [appMenu addItem:appSettingsItem];
+    [appMenu addItem:[NSMenuItem separatorItem]];
+    [appMenu addItem:[[NSMenuItem alloc] initWithTitle:@"Hide OpenGridder Server" action:@selector(hide:) keyEquivalent:@"h"]];
+    [appMenu addItem:[[NSMenuItem alloc] initWithTitle:@"Hide Others" action:@selector(hideOtherApplications:) keyEquivalent:@"h"]];
+    [appMenu addItem:[[NSMenuItem alloc] initWithTitle:@"Show All" action:@selector(unhideAllApplications:) keyEquivalent:@""]];
+    [appMenu addItem:[NSMenuItem separatorItem]];
+    NSMenuItem *appQuitItem = [[NSMenuItem alloc] initWithTitle:@"Quit OpenGridder Server" action:@selector(quitApp:) keyEquivalent:@"q"];
+    [appQuitItem setTarget:self];
+    [appMenu addItem:appQuitItem];
+    [appMenuItem setSubmenu:appMenu];
+    [NSApp setMainMenu:mainMenu];
+
     // 3. Initialize Window Controllers
     self.splashController = [[SplashWindowController alloc] init];
     __weak typeof(self) weakSelf = self;
     self.splashController.onCancel = ^{
-        // User requested cancel slow scan: continue running server
+        // User requested skip scan: restart server immediately with --no-scan
+        [weakSelf startServerWithRescan:NO noScan:YES];
     };
 
     self.pluginListController = [[PluginListWindowController alloc] init];
@@ -548,6 +1093,10 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
 }
 
 - (void)startServerWithRescan:(BOOL)rescan {
+    [self startServerWithRescan:rescan noScan:NO];
+}
+
+- (void)startServerWithRescan:(BOOL)rescan noScan:(BOOL)noScan {
     [self stopServer];
 
     NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
@@ -567,7 +1116,9 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
     self.serverTask.launchPath = binPath;
 
     NSMutableArray *taskArgs = [NSMutableArray arrayWithObject:@"--scan-progress"];
-    if (rescan) {
+    if (noScan) {
+        [taskArgs addObject:@"--no-scan"];
+    } else if (rescan) {
         [taskArgs addObject:@"--rescan"];
     }
     self.serverTask.arguments = taskArgs;
@@ -684,6 +1235,44 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
 
 - (void)showPluginManager:(id)sender {
     [self.pluginListController.window makeKeyAndOrderFront:nil];
+}
+
+- (void)showAbout:(id)sender {
+    if (!self.aboutController) {
+        self.aboutController = [[AboutWindowController alloc] init];
+    }
+    [self.aboutController.window center];
+    [self.aboutController.window makeKeyAndOrderFront:nil];
+    [self.aboutController startScrollTimer];
+    [NSApp activateIgnoringOtherApps:YES];
+}
+
+- (void)showSettings:(id)sender {
+    if (!self.settingsController) {
+        self.settingsController = [[SettingsWindowController alloc] init];
+        self.settingsController.delegate = self;
+    }
+    [self.settingsController loadCurrentSettings];
+    [self.settingsController.window center];
+    [self.settingsController.window makeKeyAndOrderFront:nil];
+    [NSApp activateIgnoringOtherApps:YES];
+}
+
+- (NSMenu *)applicationDockMenu:(NSApplication *)sender {
+    NSMenu *dockMenu = [[NSMenu alloc] initWithTitle:@"Dock Menu"];
+    NSMenuItem *aboutItem = [[NSMenuItem alloc] initWithTitle:@"About OpenGridder Server..." action:@selector(showAbout:) keyEquivalent:@""];
+    [aboutItem setTarget:self];
+    [dockMenu addItem:aboutItem];
+
+    NSMenuItem *settItem = [[NSMenuItem alloc] initWithTitle:@"Server Settings..." action:@selector(showSettings:) keyEquivalent:@""];
+    [settItem setTarget:self];
+    [dockMenu addItem:settItem];
+
+    NSMenuItem *pmItem = [[NSMenuItem alloc] initWithTitle:@"Plugin Manager..." action:@selector(showPluginManager:) keyEquivalent:@""];
+    [pmItem setTarget:self];
+    [dockMenu addItem:pmItem];
+
+    return dockMenu;
 }
 
 - (void)openLogs:(id)sender {

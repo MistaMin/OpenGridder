@@ -9,7 +9,7 @@ use crate::processor_chain::ProcessorChain;
 use crate::screen_worker::ScreenWorker;
 use og_common::message::{
     send_json_message, AddPluginResult, CpuLoadPayload, ExchangePayload, HandshakeRequest,
-    MessageFactory, MessageType, OversamplingPayload, ParameterValuePayload, PresetPayload,
+    MessageFactory, MessageType, MousePayload, OversamplingPayload, ParameterValuePayload, PresetPayload,
     RawMessage, HANDSHAKE_FLAG_STATE_ACK,
 };
 use og_common::server_plugin::ServerPlugin;
@@ -27,6 +27,9 @@ pub struct Worker {
     pub recents: Arc<Mutex<Vec<ServerPlugin>>>,
     pub running: Arc<AtomicBool>,
     pub active_editor_idx: Arc<AtomicI32>,
+    pub screen_local_mode: bool,
+    pub screen_capturing_off: bool,
+    pub plugin_windows_on_top: bool,
 }
 
 impl Worker {
@@ -35,6 +38,9 @@ impl Worker {
         format_mgr: Arc<PluginFormatManager>,
         known_plugins: Arc<Mutex<Vec<ServerPlugin>>>,
         recents: Arc<Mutex<Vec<ServerPlugin>>>,
+        screen_local_mode: bool,
+        screen_capturing_off: bool,
+        plugin_windows_on_top: bool,
     ) -> Self {
         let chain = Arc::new(ProcessorChain::new(
             handshake.sample_rate,
@@ -48,6 +54,9 @@ impl Worker {
             recents,
             running: Arc::new(AtomicBool::new(true)),
             active_editor_idx: Arc::new(AtomicI32::new(-1)),
+            screen_local_mode,
+            screen_capturing_off,
+            plugin_windows_on_top,
         }
     }
 
@@ -86,6 +95,7 @@ impl Worker {
             self.running.clone(),
             self.active_editor_idx.clone(),
             diff_detection,
+            self.screen_local_mode || self.screen_capturing_off,
         );
 
         // 3. Command loop on `cmd_stream`
@@ -215,12 +225,28 @@ impl Worker {
             MessageType::EditPlugin => {
                 if msg.payload.len() >= 4 {
                     let idx = i32::from_le_bytes(msg.payload[0..4].try_into().unwrap());
+                    let mut x = 0;
+                    let mut y = 0;
+                    if msg.payload.len() >= 16 {
+                        x = i32::from_le_bytes(msg.payload[8..12].try_into().unwrap());
+                        y = i32::from_le_bytes(msg.payload[12..16].try_into().unwrap());
+                    }
                     self.active_editor_idx.store(idx, Ordering::Relaxed);
+                    if self.screen_local_mode && idx >= 0 {
+                        if let Some(proc) = self.chain.get_processor(idx as usize) {
+                            proc.lock().show_native_editor(x, y, self.plugin_windows_on_top);
+                        }
+                    }
                 }
             }
 
             MessageType::HidePlugin => {
-                self.active_editor_idx.store(-1, Ordering::Relaxed);
+                let prev_idx = self.active_editor_idx.swap(-1, Ordering::Relaxed);
+                if self.screen_local_mode && prev_idx >= 0 {
+                    if let Some(proc) = self.chain.get_processor(prev_idx as usize) {
+                        proc.lock().hide_native_editor();
+                    }
+                }
             }
 
             MessageType::GetPluginSettings => {
@@ -375,9 +401,58 @@ impl Worker {
                     RawMessage::new(MessageType::CpuLoad, cpu.to_bytes().to_vec()).send(cmd_stream);
             }
 
+            MessageType::Mouse => {
+                if let Some(ev) = MousePayload::from_bytes(&msg.payload) {
+                    #[cfg(target_os = "macos")]
+                    unsafe {
+                        extern "C" {
+                            fn og_post_mouse_event(
+                                ev_type: u8,
+                                x: f32,
+                                y: f32,
+                                shift: bool,
+                                ctrl: bool,
+                                alt: bool,
+                                delta_x: f32,
+                                delta_y: f32,
+                            );
+                        }
+                        og_post_mouse_event(
+                            ev.ev_type as u8,
+                            ev.x,
+                            ev.y,
+                            ev.is_shift_down,
+                            ev.is_ctrl_down,
+                            ev.is_alt_down,
+                            ev.delta_x,
+                            ev.delta_y,
+                        );
+                    }
+                }
+            }
+
+            MessageType::Key => {
+                if msg.payload.len() >= 2 {
+                    let num_keys = msg.payload.len() / 2;
+                    let mut key_codes = Vec::with_capacity(num_keys);
+                    for i in 0..num_keys {
+                        let kc = u16::from_le_bytes(msg.payload[i*2..i*2+2].try_into().unwrap());
+                        key_codes.push(kc);
+                    }
+                    #[cfg(target_os = "macos")]
+                    unsafe {
+                        extern "C" {
+                            fn og_post_key_event(key_code: u16, is_down: bool);
+                        }
+                        for kc in key_codes {
+                            og_post_key_event(kc, true);
+                            og_post_key_event(kc, false);
+                        }
+                    }
+                }
+            }
+
             MessageType::ScreenCaptureArea
-            | MessageType::Mouse
-            | MessageType::Key
             | MessageType::Rescan
             | MessageType::Restart => {
                 // Handled gracefully

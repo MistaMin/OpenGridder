@@ -9,7 +9,7 @@ fn isolated_au_chain_crash_preserves_other_client_and_accepts_reconnect() {
     let mut cfg = ServerConfig::default();
     cfg.sandbox_mode = SandboxMode::Chain as i32;
     let mut server = Server::new(cfg);
-    server.set_worker_executable(env!("CARGO_BIN_EXE_AudioGridderServer").into());
+    server.set_worker_executable(env!("CARGO_BIN_EXE_OpenGridderServer").into());
     let desc = ServerPlugin::new(
         "AULowpass",
         "Apple",

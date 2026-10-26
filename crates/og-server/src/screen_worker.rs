@@ -22,6 +22,7 @@ impl ScreenWorker {
         running: Arc<AtomicBool>,
         active_editor_idx: Arc<AtomicI32>,
         diff_detection: bool,
+        capturing_off: bool,
     ) -> Self {
         let run_flag = running.clone();
         let editor_idx = active_editor_idx.clone();
@@ -34,6 +35,10 @@ impl ScreenWorker {
                 encoder.enable_diff_detection = diff_detection;
 
                 while run_flag.load(Ordering::Relaxed) {
+                    if capturing_off {
+                        thread::sleep(Duration::from_millis(100));
+                        continue;
+                    }
                     let idx = editor_idx.load(Ordering::Relaxed);
                     if idx >= 0 {
                         if let Some(proc_arc) = chain.get_processor(idx as usize) {

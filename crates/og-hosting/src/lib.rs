@@ -6,7 +6,9 @@
 pub mod au;
 #[cfg(target_os = "macos")]
 mod au_native;
+pub mod bundle_inspect;
 pub mod lv2;
+pub mod vst2;
 pub mod vst3;
 #[cfg(og_vst3_host)]
 mod vst3_native;
@@ -84,6 +86,13 @@ pub trait HostedPlugin: Send {
     fn has_editor(&self) -> bool;
     fn editor_size(&self) -> (u32, u32);
     fn render_editor_rgba(&self) -> (u32, u32, Vec<u8>);
+    fn show_editor(&mut self, _x: i32, _y: i32, _on_top: bool) -> bool {
+        false
+    }
+    fn hide_editor(&mut self) {}
+    fn is_editor_open(&self) -> bool {
+        false
+    }
 }
 
 /// Built-in OpenGridder gain/mix processor for diagnostics and DSP tests.
@@ -426,6 +435,9 @@ impl PluginFormatManager {
             "AudioUnit" | "AU" => au::instantiate_audiounit(desc)?,
             "VST3" => vst3::instantiate_vst3(desc)?,
             "LV2" => lv2::instantiate_lv2(desc)?,
+            "VST" | "VST2" => {
+                Box::new(HostedPluginInstance::new(desc.clone()))
+            }
             "OpenGridder" if desc.id == "OpenGridder:Gain" => {
                 Box::new(HostedPluginInstance::new(desc.clone()))
             }

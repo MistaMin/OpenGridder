@@ -1622,6 +1622,23 @@ impl MousePayload {
         payload[24] = u8::from(self.is_smooth);
         payload
     }
+
+    pub fn from_bytes(b: &[u8]) -> Option<Self> {
+        if b.len() < Self::SIZE {
+            return None;
+        }
+        Some(Self {
+            ev_type: MouseEvType::from_u8(b[0]),
+            x: f32::from_le_bytes(b[4..8].try_into().ok()?),
+            y: f32::from_le_bytes(b[8..12].try_into().ok()?),
+            is_shift_down: b[12] != 0,
+            is_ctrl_down: b[13] != 0,
+            is_alt_down: b[14] != 0,
+            delta_x: f32::from_le_bytes(b[16..20].try_into().ok()?),
+            delta_y: f32::from_le_bytes(b[20..24].try_into().ok()?),
+            is_smooth: b[24] != 0,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

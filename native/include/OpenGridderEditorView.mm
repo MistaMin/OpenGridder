@@ -190,6 +190,7 @@ static NSFont *MonoFont(CGFloat size, NSFontWeight weight) {
     if (r) {
         _statusCode = og_native_status(r);
         _latencySamples = og_native_latency(r);
+        _activeProfile = (int)(og_native_get_param(r, 2) * 3.0f + 0.5f);
         if (_draggedKnob < 0) {
             _isBypassed = og_native_get_param(r, 0) >= 0.5f;
             _inputGain = og_native_get_param(r, 3);
@@ -1312,7 +1313,14 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
             CGRect bRect = CGRectMake(bx, by, 108, 24);
             if (CGRectContainsPoint(bRect, cp)) {
                 _activeProfile = i;
-                if (self.rust) og_native_set_param(self.rust, 2, (float)i / 3.0f);
+                uint32_t target = (i == 0) ? 128 : (i == 1) ? 256 : (i == 2) ? 512 : 1024;
+                _latencySamples = target;
+                if (self.rust) {
+                    og_native_set_param(self.rust, 2, (float)i / 3.0f);
+                    og_native_set_transport_latency(self.rust, target);
+                    og_native_accept_latency(self.rust, og_native_latency(self.rust));
+                    _latencySamples = og_native_latency(self.rust);
+                }
                 if (self.onProfileChanged) self.onProfileChanged(i);
                 [self setNeedsDisplay:YES];
                 return;
@@ -1379,15 +1387,22 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
             if (CGRectContainsPoint(slotRect, cp)) {
                 _activeSlot = i;
                 NSWindow *win = self.window;
-                NSPoint winPoint = [self convertPoint:p toView:nil];
-                NSRect screenRect = [win convertRectToScreen:NSMakeRect(winPoint.x, winPoint.y, 1, 1)];
-                og_native_edit_plugin(self.rust, i, (int32_t)screenRect.origin.x, (int32_t)screenRect.origin.y);
-                char slotName[256] = {0};
-                bool slotByp = false;
-                uint32_t slotOs = 1;
-                og_native_get_loaded_plugin(self.rust, i, slotName, sizeof(slotName), &slotByp, &slotOs);
-                NSString *title = [NSString stringWithUTF8String:slotName];
-                [[OpenGridderRemoteWindowController sharedController] showForPlugin:self.rust slotIndex:i title:title];
+                NSRect winFrame = win ? [win frame] : NSZeroRect;
+                int32_t posX = (int32_t)(winFrame.origin.x + winFrame.size.width + 10.0);
+                int32_t posY = (int32_t)(winFrame.origin.y + winFrame.size.height);
+                og_native_edit_plugin(self.rust, i, posX, posY);
+
+                bool isLocal = og_native_is_server_local_mode(self.rust);
+                if (!isLocal) {
+                    char slotName[256] = {0};
+                    bool slotByp = false;
+                    uint32_t slotOs = 1;
+                    og_native_get_loaded_plugin(self.rust, i, slotName, sizeof(slotName), &slotByp, &slotOs);
+                    NSString *title = [NSString stringWithUTF8String:slotName];
+                    [[OpenGridderRemoteWindowController sharedController] showForPlugin:self.rust slotIndex:i title:title];
+                } else {
+                    [[OpenGridderRemoteWindowController sharedController] hide];
+                }
                 [self setNeedsDisplay:YES];
                 return;
             }
@@ -1661,44 +1676,132 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
     if (!_cachedPluginMenu || _cachedPluginCount != numAvail) {
         _cachedPluginMenu = [[NSMenu alloc] initWithTitle:@"Available Plugins"];
         [_cachedPluginMenu setAutoenablesItems:NO];
+
+        // Format submenus: "AudioUnit", "VST3", "VST"
+        NSMutableDictionary *formatMenus = [NSMutableDictionary dictionary];
+        // Nested (Format -> Company) submenus
+        NSMutableDictionary *companyMenus = [NSMutableDictionary dictionary];
+        // Nested (Format -> Company -> Category) submenus
         NSMutableDictionary *categoryMenus = [NSMutableDictionary dictionary];
+
+        NSArray *formatOrder = @[@"AudioUnit", @"VST3", @"VST"];
+        for (NSString *fmt in formatOrder) {
+            NSMenu *fmtMenu = [[NSMenu alloc] initWithTitle:fmt];
+            [fmtMenu setAutoenablesItems:NO];
+            NSMenuItem *fmtItem = [[NSMenuItem alloc] initWithTitle:fmt action:nil keyEquivalent:@""];
+            [fmtItem setSubmenu:fmtMenu];
+            [_cachedPluginMenu addItem:fmtItem];
+            formatMenus[fmt] = fmtMenu;
+        }
 
         for (uint32_t i = 0; i < numAvail; ++i) {
             char nameBuf[256] = {0};
             char idBuf[256] = {0};
-            char catBuf[256] = {0};
-            og_native_get_available_plugin(self.rust, i, nameBuf, sizeof(nameBuf), idBuf, sizeof(idBuf), catBuf, sizeof(catBuf));
+            char typeBuf[64] = {0};
+            char compBuf[128] = {0};
+            char catBuf[128] = {0};
+
+            og_native_get_available_plugin_ext(self.rust, i,
+                                               nameBuf, sizeof(nameBuf),
+                                               idBuf, sizeof(idBuf),
+                                               typeBuf, sizeof(typeBuf),
+                                               compBuf, sizeof(compBuf),
+                                               catBuf, sizeof(catBuf));
 
             NSString *name = [NSString stringWithUTF8String:nameBuf];
+            NSString *fmt = [NSString stringWithUTF8String:typeBuf];
+            NSString *comp = [NSString stringWithUTF8String:compBuf];
             NSString *cat = [NSString stringWithUTF8String:catBuf];
-            if (cat.length == 0) {
-                cat = @"General";
+
+            if (fmt.length == 0) fmt = @"AudioUnit";
+            if (comp.length == 0) comp = @"General";
+            if (cat.length == 0) cat = @"Effect";
+
+            NSMenu *targetFmtMenu = formatMenus[fmt];
+            if (!targetFmtMenu) {
+                targetFmtMenu = [[NSMenu alloc] initWithTitle:fmt];
+                [targetFmtMenu setAutoenablesItems:NO];
+                NSMenuItem *fmtItem = [[NSMenuItem alloc] initWithTitle:fmt action:nil keyEquivalent:@""];
+                [fmtItem setEnabled:YES];
+                [fmtItem setSubmenu:targetFmtMenu];
+                [_cachedPluginMenu addItem:fmtItem];
+                formatMenus[fmt] = targetFmtMenu;
             }
 
-            NSMenu *targetMenu = categoryMenus[cat];
-            if (!targetMenu) {
-                NSMenuItem *catItem = [[NSMenuItem alloc] initWithTitle:cat action:nil keyEquivalent:@""];
-                targetMenu = [[NSMenu alloc] initWithTitle:cat];
-                [catItem setSubmenu:targetMenu];
-                [_cachedPluginMenu addItem:catItem];
-                categoryMenus[cat] = targetMenu;
+            NSString *fmtCompKey = [NSString stringWithFormat:@"%@::%@", fmt, comp];
+            NSMenu *targetCompMenu = companyMenus[fmtCompKey];
+            if (!targetCompMenu) {
+                targetCompMenu = [[NSMenu alloc] initWithTitle:comp];
+                [targetCompMenu setAutoenablesItems:NO];
+                NSMenuItem *compItem = [[NSMenuItem alloc] initWithTitle:comp action:nil keyEquivalent:@""];
+                [compItem setEnabled:YES];
+                [compItem setSubmenu:targetCompMenu];
+                [targetFmtMenu addItem:compItem];
+                companyMenus[fmtCompKey] = targetCompMenu;
+            }
+
+            NSMenu *finalMenu = targetCompMenu;
+            if (cat.length > 0 && ![cat isEqualToString:@"Effect"] && ![cat isEqualToString:@"General"]) {
+                NSString *fmtCompCatKey = [NSString stringWithFormat:@"%@::%@::%@", fmt, comp, cat];
+                NSMenu *targetCatMenu = categoryMenus[fmtCompCatKey];
+                if (!targetCatMenu) {
+                    targetCatMenu = [[NSMenu alloc] initWithTitle:cat];
+                    [targetCatMenu setAutoenablesItems:NO];
+                    NSMenuItem *catItem = [[NSMenuItem alloc] initWithTitle:cat action:nil keyEquivalent:@""];
+                    [catItem setEnabled:YES];
+                    [catItem setSubmenu:targetCatMenu];
+                    [targetCompMenu addItem:catItem];
+                    categoryMenus[fmtCompCatKey] = targetCatMenu;
+                }
+                finalMenu = targetCatMenu;
             }
 
             NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:name action:@selector(onSelectPlugin:) keyEquivalent:@""];
             [item setTarget:self];
             [item setTag:(NSInteger)i];
-            [targetMenu addItem:item];
+            [item setEnabled:YES];
+            [finalMenu addItem:item];
         }
+
+        // Clean up empty format menus if no plugins exist for that format
+        for (NSString *fmt in formatOrder) {
+            NSMenu *fmtMenu = formatMenus[fmt];
+            if (fmtMenu.numberOfItems == 0) {
+                NSInteger idx = [_cachedPluginMenu indexOfItemWithSubmenu:fmtMenu];
+                if (idx >= 0) {
+                    [_cachedPluginMenu removeItemAtIndex:idx];
+                }
+            }
+        }
+
         _cachedPluginCount = numAvail;
     }
 
     [_cachedPluginMenu popUpMenuPositioningItem:nil atLocation:pt inView:self];
 }
 
+- (BOOL)validateMenuItem:(NSMenuItem *)menuItem {
+    return YES;
+}
+
 - (void)onSelectPlugin:(NSMenuItem *)sender {
     if (!self.rust) return;
     uint32_t idx = (uint32_t)sender.tag;
-    og_native_load_plugin(self.rust, idx);
+    NSWindow *win = self.window;
+    NSRect winFrame = win ? [win frame] : NSZeroRect;
+    int32_t posX = (int32_t)(winFrame.origin.x + winFrame.size.width + 10.0);
+    int32_t posY = (int32_t)(winFrame.origin.y + winFrame.size.height);
+    uint32_t newSlot = og_native_num_loaded_plugins(self.rust);
+    og_native_load_plugin_at(self.rust, idx, posX, posY);
+    _activeSlot = (int)newSlot;
+
+    bool isLocal = og_native_is_server_local_mode(self.rust);
+    if (!isLocal) {
+        NSString *title = sender.title ?: @"Remote Plugin";
+        [[OpenGridderRemoteWindowController sharedController] showForPlugin:self.rust slotIndex:newSlot title:title];
+    } else {
+        [[OpenGridderRemoteWindowController sharedController] hide];
+    }
     [self setNeedsDisplay:YES];
 }
 

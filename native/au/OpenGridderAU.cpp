@@ -7,6 +7,7 @@
 #include <AudioUnit/AudioUnit.h>
 #include <AudioUnit/AudioUnitProperties.h>
 #include <AudioUnit/AudioUnitParameters.h>
+#include <AudioToolbox/AudioUnitUtilities.h>
 #include <dlfcn.h>
 
 #if defined(__i386__) || defined(__PPC__)
@@ -131,17 +132,18 @@ public:
         }
 
         // Pull input audio from host callback
-        AudioBufferList inputBufferList;
-        inputBufferList.mNumberBuffers = channels_;
+        alignas(AudioBufferList) uint8_t inputBufferStorage[sizeof(AudioBufferList) + sizeof(AudioBuffer) * 2];
+        auto* inputBufferList = reinterpret_cast<AudioBufferList*>(inputBufferStorage);
+        inputBufferList->mNumberBuffers = channels_;
         for (UInt32 ch = 0; ch < channels_; ++ch) {
-            inputBufferList.mBuffers[ch].mNumberChannels = 1;
-            inputBufferList.mBuffers[ch].mDataByteSize = inNumberFrames * sizeof(float);
-            inputBufferList.mBuffers[ch].mData = scratchBuffers_[ch].data();
+            inputBufferList->mBuffers[ch].mNumberChannels = 1;
+            inputBufferList->mBuffers[ch].mDataByteSize = inNumberFrames * sizeof(float);
+            inputBufferList->mBuffers[ch].mData = scratchBuffers_[ch].data();
         }
 
         if (hasConnection_ && connection_.sourceAudioUnit) {
             AudioUnitRenderActionFlags flags = 0;
-            OSStatus err = AudioUnitRender(connection_.sourceAudioUnit, &flags, inTimeStamp, connection_.sourceOutputNumber, inNumberFrames, &inputBufferList);
+            OSStatus err = AudioUnitRender(connection_.sourceAudioUnit, &flags, inTimeStamp, connection_.sourceOutputNumber, inNumberFrames, inputBufferList);
             if (err != noErr) return err;
         } else if (inputCallback_.inputProc) {
             OSStatus err = inputCallback_.inputProc(inputCallback_.inputProcRefCon,
@@ -149,11 +151,16 @@ public:
                                                    inTimeStamp,
                                                    0,
                                                    inNumberFrames,
-                                                   &inputBufferList);
+                                                   inputBufferList);
             if (err != noErr) return err;
         } else {
+            // In-place processing: host provided input audio in ioData
             for (UInt32 ch = 0; ch < channels_; ++ch) {
-                std::fill_n(scratchBuffers_[ch].data(), inNumberFrames, 0.0f);
+                if (ch < ioData->mNumberBuffers && ioData->mBuffers[ch].mData) {
+                    std::memcpy(scratchBuffers_[ch].data(), ioData->mBuffers[ch].mData, inNumberFrames * sizeof(float));
+                } else {
+                    std::fill_n(scratchBuffers_[ch].data(), inNumberFrames, 0.0f);
+                }
             }
         }
 
@@ -644,8 +651,11 @@ public:
             case kParamLatencyProfile: {
                 profile_ = static_cast<int32_t>(std::max(0.0f, std::min(3.0f, inValue)));
                 uint32_t target = targetLatencyFromProfile(profile_);
+                lastLatency_ = target;
                 if (rust_) {
+                    og_native_set_param(rust_, kParamLatencyProfile, static_cast<float>(profile_) / 3.0f);
                     og_native_set_transport_latency(rust_, target);
+                    og_native_accept_latency(rust_, og_native_latency(rust_));
                 }
                 notifyPropertyListeners(kAudioUnitProperty_Latency);
                 return noErr;
@@ -825,6 +835,15 @@ private:
             if (l.id == inID && l.proc) {
                 l.proc(l.userData, static_cast<AudioUnit>(compInstance_), inID, kAudioUnitScope_Global, 0);
             }
+        }
+        if (compInstance_) {
+            AudioUnitEvent event;
+            event.mEventType = kAudioUnitEvent_PropertyChange;
+            event.mArgument.mProperty.mAudioUnit = static_cast<AudioUnit>(compInstance_);
+            event.mArgument.mProperty.mPropertyID = inID;
+            event.mArgument.mProperty.mScope = kAudioUnitScope_Global;
+            event.mArgument.mProperty.mElement = 0;
+            AUEventListenerNotify(nullptr, nullptr, &event);
         }
     }
 

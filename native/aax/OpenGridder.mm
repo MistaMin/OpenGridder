@@ -129,7 +129,16 @@ public:
                 static_cast<uint32_t>(std::lround(unitValue(value) * 128.0)));
             else if (!std::strcmp(id, cDefaultMasterBypassID)) og_native_bypass(instance_.rust, value >= 0.5);
             else if (!std::strcmp(id, kLatencyProfile)) {
-                og_native_set_param(instance_.rust, 2, static_cast<float>(unitValue(value)));
+                float val = static_cast<float>(unitValue(value));
+                int prof = std::clamp(static_cast<int>(val * 3.0f + 0.5f), 0, 3);
+                uint32_t target = (prof == 0) ? 128 : (prof == 1) ? 256 : (prof == 2) ? 512 : 1024;
+                if (instance_.rust) {
+                    og_native_set_param(instance_.rust, 2, val);
+                    og_native_set_transport_latency(instance_.rust, target);
+                    og_native_accept_latency(instance_.rust, og_native_latency(instance_.rust));
+                }
+                lastLatency_ = instance_.rust ? og_native_latency(instance_.rust) : target;
+                Controller()->SetSignalLatency(static_cast<int32_t>(lastLatency_));
             }
             else if (!std::strcmp(id, kInputGain)) og_native_set_param(instance_.rust, 3, static_cast<float>(unitValue(value)));
             else if (!std::strcmp(id, kWetDryMix)) og_native_set_param(instance_.rust, 4, static_cast<float>(unitValue(value)));
@@ -162,7 +171,7 @@ public:
         if (id && text && !std::strcmp(id, kLatencyProfile)) {
             if (!std::isfinite(normalized)) return AAX_ERROR_INVALID_STRING_CONVERSION;
             const auto index = static_cast<uint32_t>(std::lround(unitValue(normalized) * 3.0));
-            const char* names[] = {"1024s LAN", "512s 10GbE", "384s Localhost VSTi", "256s Localhost Direct"};
+            const char* names[] = {"LOW (128)", "STD (256)", "HIGH (512)", "STUDIO (1024)"};
             text->Set(names[index % 4]);
             return AAX_SUCCESS;
         }

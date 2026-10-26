@@ -86,6 +86,9 @@ lib.og_native_send_mouse.restype = None
 lib.og_native_is_editor_open.argtypes = [ctypes.c_void_p]
 lib.og_native_is_editor_open.restype = ctypes.c_bool
 
+lib.og_native_is_server_local_mode.argtypes = [ctypes.c_void_p]
+lib.og_native_is_server_local_mode.restype = ctypes.c_bool
+
 
 def main():
     print("=== OpenGridder Screen Streaming Test ===")
@@ -96,7 +99,7 @@ def main():
     print(f"Created NativePlugin handle: {hex(p)}")
 
     # Wait for connection to server
-    print("Waiting for connection to AudioGridder server (127.0.0.1:55056)...")
+    print("Waiting for connection to OpenGridder server (127.0.0.1:55056)...")
     connected = False
     for _ in range(30):
         st = lib.og_native_status(p)
@@ -135,54 +138,60 @@ def main():
     num_loaded = lib.og_native_num_loaded_plugins(p)
     print(f"Loaded plugins count: {num_loaded}")
 
-    # Open remote editor
-    print("Requesting remote editor GUI (og_native_edit_plugin)...")
+    is_local = lib.og_native_is_server_local_mode(p)
+    print(f"Server ScreenLocalMode: {is_local}")
+
+    # Open editor
+    print("Requesting editor GUI (og_native_edit_plugin)...")
     lib.og_native_edit_plugin(p, 0, 100, 100)
     time.sleep(0.5)
     print(f"is_editor_open: {lib.og_native_is_editor_open(p)}")
 
-    # Wait for screen frame
-    print("Waiting for streamed screen capture frame...")
-    w = ctypes.c_uint32(0)
-    h = ctypes.c_uint32(0)
-    scale = ctypes.c_double(1.0)
-    fid = ctypes.c_uint64(0)
-    got_frame = False
+    if is_local:
+        print("PASS: In Local Mode, native Cocoa/AU editor displays directly on host display with zero streaming overhead.")
+    else:
+        # Wait for screen frame in Remote Mode
+        print("Waiting for streamed screen capture frame...")
+        w = ctypes.c_uint32(0)
+        h = ctypes.c_uint32(0)
+        scale = ctypes.c_double(1.0)
+        fid = ctypes.c_uint64(0)
+        got_frame = False
 
-    out_dir = "/Users/marcosdeida/Projects/OpenGridder-Rust/qa/2026-10-25-alpha-stabilization"
-    os.makedirs(out_dir, exist_ok=True)
-    out_img = os.path.join(out_dir, "screen_stream_frame.png")
+        out_dir = "/Users/marcosdeida/Projects/OpenGridder-Rust/qa/2026-10-25-alpha-stabilization"
+        os.makedirs(out_dir, exist_ok=True)
+        out_img = os.path.join(out_dir, "screen_stream_frame.png")
 
-    for _ in range(50):
-        if lib.og_native_get_screen_info(p, ctypes.byref(w), ctypes.byref(h), ctypes.byref(scale), ctypes.byref(fid)):
-            if w.value > 0 and h.value > 0 and fid.value > 0:
-                got_frame = True
-                break
-        time.sleep(0.1)
+        for _ in range(50):
+            if lib.og_native_get_screen_info(p, ctypes.byref(w), ctypes.byref(h), ctypes.byref(scale), ctypes.byref(fid)):
+                if w.value > 0 and h.value > 0 and fid.value > 0:
+                    got_frame = True
+                    break
+            time.sleep(0.1)
 
-    if not got_frame:
-        print("FAIL: timed out waiting for screen capture frame from server")
-        lib.og_native_hide_plugin(p)
-        lib.og_native_destroy(p)
-        sys.exit(1)
+        if not got_frame:
+            print("FAIL: timed out waiting for screen capture frame from server")
+            lib.og_native_hide_plugin(p)
+            lib.og_native_destroy(p)
+            sys.exit(1)
 
-    print(f"SUCCESS: Received frame #{fid.value}: {w.value}x{h.value} @ {scale.value}x scale")
+        print(f"SUCCESS: Received frame #{fid.value}: {w.value}x{h.value} @ {scale.value}x scale")
 
-    # Copy frame
-    buf_size = w.value * h.value * 4
-    buf = (ctypes.c_uint8 * buf_size)()
-    copied_fid = ctypes.c_uint64(0)
-    if not lib.og_native_copy_screen_frame(p, buf, buf_size, ctypes.byref(copied_fid)):
-        print("FAIL: og_native_copy_screen_frame returned false")
-        lib.og_native_hide_plugin(p)
-        lib.og_native_destroy(p)
-        sys.exit(1)
+        # Copy frame
+        buf_size = w.value * h.value * 4
+        buf = (ctypes.c_uint8 * buf_size)()
+        copied_fid = ctypes.c_uint64(0)
+        if not lib.og_native_copy_screen_frame(p, buf, buf_size, ctypes.byref(copied_fid)):
+            print("FAIL: og_native_copy_screen_frame returned false")
+            lib.og_native_hide_plugin(p)
+            lib.og_native_destroy(p)
+            sys.exit(1)
 
-    # Save image
-    img_data = bytes(buf)
-    img = Image.frombytes("RGBA", (w.value, h.value), img_data)
-    img.save(out_img)
-    print(f"Saved decoded screen frame to: {out_img}")
+        # Save image
+        img_data = bytes(buf)
+        img = Image.frombytes("RGBA", (w.value, h.value), img_data)
+        img.save(out_img)
+        print(f"Saved decoded screen frame to: {out_img}")
 
     # Forward mouse click
     print("Testing mouse click forwarding (LeftDown -> LeftUp at x=50, y=50)...")

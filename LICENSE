@@ -1,7 +1,6 @@
 MIT License
 
-Copyright (c) 2020-2023 Andreas Pohl (Original AudioGridder concept, protocol, and architecture)
-Copyright (c) 2026 Marcos Deida (marcosfork-1.2.1 oversampling & Rust/GoodLookinUI rewrite)
+Copyright (c) 2026 Marcos Deida
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

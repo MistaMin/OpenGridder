@@ -34,7 +34,7 @@ impl Rect {
 }
 
 /// Linear gradient stops are the two colours. `vertical` paints top→bottom; otherwise the
-/// gradient runs from the top-left of the shape toward the bottom-right (JUCE knob discs).
+/// gradient runs from the top-left of the shape toward the bottom-right (knob bevel discs).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Cmd {
     FillEllipse { rect: Rect, top: Color, bottom: Color, diagonal: bool },
@@ -46,7 +46,7 @@ pub enum Cmd {
     /// Closed fill. `diagonal` uses a top-left → bottom-right gradient across the bounds of `pts`.
     FillPoly { pts: Vec<Point>, top: Color, bottom: Color, diagonal: bool },
     StrokePoly { pts: Vec<Point>, color: Color, width: f32, closed: bool },
-    /// Angles in radians, 0 = +x in standard math, matching JUCE `addCentredArc` (0 = 3 o'clock, clockwise positive in screen space).
+    /// Angles in radians, 0 = +x in standard math (0 = 3 o'clock, clockwise positive in screen space).
     StrokeArc { center: Point, radius: f32, from: f32, to: f32, color: Color, width: f32 },
     Text { at: Point, text: String, color: Color, size: f32, center: bool },
     /// Push/pop a clip rounded-rect. Hosts that cannot clip may ignore these.

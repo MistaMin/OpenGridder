@@ -4,7 +4,7 @@ project(OpenGridderVST3 LANGUAGES C CXX OBJCXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(VST3_SDK_ROOT "/Users/marcosdeida/Projects/audiogridder/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK" CACHE PATH "Steinberg VST3 SDK Root")
+set(VST3_SDK_ROOT "/Volumes/Developer/Dev Projects/Water Channel/third_party/vst3sdk" CACHE PATH "Steinberg VST3 SDK Root")
 
 add_library(OpenGridder MODULE
     OpenGridderVST3.mm

@@ -515,7 +515,7 @@ public:
     bool bypass() const { return bypass_; }
     int profile() const { return profile_; }
     uint32_t selection() const { return static_cast<uint32_t>(selection_); }
-    void setProfile(int p) { applyParameter(kParamLatencyProfile, static_cast<double>(p) / 3.0); }
+    void setProfile(int p) { applyParameterFromUI(kParamLatencyProfile, static_cast<double>(p) / 3.0); }
     void applyParameterFromUI(ParamID id, ParamValue val) {
         applyParameter(id, val);
         if (componentHandler_) {
@@ -538,16 +538,16 @@ private:
             if (rust_) og_native_set_param(rust_, kParamSelection, static_cast<float>(val));
         } else if (id == kParamLatencyProfile) {
             int newProfile = std::clamp(static_cast<int>(val * 3.0 + 0.5), 0, 3);
-            if (newProfile != profile_) {
-                profile_ = newProfile;
-                uint32_t targetSamples = targetLatencyFromProfile(profile_);
-                if (rust_) {
-                    og_native_set_param(rust_, kParamLatencyProfile, static_cast<float>(val));
-                    og_native_accept_latency(rust_, targetSamples);
-                }
-                if (componentHandler_) {
-                    componentHandler_->restartComponent(kLatencyChanged);
-                }
+            profile_ = newProfile;
+            uint32_t targetSamples = targetLatencyFromProfile(profile_);
+            lastLatency_ = targetSamples;
+            if (rust_) {
+                og_native_set_param(rust_, kParamLatencyProfile, static_cast<float>(val));
+                og_native_set_transport_latency(rust_, targetSamples);
+                og_native_accept_latency(rust_, og_native_latency(rust_));
+            }
+            if (componentHandler_) {
+                componentHandler_->restartComponent(kLatencyChanged);
             }
         } else if (id == kParamInputGain) {
             inputGain_ = val;

@@ -22,7 +22,9 @@ uint32_t og_native_num_loaded_plugins(NativePlugin*);
 bool og_native_get_loaded_plugin(NativePlugin*, uint32_t idx, char* name_buf, uint32_t name_cap, bool* bypassed, uint32_t* oversampling);
 uint32_t og_native_num_available_plugins(NativePlugin*);
 bool og_native_get_available_plugin(NativePlugin*, uint32_t idx, char* name_buf, uint32_t name_cap, char* id_buf, uint32_t id_cap, char* cat_buf, uint32_t cat_cap);
+bool og_native_get_available_plugin_ext(NativePlugin*, uint32_t idx, char* name_buf, uint32_t name_cap, char* id_buf, uint32_t id_cap, char* type_buf, uint32_t type_cap, char* company_buf, uint32_t company_cap, char* cat_buf, uint32_t cat_cap);
 bool og_native_load_plugin(NativePlugin*, uint32_t available_idx);
+bool og_native_load_plugin_at(NativePlugin*, uint32_t available_idx, int32_t x, int32_t y);
 bool og_native_unload_plugin(NativePlugin*, uint32_t loaded_idx);
 bool og_native_set_plugin_oversampling(NativePlugin*, uint32_t loaded_idx, uint32_t factor);
 bool og_native_set_plugin_bypassed(NativePlugin*, uint32_t loaded_idx, bool bypassed);
@@ -35,6 +37,7 @@ bool og_native_copy_screen_frame(NativePlugin*, uint8_t* dest, uint32_t dest_cap
 void og_native_send_mouse(NativePlugin*, uint8_t ev_type, float x, float y, bool shift, bool ctrl, bool alt, float delta_x, float delta_y, bool is_smooth);
 void og_native_send_key(NativePlugin*, const uint16_t* keys, uint32_t count);
 bool og_native_is_editor_open(NativePlugin*);
+bool og_native_is_server_local_mode(NativePlugin*);
 
 // --- Local Console DSP Parameters & Real-Time Peak Meters (Phase 1) ---
 // param_id: 0=Bypass, 1=Selection, 2=LatencyProfile, 3=InputGain, 4=WetDryMix, 5=Drive, 6=OutputGain, 7..22=AutomationSlots 0..15, 23=DriveCharacter (0 Clean, 0.5 Tb, 1 Tr), 24=DriveQuality (0 ADAA, 0.5 2x, 1 4x)

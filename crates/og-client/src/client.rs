@@ -88,6 +88,7 @@ pub struct Client {
     plugins: Mutex<Vec<ServerPlugin>>,
     ready: AtomicBool,
     sandbox_enabled: AtomicBool,
+    server_local_mode: AtomicBool,
     state_ack: AtomicBool,
     latency_samples: AtomicI32,
     server_cpu_load: AtomicU32,
@@ -113,6 +114,7 @@ impl Client {
             plugins: Mutex::new(Vec::new()),
             ready: AtomicBool::new(false),
             sandbox_enabled: AtomicBool::new(false),
+            server_local_mode: AtomicBool::new(false),
             state_ack: AtomicBool::new(false),
             latency_samples: AtomicI32::new(0),
             server_cpu_load: AtomicU32::new(0),
@@ -125,6 +127,10 @@ impl Client {
 
     pub fn is_sandbox_enabled(&self) -> bool {
         self.sandbox_enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn is_server_local_mode(&self) -> bool {
+        self.server_local_mode.load(Ordering::Relaxed)
     }
 
     pub fn latency_samples(&self) -> i32 {
@@ -200,6 +206,10 @@ impl Client {
         self.state_ack.store(resp.is_flag(HANDSHAKE_RESP_FLAG_STATE_ACK), Ordering::Relaxed);
         self.sandbox_enabled.store(
             resp.is_flag(HANDSHAKE_FLAGS_SANDBOX_ENABLED),
+            Ordering::Relaxed,
+        );
+        self.server_local_mode.store(
+            resp.is_flag(og_common::message::HANDSHAKE_RESP_FLAG_LOCAL_MODE),
             Ordering::Relaxed,
         );
 
@@ -290,12 +300,22 @@ impl Client {
                             }
                         }
                         Err(e) => {
+                            if !screen_running.load(Ordering::Relaxed) {
+                                break;
+                            }
                             if e.code == og_common::message::ErrorCode::Timeout
                                 || e.text.contains("Resource temporarily unavailable")
                                 || e.text.contains("timed out")
                                 || e.text.contains("would block")
                             {
                                 continue;
+                            }
+                            if !screen_running.load(Ordering::Relaxed)
+                                || e.text.contains("failed to fill whole buffer")
+                                || e.text.contains("Connection reset by peer")
+                                || e.text.contains("Broken pipe")
+                            {
+                                break;
                             }
                             eprintln!("[OG-ScreenClient] stream read error: {}", e);
                             break;

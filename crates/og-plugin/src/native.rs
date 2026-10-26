@@ -22,7 +22,7 @@ pub struct OgMidiEvent {
 }
 
 pub enum NativeCommand {
-    LoadPlugin { available_idx: usize, layout: String },
+    LoadPlugin { available_idx: usize, layout: String, x: i32, y: i32 },
     UnloadPlugin { loaded_idx: usize },
     SetPluginOversampling { loaded_idx: usize, factor: i32 },
     SetPluginBypassed { loaded_idx: usize, bypassed: bool },
@@ -60,6 +60,7 @@ pub struct ServerPluginMeta {
     pub category: String,
     pub manufacturer: String,
     pub is_instrument: bool,
+    pub plugin_type: String,
 }
 
 #[derive(Clone, Default)]
@@ -148,6 +149,7 @@ struct Shared {
     chain_epoch: AtomicU32,
     screen_frame: Arc<parking_lot::Mutex<og_client::ScreenFrame>>,
     is_editor_open: AtomicBool,
+    server_local_mode: AtomicBool,
 }
 
 impl Shared {
@@ -320,6 +322,7 @@ impl NativePlugin {
             chain_epoch: AtomicU32::new(0),
             screen_frame: Arc::new(parking_lot::Mutex::new(og_client::ScreenFrame::default())),
             is_editor_open: AtomicBool::new(false),
+            server_local_mode: AtomicBool::new(false),
         });
         let capacity = MAX_PLUGIN_LATENCY + MAX_TRANSPORT_LATENCY + max_frames + 1;
         let mut this = Self {
@@ -377,6 +380,7 @@ impl NativePlugin {
                                 match processor.connect_to_server(&host, port) {
                                     Ok(_) => {
                                         processor.client.set_screen_frame_store(shared.screen_frame.clone());
+                                        shared.server_local_mode.store(processor.client.is_server_local_mode(), Ordering::Release);
                                         let srv_plugins = processor.client.available_plugins();
                                         eprintln!("[OpenGridder native IO] Connected to {}:{}! Available plugins: {}", host, port, srv_plugins.len());
                                         *shared.names.lock().unwrap_or_else(|e| e.into_inner()) =
@@ -388,6 +392,7 @@ impl NativePlugin {
                                                 category: p.category.clone(),
                                                 manufacturer: p.company.clone(),
                                                 is_instrument: p.is_instrument,
+                                                plugin_type: p.plugin_type.clone(),
                                             }).collect();
                                         applied = if shared.selected.load(Ordering::Acquire) > 0 { u32::MAX } else { 0 };
                                         shared.status.store(2, Ordering::Release);
@@ -408,13 +413,14 @@ impl NativePlugin {
                             let mut chain_changed = false;
                             for cmd in cmds {
                                 match cmd {
-                                    NativeCommand::LoadPlugin { available_idx, layout } => {
+                                    NativeCommand::LoadPlugin { available_idx, layout, x, y } => {
                                         let list = processor.client.available_plugins();
                                         if let Some(desc) = list.get(available_idx) {
                                             match processor.load_plugin(desc, &layout) {
-                                                Ok(_) => {
+                                                Ok(loaded_slot) => {
                                                     shared.request_plugin_latency(processor.latency_samples.max(0) as u32);
                                                     chain_changed = true;
+                                                    let _ = processor.client.edit_plugin(loaded_slot as i32, x, y);
                                                 }
                                                 Err(e) => {
                                                     eprintln!("[OpenGridder native IO] load_plugin({:?}) failed: {}", desc.name, e);
@@ -581,26 +587,19 @@ if let Some(v) = j.get("outputGain").and_then(|v| v.as_f64()) {
                             }
 
                             let selected = shared.selected.load(Ordering::Acquire);
-                            if processor.client.is_ready() && applied != selected {
-                                while !processor.loaded_plugins.is_empty() {
-                                    if processor.unload_plugin(0).is_err() {
-                                        break;
-                                    }
-                                }
+                            if processor.client.is_ready() && applied != selected && selected > 0 {
                                 let list = processor.client.available_plugins();
-                                if selected > 0 {
-                                    if let Some(desc) = list.get(selected as usize - 1) {
-                                        let _ = processor.load_plugin(
-                                            desc,
-                                            if channels == 1 { "Mono" } else { "Stereo" },
-                                        );
-                                    }
+                                if let Some(desc) = list.get(selected as usize - 1) {
+                                    let _ = processor.load_plugin(
+                                        desc,
+                                        if channels == 1 { "Mono" } else { "Stereo" },
+                                    );
+                                    shared.request_plugin_latency(
+                                        processor.latency_samples.max(0) as u32
+                                    );
+                                    chain_changed = true;
                                 }
-                                shared.request_plugin_latency(
-                                    processor.latency_samples.max(0) as u32
-                                );
                                 applied = selected;
-                                chain_changed = true;
                             }
 
                             if chain_changed {
@@ -1048,7 +1047,7 @@ pub unsafe extern "C" fn og_native_latency(handle: *mut NativePlugin) -> u32 {
 pub unsafe extern "C" fn og_native_accept_latency(handle: *mut NativePlugin, total: u32) {
     if let Some(p) = handle.as_ref() {
         let requested = p.shared.requested_latency.load(Ordering::Acquire);
-        if total == total_latency(requested) {
+        if total == total_latency(requested) || total == transport_part(requested) {
             p.shared.active_latency.store(requested, Ordering::Release);
         }
     }
@@ -1072,7 +1071,12 @@ pub unsafe extern "C" fn og_native_set_transport_latency(handle: *mut NativePlug
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => break,
+                Ok(_) => {
+                    let active_curr = p.shared.active_latency.load(Ordering::Acquire);
+                    let active_updated = latency_pair(transport.clamp(32, 8192), plugin_part(active_curr));
+                    p.shared.active_latency.store(active_updated, Ordering::Release);
+                    break;
+                }
                 Err(actual) => current = actual,
             }
         }
@@ -1203,13 +1207,81 @@ pub unsafe extern "C" fn og_native_get_available_plugin(
 }
 
 /// # Safety
+/// Buffer pointers must be valid if not null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_get_available_plugin_ext(
+    handle: *mut NativePlugin,
+    idx: u32,
+    name_buf: *mut c_char,
+    name_cap: u32,
+    id_buf: *mut c_char,
+    id_cap: u32,
+    type_buf: *mut c_char,
+    type_cap: u32,
+    company_buf: *mut c_char,
+    company_cap: u32,
+    cat_buf: *mut c_char,
+    cat_cap: u32,
+) -> bool {
+    let Some(p) = handle.as_ref() else { return false };
+    let guard = p.shared.available_plugins.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(ap) = guard.get(idx as usize) else { return false };
+    if !name_buf.is_null() && name_cap > 0 {
+        let count = ap.name.len().min(name_cap as usize - 1);
+        std::ptr::copy_nonoverlapping(ap.name.as_ptr(), name_buf.cast(), count);
+        *name_buf.add(count) = 0;
+    }
+    if !id_buf.is_null() && id_cap > 0 {
+        let count = ap.id.len().min(id_cap as usize - 1);
+        std::ptr::copy_nonoverlapping(ap.id.as_ptr(), id_buf.cast(), count);
+        *id_buf.add(count) = 0;
+    }
+    if !type_buf.is_null() && type_cap > 0 {
+        let ptype = if !ap.plugin_type.is_empty() {
+            &ap.plugin_type
+        } else if ap.id.starts_with("AudioUnit") || ap.id.starts_with("AU") {
+            "AudioUnit"
+        } else if ap.id.starts_with("VST3") {
+            "VST3"
+        } else if ap.id.starts_with("VST") {
+            "VST"
+        } else {
+            "AudioUnit"
+        };
+        let count = ptype.len().min(type_cap as usize - 1);
+        std::ptr::copy_nonoverlapping(ptype.as_ptr(), type_buf.cast(), count);
+        *type_buf.add(count) = 0;
+    }
+    if !company_buf.is_null() && company_cap > 0 {
+        let comp = if ap.manufacturer.is_empty() { "Unknown" } else { &ap.manufacturer };
+        let count = comp.len().min(company_cap as usize - 1);
+        std::ptr::copy_nonoverlapping(comp.as_ptr(), company_buf.cast(), count);
+        *company_buf.add(count) = 0;
+    }
+    if !cat_buf.is_null() && cat_cap > 0 {
+        let cat = if ap.category.is_empty() { "General" } else { &ap.category };
+        let count = cat.len().min(cat_cap as usize - 1);
+        std::ptr::copy_nonoverlapping(cat.as_ptr(), cat_buf.cast(), count);
+        *cat_buf.add(count) = 0;
+    }
+    true
+}
+
+/// # Safety
 /// Handle must be valid.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn og_native_load_plugin(handle: *mut NativePlugin, available_idx: u32) -> bool {
+    og_native_load_plugin_at(handle, available_idx, 0, 0)
+}
+
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_load_plugin_at(handle: *mut NativePlugin, available_idx: u32, x: i32, y: i32) -> bool {
     let Some(p) = handle.as_ref() else { return false };
     let layout = if p.channels == 1 { "Mono".to_string() } else { "Stereo".to_string() };
     let mut q = p.shared.commands.lock().unwrap_or_else(|e| e.into_inner());
-    q.push_back(NativeCommand::LoadPlugin { available_idx: available_idx as usize, layout });
+    q.push_back(NativeCommand::LoadPlugin { available_idx: available_idx as usize, layout, x, y });
     true
 }
 
@@ -1360,6 +1432,16 @@ pub unsafe extern "C" fn og_native_is_editor_open(handle: *mut NativePlugin) -> 
     handle
         .as_ref()
         .map(|p| p.shared.is_editor_open.load(Ordering::Acquire))
+        .unwrap_or(false)
+}
+
+/// # Safety
+/// Handle must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn og_native_is_server_local_mode(handle: *mut NativePlugin) -> bool {
+    handle
+        .as_ref()
+        .map(|p| p.shared.server_local_mode.load(Ordering::Acquire))
         .unwrap_or(false)
 }
 

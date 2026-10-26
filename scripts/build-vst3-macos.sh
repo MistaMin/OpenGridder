@@ -21,6 +21,7 @@ echo "=== 2. Compiling C++ VST3 Slices ==="
 cmake -S "$og_root/native/vst3" -B "$og_root/target/vst3-arm64" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+    -DVST3_SDK_ROOT="${OPENGRIDDER_VST3_SDK:-/Volumes/Developer/Dev Projects/Water Channel/third_party/vst3sdk}" \
     -DOPENGRIDDER_RUST_LIBRARY="$og_root/target/release/libog_plugin.a"
 cmake --build "$og_root/target/vst3-arm64" -j "${OG_BUILD_JOBS:-4}"
 
@@ -29,6 +30,7 @@ cmake -S "$og_root/native/vst3" -B "$og_root/target/vst3-x86_64" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=10.12 -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
     '-DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/arch;-x86_64' \
+    -DVST3_SDK_ROOT="${OPENGRIDDER_VST3_SDK:-/Volumes/Developer/Dev Projects/Water Channel/third_party/vst3sdk}" \
     -DOPENGRIDDER_RUST_LIBRARY="$og_root/target/rosetta-intel/x86_64-apple-darwin/release/libog_plugin.a"
 cmake --build "$og_root/target/vst3-x86_64" -j "${OG_BUILD_JOBS:-4}"
 

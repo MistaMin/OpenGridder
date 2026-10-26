@@ -92,7 +92,7 @@ def main():
     assert e.numInputs == 2, f"Expected 2 inputs, got {e.numInputs}"
     assert e.numOutputs == 2, f"Expected 2 outputs, got {e.numOutputs}"
     assert e.numParams == 7, f"Expected 7 parameters, got {e.numParams}"
-    assert e.initialDelay == 1024, f"Expected initialDelay 1024, got {e.initialDelay}"
+    assert e.initialDelay == 256, f"Expected initialDelay 256, got {e.initialDelay}"
     print(f"Verified VST2 structure: magic=VstP, inputs={e.numInputs}, outputs={e.numOutputs}, initialDelay={e.initialDelay}")
 
     # Query name via dispatcher
@@ -109,11 +109,11 @@ def main():
     print(f"Param 2 Name: {param_buf.value.decode('utf-8')}")
     assert param_buf.value == b"Latency"
 
-    # Test changing latency profile to 3 (256s Direct = 1.0f normalized)
+    # Test changing latency profile to 3 (1024s Studio = 1.0f normalized)
     e.setParameter(effect_ptr, 2, 1.0)
-    assert e.initialDelay == 256, f"Expected initialDelay updated to 256, got {e.initialDelay}"
+    assert e.initialDelay == 1024, f"Expected initialDelay updated to 1024, got {e.initialDelay}"
     assert len(io_changed_called) > 0, "audioMasterIOChanged was not notified to host"
-    print("Verified dynamic PDC update: initialDelay changed to 256 samples and audioMasterIOChanged notified!")
+    print("Verified dynamic PDC update: initialDelay changed to 1024 samples and audioMasterIOChanged notified!")
 
     # Test processReplacing with silence
     frames = 128

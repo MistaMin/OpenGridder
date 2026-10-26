@@ -6,7 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "AudioGridderPluginTray"
+name = "OpenGridderPluginTray"
 path = "src/main.rs"
 
 [dependencies]

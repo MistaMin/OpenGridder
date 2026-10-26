@@ -98,7 +98,11 @@ fn run() -> Result<(), String> {
             .into_iter()
             .find(|p| p.id == id)
             .ok_or_else(|| format!("AU not installed: {id}"))?;
-        if desc.is_instrument || !desc.id.starts_with("AudioUnit:aufx:") {
+        if desc.is_instrument
+            || (!desc.id.starts_with("AudioUnit:aufx:")
+                && !desc.id.starts_with("AudioUnit:aumf:")
+                && !desc.id.starts_with("AudioUnit:augn:"))
+        {
             return Err("Only audio effects are supported yet".into());
         }
         server.add_known_plugin(desc);
@@ -146,6 +150,13 @@ fn run() -> Result<(), String> {
         server.known_plugins().len(),
         config.sandbox_mode == SandboxMode::Chain as i32
     );
+    #[cfg(target_os = "macos")]
+    if config.sandbox_mode != SandboxMode::Chain as i32 {
+        extern "C" {
+            fn og_run_main_loop();
+        }
+        unsafe { og_run_main_loop(); }
+    }
     loop {
         std::thread::sleep(std::time::Duration::from_secs(1));
     }

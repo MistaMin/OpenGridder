@@ -23,6 +23,9 @@ struct Payload {
     handshake: Vec<u8>,
     plugins: Vec<ServerPlugin>,
     diff_detection: bool,
+    screen_local_mode: bool,
+    screen_capturing_off: bool,
+    plugin_windows_on_top: bool,
 }
 
 pub fn spawn(
@@ -31,11 +34,17 @@ pub fn spawn(
     handshake: HandshakeRequest,
     plugins: Vec<ServerPlugin>,
     diff_detection: bool,
+    screen_local_mode: bool,
+    screen_capturing_off: bool,
+    plugin_windows_on_top: bool,
 ) -> Result<Child, String> {
     let payload = serde_json::to_vec(&Payload {
         handshake: handshake.to_bytes().to_vec(),
         plugins,
         diff_detection,
+        screen_local_mode,
+        screen_capturing_off,
+        plugin_windows_on_top,
     })
     .map_err(|e| e.to_string())?;
     if payload.len() > 8 * 1024 * 1024 {
@@ -110,7 +119,34 @@ pub fn run_worker() -> Result<(), String> {
         Arc::new(PluginFormatManager::new_all_enabled()),
         Arc::new(Mutex::new(payload.plugins)),
         Arc::new(Mutex::new(Vec::new())),
+        payload.screen_local_mode,
+        payload.screen_capturing_off,
+        payload.plugin_windows_on_top,
     );
-    worker.run(master, cmd_in, audio, screen, payload.diff_detection);
-    Ok(())
+
+    #[cfg(target_os = "macos")]
+    {
+        extern "C" {
+            fn og_run_main_loop();
+            fn og_stop_main_loop();
+        }
+        let diff_detect = payload.diff_detection;
+        let worker_thread = std::thread::Builder::new()
+            .name("OG-ChainWorker".into())
+            .spawn(move || {
+                worker.run(master, cmd_in, audio, screen, diff_detect);
+                unsafe { og_stop_main_loop(); }
+            })
+            .map_err(|e| e.to_string())?;
+
+        unsafe { og_run_main_loop(); }
+        let _ = worker_thread.join();
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        worker.run(master, cmd_in, audio, screen, payload.diff_detection);
+        Ok(())
+    }
 }

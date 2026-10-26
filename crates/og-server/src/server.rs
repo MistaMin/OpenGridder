@@ -36,20 +36,36 @@ pub struct ServerConfig {
     pub au: bool,
     #[serde(rename = "VST3", default = "default_true")]
     pub vst3: bool,
+    #[serde(rename = "VST2", default = "default_true")]
+    pub vst2: bool,
     #[serde(rename = "LV2", default = "default_true")]
     pub lv2: bool,
     #[serde(rename = "VST3Folders", default)]
     pub vst3_folders: Vec<String>,
+    #[serde(rename = "VST2Folders", default)]
+    pub vst2_folders: Vec<String>,
     #[serde(rename = "LV2Folders", default)]
     pub lv2_folders: Vec<String>,
     #[serde(default)]
     pub sandbox_mode: i32,
-    #[serde(default = "default_true")]
+    #[serde(rename = "ScreenLocalMode", default)]
+    pub screen_local_mode: bool,
+    #[serde(rename = "ScreenCapturingOff", default)]
+    pub screen_capturing_off: bool,
+    #[serde(rename = "ScreenDiffDetection", default = "default_true")]
     pub screen_diff_detection: bool,
+    #[serde(rename = "PluginWindowsOnTop", default)]
+    pub plugin_windows_on_top: bool,
+    #[serde(rename = "ScreenQuality", default = "default_screen_quality")]
+    pub screen_quality: f32,
     #[serde(default = "default_true")]
     pub scan_for_plugins: bool,
     #[serde(default)]
     pub crash_reporting: bool,
+}
+
+fn default_screen_quality() -> f32 {
+    0.9
 }
 
 fn default_server_name() -> String {
@@ -67,11 +83,17 @@ impl Default for ServerConfig {
             name: default_server_name(),
             au: cfg!(target_os = "macos"),
             vst3: true,
+            vst2: true,
             lv2: true,
             vst3_folders: Vec::new(),
+            vst2_folders: Vec::new(),
             lv2_folders: Vec::new(),
             sandbox_mode: SandboxMode::None as i32,
+            screen_local_mode: false,
+            screen_capturing_off: false,
             screen_diff_detection: true,
+            plugin_windows_on_top: false,
+            screen_quality: 0.9,
             scan_for_plugins: true,
             crash_reporting: false,
         }
@@ -180,13 +202,25 @@ impl Server {
             PluginCache::default()
         };
 
+        // Merge legacy blacklist if not already present
+        for b in load_audiogridder_blacklist() {
+            if !cache.blacklist.contains(&b) {
+                cache.blacklist.push(b);
+            }
+        }
+
         let mut discovered = Vec::new();
 
         // 1. Scan AU
         let au_plugins = if self.config.lock().au {
             og_hosting::au::scan_audiounits()
                 .into_iter()
-                .filter(|p| p.id.starts_with("AudioUnit:aufx:") && !p.is_instrument)
+                .filter(|p| {
+                    (p.id.starts_with("AudioUnit:aufx:")
+                        || p.id.starts_with("AudioUnit:aumf:")
+                        || p.id.starts_with("AudioUnit:augn:"))
+                        && !p.is_instrument
+                })
                 .collect::<Vec<_>>()
         } else {
             Vec::new()
@@ -199,7 +233,13 @@ impl Server {
             Vec::new()
         };
 
-        let total_items = au_plugins.len() + vst3_bundles.len();
+        let vst2_bundles = if cfg.vst2 {
+            og_hosting::vst2::find_vst2_bundles(&cfg.vst2_folders)
+        } else {
+            Vec::new()
+        };
+
+        let total_items = au_plugins.len() + vst3_bundles.len() + vst2_bundles.len();
         let mut current_idx = 0;
 
         for p in au_plugins {
@@ -210,10 +250,11 @@ impl Server {
             discovered.push(p);
         }
 
-        // 2. Scan VST3 with caching
+        // 2. Scan VST3 with caching and parallel worker pool
         let mut updated_cache_entries = Vec::new();
+        let mut vst3_to_probe = Vec::new();
+
         for bundle in vst3_bundles {
-            current_idx += 1;
             let path_str = bundle.to_string_lossy().to_string();
             let bundle_name = bundle
                 .file_stem()
@@ -227,9 +268,18 @@ impl Server {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
 
+            if is_in_blacklist(&cache.blacklist, &path_str, &bundle_name) {
+                current_idx += 1;
+                if let Some(ref cb) = progress {
+                    cb(&bundle_name, current_idx, total_items, "VST3 (blacklisted)");
+                }
+                continue;
+            }
+
             // Check if cached
             if !rescan {
                 if let Some(entry) = cache.entries.iter().find(|e| e.path == path_str && e.mtime_secs == mtime_secs) {
+                    current_idx += 1;
                     if let Some(ref cb) = progress {
                         cb(&bundle_name, current_idx, total_items, "VST3 (cached)");
                     }
@@ -239,28 +289,162 @@ impl Server {
                 }
             }
 
-            // Not cached: inspect
-            if let Some(ref cb) = progress {
-                cb(&bundle_name, current_idx, total_items, "VST3");
+            vst3_to_probe.push((bundle, bundle_name, path_str, mtime_secs));
+        }
+
+        if !vst3_to_probe.is_empty() {
+            let num_workers = std::thread::available_parallelism()
+                .map(|p| p.get())
+                .unwrap_or(4)
+                .clamp(2, 8);
+            let queue = std::sync::Arc::new(std::sync::Mutex::new(vst3_to_probe.into_iter()));
+            let (tx, rx) = std::sync::mpsc::channel();
+
+            for _ in 0..num_workers {
+                let q = std::sync::Arc::clone(&queue);
+                let sender = tx.clone();
+                std::thread::spawn(move || {
+                    while let Some((bundle, bundle_name, path_str, mtime_secs)) = {
+                        let mut guard = q.lock().unwrap();
+                        guard.next()
+                    } {
+                        let plugins = og_hosting::vst3::inspect_vst3_classes(&bundle);
+                        let _ = sender.send((bundle_name, path_str, mtime_secs, plugins));
+                    }
+                });
             }
-            let plugins = og_hosting::vst3::inspect_vst3_classes(&bundle);
-            for p in plugins {
-                if !p.is_instrument {
-                    discovered.push(p.clone());
-                    updated_cache_entries.push(CachedPluginEntry {
-                        plugin: p,
-                        path: path_str.clone(),
-                        mtime_secs,
-                    });
+            drop(tx);
+
+            let mut batch_count = 0;
+            while let Ok((bundle_name, path_str, mtime_secs, plugins)) = rx.recv() {
+                current_idx += 1;
+                if let Some(ref cb) = progress {
+                    cb(&bundle_name, current_idx, total_items, "VST3");
+                }
+                if plugins.is_empty() {
+                    if !cache.blacklist.contains(&path_str) {
+                        cache.blacklist.push(path_str.clone());
+                    }
+                } else {
+                    for p in plugins {
+                        if !p.is_instrument {
+                            discovered.push(p.clone());
+                            updated_cache_entries.push(CachedPluginEntry {
+                                plugin: p,
+                                path: path_str.clone(),
+                                mtime_secs,
+                            });
+                        }
+                    }
+                }
+                batch_count += 1;
+                if batch_count >= 25 {
+                    batch_count = 0;
+                    cache.version = 1;
+                    cache.entries = updated_cache_entries.clone();
+                    atomic_save_cache(&cache_file, &cache);
+                }
+            }
+        }
+
+        // 3. Scan VST2 with caching
+        let mut vst2_to_probe = Vec::new();
+        for bundle in vst2_bundles {
+            let path_str = bundle.to_string_lossy().to_string();
+            let bundle_name = bundle
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| path_str.clone());
+
+            let mtime_secs = std::fs::metadata(&bundle)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
+            if is_in_blacklist(&cache.blacklist, &path_str, &bundle_name) {
+                current_idx += 1;
+                if let Some(ref cb) = progress {
+                    cb(&bundle_name, current_idx, total_items, "VST2 (blacklisted)");
+                }
+                continue;
+            }
+
+            // Check if cached
+            if !rescan {
+                if let Some(entry) = cache.entries.iter().find(|e| e.path == path_str && e.mtime_secs == mtime_secs) {
+                    current_idx += 1;
+                    if let Some(ref cb) = progress {
+                        cb(&bundle_name, current_idx, total_items, "VST2 (cached)");
+                    }
+                    discovered.push(entry.plugin.clone());
+                    updated_cache_entries.push(entry.clone());
+                    continue;
+                }
+            }
+
+            vst2_to_probe.push((bundle, bundle_name, path_str, mtime_secs));
+        }
+
+        if !vst2_to_probe.is_empty() {
+            let num_workers = std::thread::available_parallelism()
+                .map(|p| p.get())
+                .unwrap_or(4)
+                .clamp(2, 8);
+            let queue = std::sync::Arc::new(std::sync::Mutex::new(vst2_to_probe.into_iter()));
+            let (tx, rx) = std::sync::mpsc::channel();
+
+            for _ in 0..num_workers {
+                let q = std::sync::Arc::clone(&queue);
+                let sender = tx.clone();
+                std::thread::spawn(move || {
+                    while let Some((bundle, bundle_name, path_str, mtime_secs)) = {
+                        let mut guard = q.lock().unwrap();
+                        guard.next()
+                    } {
+                        let plugins = og_hosting::vst2::inspect_vst2_classes(&bundle);
+                        let _ = sender.send((bundle_name, path_str, mtime_secs, plugins));
+                    }
+                });
+            }
+            drop(tx);
+
+            let mut batch_count = 0;
+            while let Ok((bundle_name, path_str, mtime_secs, plugins)) = rx.recv() {
+                current_idx += 1;
+                if let Some(ref cb) = progress {
+                    cb(&bundle_name, current_idx, total_items, "VST2");
+                }
+                if plugins.is_empty() {
+                    if !cache.blacklist.contains(&path_str) {
+                        cache.blacklist.push(path_str.clone());
+                    }
+                } else {
+                    for p in plugins {
+                        if !p.is_instrument {
+                            discovered.push(p.clone());
+                            updated_cache_entries.push(CachedPluginEntry {
+                                plugin: p,
+                                path: path_str.clone(),
+                                mtime_secs,
+                            });
+                        }
+                    }
+                }
+                batch_count += 1;
+                if batch_count >= 25 {
+                    batch_count = 0;
+                    cache.version = 1;
+                    cache.entries = updated_cache_entries.clone();
+                    atomic_save_cache(&cache_file, &cache);
                 }
             }
         }
 
         cache.version = 1;
         cache.entries = updated_cache_entries;
-        if let Ok(json) = serde_json::to_string_pretty(&cache) {
-            let _ = std::fs::write(&cache_file, json);
-        }
+        atomic_save_cache(&cache_file, &cache);
 
         let mut guard = self.known_plugins.lock();
         for p in discovered {
@@ -409,6 +593,9 @@ impl Server {
         if SandboxMode::from_i32(cfg.sandbox_mode) == SandboxMode::Chain && executable.is_some() {
             resp.set_flag(HANDSHAKE_FLAGS_SANDBOX_ENABLED);
         }
+        if cfg.screen_local_mode {
+            resp.set_flag(og_common::message::HANDSHAKE_RESP_FLAG_LOCAL_MODE);
+        }
 
         if req.flags & HANDSHAKE_FLAG_STATE_ACK != 0 {
             resp.set_flag(HANDSHAKE_RESP_FLAG_STATE_ACK);
@@ -443,6 +630,9 @@ impl Server {
                     req,
                     known.lock().clone(),
                     cfg.screen_diff_detection,
+                    cfg.screen_local_mode,
+                    cfg.screen_capturing_off,
+                    cfg.plugin_windows_on_top,
                 ) {
                     Ok(child) => children.lock().push(child),
                     Err(error) => log::error!("{error}"),
@@ -454,7 +644,15 @@ impl Server {
         thread::Builder::new()
             .name("OG-Worker".to_string())
             .spawn(move || {
-                let worker = Worker::new(req, fmt_mgr, known, recents);
+                let worker = Worker::new(
+                    req,
+                    fmt_mgr,
+                    known,
+                    recents,
+                    cfg.screen_local_mode,
+                    cfg.screen_capturing_off,
+                    cfg.plugin_windows_on_top,
+                );
                 worker.run(
                     master_stream,
                     cmd_in_stream,
@@ -506,6 +704,49 @@ impl Drop for Server {
 pub struct PluginCache {
     pub version: u32,
     pub entries: Vec<CachedPluginEntry>,
+    #[serde(default)]
+    pub blacklist: Vec<String>,
+}
+
+pub fn atomic_save_cache(cache_file: &std::path::Path, cache: &PluginCache) {
+    if let Ok(json) = serde_json::to_string_pretty(cache) {
+        let tmp = cache_file.with_extension("tmp");
+        if std::fs::write(&tmp, json).is_ok() {
+            let _ = std::fs::rename(&tmp, cache_file);
+        }
+    }
+}
+
+pub fn is_in_blacklist(blacklist: &[String], path: &str, name: &str) -> bool {
+    blacklist.iter().any(|b| {
+        b == path
+            || b.ends_with(name)
+            || path.contains(b.trim_end_matches(".vst3"))
+            || path.contains(b.trim_end_matches(".vst"))
+    })
+}
+
+pub fn load_audiogridder_blacklist() -> Vec<String> {
+    let mut blacklisted = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        let legacy_cache = home.join(".audiogridder/audiogridderserver.cache");
+        if legacy_cache.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&legacy_cache) {
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("<BLACKLISTED") {
+                        if let Some(start) = trimmed.find("id=\"") {
+                            let rest = &trimmed[start + 4..];
+                            if let Some(end) = rest.find('"') {
+                                blacklisted.push(rest[..end].to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    blacklisted
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

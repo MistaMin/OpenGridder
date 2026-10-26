@@ -122,17 +122,17 @@ pub fn glow_round(scene: &mut Scene, r: Rect, radius: f32, c: Color, w: f32, str
     scene.stroke_round(r, radius, c, w);
     scene.stroke_round(r, radius, c.brighter(0.7).with_alpha(0.9), w * 0.35);
 }
-fn juce_arc(scene: &mut Scene, c: Point, rad: f32, from: f32, to: f32, color: Color, width: f32) {
+fn radial_arc(scene: &mut Scene, c: Point, rad: f32, from: f32, to: f32, color: Color, width: f32) {
     let k = -HALF_PI;
     scene.stroke_arc(c, rad, from + k, to + k, color, width);
 }
-fn glow_juce_arc(scene: &mut Scene, c: Point, rad: f32, from: f32, to: f32, color: Color, w: f32, strength: f32, glow: bool) {
-    if !glow { juce_arc(scene, c, rad, from, to, color, w); return; }
+fn glow_radial_arc(scene: &mut Scene, c: Point, rad: f32, from: f32, to: f32, color: Color, w: f32, strength: f32, glow: bool) {
+    if !glow { radial_arc(scene, c, rad, from, to, color, w); return; }
     for k in (1..=4).rev() {
-        juce_arc(scene, c, rad, from, to, color.with_alpha(0.05 * strength * (5 - k) as f32), w * (1.0 + 1.6 * k as f32));
+        radial_arc(scene, c, rad, from, to, color.with_alpha(0.05 * strength * (5 - k) as f32), w * (1.0 + 1.6 * k as f32));
     }
-    juce_arc(scene, c, rad, from, to, color, w);
-    juce_arc(scene, c, rad, from, to, color.brighter(0.7).with_alpha(0.9), w * 0.35);
+    radial_arc(scene, c, rad, from, to, color, w);
+    radial_arc(scene, c, rad, from, to, color.brighter(0.7).with_alpha(0.9), w * 0.35);
 }
 
 pub fn scanlines(scene: &mut Scene, r: Rect, t: f32, alpha: f32, glow: bool) {
@@ -225,7 +225,7 @@ pub fn draw_arc_gauge(scene: &mut Scene, r: Rect, level: f32, lit: Color, t: f32
     let rad = (r.w * 0.46).min(r.h * 0.92);
     let c = Point::new(r.center().x, r.bottom() - 6.0);
     let arc = |scene: &mut Scene, f0: f32, f1: f32, rr: f32, w: f32, col: Color| {
-        juce_arc(scene, c, rr, (-0.5 + f0) * PI, (-0.5 + f1) * PI, col, w);
+        radial_arc(scene, c, rr, (-0.5 + f0) * PI, (-0.5 + f1) * PI, col, w);
     };
     arc(scene, 0.0, 1.0, rad, rad * 0.22, lit.with_alpha(0.12));
     arc(scene, 0.0, level.min(0.86), rad, rad * 0.30, lit.with_alpha(0.22 * flicker(t, glow)));
@@ -322,8 +322,8 @@ pub fn draw_hex_ring(scene: &mut Scene, r: Rect, level: f32, lo: Color, hi: Colo
     let a0 = -PI * 1.25;
     let a1 = PI * 0.25;
     let ring = radius * 0.80;
-    juce_arc(scene, c, ring, a0 + HALF_PI, a1 + HALF_PI, lo.with_alpha(0.18), radius * 0.10);
-    glow_juce_arc(scene, c, ring, a0 + HALF_PI, a0 + (a1 - a0) * level + HALF_PI, heat(level, lo, hi), radius * 0.10, 1.0, glow);
+    radial_arc(scene, c, ring, a0 + HALF_PI, a1 + HALF_PI, lo.with_alpha(0.18), radius * 0.10);
+    glow_radial_arc(scene, c, ring, a0 + HALF_PI, a0 + (a1 - a0) * level + HALF_PI, heat(level, lo, hi), radius * 0.10, 1.0, glow);
     for i in 0..24 {
         let a = a0 + (a1 - a0) * i as f32 / 23.0 + HALF_PI;
         let on = i as f32 / 23.0 <= level;

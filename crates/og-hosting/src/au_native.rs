@@ -360,12 +360,12 @@ impl AudioUnitPlugin {
             component_manufacturer: fourcc(fields[3]),
             ..Default::default()
         };
-        if fields[1] != "aufx" {
-            return Err("This host currently supports Audio Unit audio effects; MIDI/instrument hosting is not implemented".into());
+        if fields[1] != "aufx" && fields[1] != "aumf" && fields[1] != "augn" {
+            return Err("This host currently supports Audio Unit audio and music effects; instrument hosting is not implemented".into());
         }
         let channels = desc.num_output_ch;
-        if channels < 1 || channels as usize > MAX_CHANNELS || desc.num_input_ch != channels {
-            return Err("Audio Unit requires matching input/output channel counts (1–32)".into());
+        if channels < 1 || channels as usize > MAX_CHANNELS {
+            return Err("Audio Unit requires valid channel counts (1–32)".into());
         }
         let component = unsafe { AudioComponentFindNext(ptr::null_mut(), &description) };
         if component.is_null() {
@@ -399,7 +399,7 @@ impl AudioUnitPlugin {
             sample_time: 0.0,
             render_error: 0,
         };
-        plugin.desc.has_editor = false; // Generic parameter view; no native UI capture yet.
+        plugin.desc.has_editor = true;
         plugin.desc.presets.clear(); // Do not advertise fictitious factory presets.
         plugin.read_parameters()?;
         Ok(plugin)
@@ -896,10 +896,34 @@ impl HostedPlugin for AudioUnitPlugin {
         Ok(())
     }
     fn has_editor(&self) -> bool {
-        false
+        true
     }
     fn editor_size(&self) -> (u32, u32) {
         (640, 360)
+    }
+    fn show_editor(&mut self, x: i32, y: i32, on_top: bool) -> bool {
+        #[cfg(target_os = "macos")]
+        unsafe {
+            extern "C" {
+                fn og_au_show_window(unit: Unit, title: *const std::os::raw::c_char, x: i32, y: i32, on_top: bool) -> bool;
+            }
+            let title = std::ffi::CString::new(self.desc.name.clone()).unwrap_or_default();
+            og_au_show_window(self.unit, title.as_ptr(), x, y, on_top)
+        }
+        #[cfg(not(target_os = "macos"))]
+        false
+    }
+    fn hide_editor(&mut self) {
+        #[cfg(target_os = "macos")]
+        unsafe {
+            extern "C" {
+                fn og_au_hide_window(unit: Unit);
+            }
+            og_au_hide_window(self.unit);
+        }
+    }
+    fn is_editor_open(&self) -> bool {
+        true
     }
     fn render_editor_rgba(&self) -> (u32, u32, Vec<u8>) {
         let mut desc = self.desc.clone();

@@ -411,4 +411,18 @@ impl Processor {
     pub fn render_editor_rgba(&self) -> Option<(u32, u32, Vec<u8>)> {
         self.plugins.first().map(|p| p.render_editor_rgba())
     }
+
+    pub fn show_native_editor(&mut self, x: i32, y: i32, on_top: bool) -> bool {
+        if let Some(p) = self.plugins.first_mut() {
+            p.show_editor(x, y, on_top)
+        } else {
+            false
+        }
+    }
+
+    pub fn hide_native_editor(&mut self) {
+        if let Some(p) = self.plugins.first_mut() {
+            p.hide_editor();
+        }
+    }
 }

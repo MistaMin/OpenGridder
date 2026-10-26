@@ -3,9 +3,42 @@ fn main() {
     println!("cargo:rustc-check-cfg=cfg(og_vst3_host)");
     println!("cargo:rerun-if-env-changed=OPENGRIDDER_VST3_SDK");
     println!("cargo:rerun-if-changed=native/vst3_bridge.cpp");
+    println!("cargo:rerun-if-changed=native/au_window.m");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         return;
     }
+    let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    let arch = if env::var("CARGO_CFG_TARGET_ARCH").unwrap() == "x86_64" {
+        "x86_64"
+    } else {
+        "arm64"
+    };
+
+    // Compile native Cocoa AudioUnit window controller
+    let au_obj = out.join("au_window.o");
+    let status = Command::new("clang")
+        .args([
+            "-fobjc-arc",
+            "-O2",
+            "-fPIC",
+            "-arch",
+            arch,
+            if arch == "x86_64" { "-mmacosx-version-min=10.12" } else { "-mmacosx-version-min=11.0" },
+            "-c",
+            "native/au_window.m",
+            "-o",
+        ])
+        .arg(&au_obj)
+        .status()
+        .expect("clang failed to compile au_window.m");
+    assert!(status.success(), "au_window.m compilation failed");
+    let au_lib = out.join("libog_au_window.a");
+    assert!(Command::new("ar").arg("crs").arg(&au_lib).arg(&au_obj).status().unwrap().success());
+    println!("cargo:rustc-link-search=native={}", out.display());
+    println!("cargo:rustc-link-lib=static=og_au_window");
+    println!("cargo:rustc-link-lib=framework=Cocoa");
+    println!("cargo:rustc-link-lib=framework=AudioToolbox");
+
     let Some(sdk) = env::var_os("OPENGRIDDER_VST3_SDK").map(PathBuf::from) else {
         println!("cargo:warning=VST3 hosting disabled: set OPENGRIDDER_VST3_SDK to the external Steinberg SDK root");
         return;

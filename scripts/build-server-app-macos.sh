@@ -7,26 +7,23 @@ og_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 og_server_bin_tmp="$og_root/target/server-universal/OpenGridderServer-bin"
 og_existing_server="$og_root/target/server-universal/OpenGridderServer"
 
-if [ ! -f "$og_server_bin_tmp" ]; then
-    if [ -f "$og_existing_server" ]; then
-        echo "=== 1. Using existing Universal Server Binary ==="
-        cp "$og_existing_server" "$og_server_bin_tmp"
-    else
-        echo "=== 1. Building Server Universal Rust Binary ==="
-        og_arm_tools="${OG_ARM_TOOLCHAIN:-$HOME/.rustup/toolchains/1.98.0-aarch64-apple-darwin}"
-        og_intel_tools="${OG_INTEL_TOOLCHAIN:-$HOME/.rustup/toolchains/1.98.0-x86_64-apple-darwin}"
-        export CARGO_PROFILE_RELEASE_STRIP=none
-        RUSTC="$og_arm_tools/bin/rustc" "$og_arm_tools/bin/cargo" build \
-            --manifest-path "$og_root/Cargo.toml" --release --locked -p og-server --target-dir "$og_root/target"
-        RUSTC="$og_intel_tools/bin/rustc" /usr/bin/arch -x86_64 "$og_intel_tools/bin/cargo" build \
-            --manifest-path "$og_root/Cargo.toml" --release --locked -p og-server --target x86_64-apple-darwin \
-            --target-dir "$og_root/target/rosetta-intel"
-        mkdir -p "$og_root/target/server-universal"
-        lipo -create "$og_root/target/release/AudioGridderServer" \
-            "$og_root/target/rosetta-intel/x86_64-apple-darwin/release/AudioGridderServer" \
-            -output "$og_server_bin_tmp"
-    fi
-fi
+: "${OPENGRIDDER_VST3_SDK:=/Volumes/Developer/Dev Projects/Water Channel/third_party/vst3sdk}"
+export OPENGRIDDER_VST3_SDK
+
+echo "=== 1. Building Server Universal Rust Binary (VST3 SDK: $OPENGRIDDER_VST3_SDK) ==="
+og_arm_tools="${OG_ARM_TOOLCHAIN:-$HOME/.rustup/toolchains/1.98.0-aarch64-apple-darwin}"
+og_intel_tools="${OG_INTEL_TOOLCHAIN:-$HOME/.rustup/toolchains/1.98.0-x86_64-apple-darwin}"
+export CARGO_PROFILE_RELEASE_STRIP=none
+RUSTC="$og_arm_tools/bin/rustc" "$og_arm_tools/bin/cargo" build \
+    --manifest-path "$og_root/Cargo.toml" --release --locked -p og-server --target-dir "$og_root/target"
+RUSTC="$og_intel_tools/bin/rustc" /usr/bin/arch -x86_64 "$og_intel_tools/bin/cargo" build \
+    --manifest-path "$og_root/Cargo.toml" --release --locked -p og-server --target x86_64-apple-darwin \
+    --target-dir "$og_root/target/rosetta-intel"
+mkdir -p "$og_root/target/server-universal"
+lipo -create "$og_root/target/release/OpenGridderServer" \
+    "$og_root/target/rosetta-intel/x86_64-apple-darwin/release/OpenGridderServer" \
+    -output "$og_server_bin_tmp"
+cp "$og_server_bin_tmp" "$og_existing_server"
 lipo "$og_server_bin_tmp" -verify_arch arm64 x86_64
 
 echo "=== 2. Compiling Cocoa Launcher Slices ==="
