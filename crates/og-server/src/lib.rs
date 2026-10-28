@@ -63,15 +63,15 @@ mod tests {
 
         proc.set_oversampling_factor(2);
         assert_eq!(proc.oversampling_factor(), 2);
-        assert_eq!(proc.latency_samples(), 12);
+        assert_eq!(proc.latency_samples(), 54);
 
         proc.set_oversampling_factor(4);
         assert_eq!(proc.oversampling_factor(), 4);
-        assert_eq!(proc.latency_samples(), 18);
+        assert_eq!(proc.latency_samples(), 59);
         proc.set_plugin_latency_samples(19);
         assert_eq!(
             proc.latency_samples(),
-            23,
+            64,
             "round plugin delay up from the 4x processing rate"
         );
         proc.set_plugin_latency_samples(0);

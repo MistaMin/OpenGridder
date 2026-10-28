@@ -91,18 +91,18 @@ mod tests {
         let clicked_2x = editor.handle_mouse_click(&mut proc, 90.0, 68.0);
         assert!(clicked_2x);
         assert_eq!(proc.get_plugin_oversampling(0), 2);
-        assert_eq!(proc.latency_samples, 12); // 2x FIR latency = 12 samples
+        assert_eq!(proc.latency_samples, 54); // 2x half-band latency = 54 samples
 
         let clicked_4x = editor.handle_mouse_click(&mut proc, 90.0, 68.0);
         assert!(clicked_4x);
         assert_eq!(proc.get_plugin_oversampling(0), 4);
-        assert_eq!(proc.latency_samples, 18); // 4x cascaded FIR latency = 18 samples
+        assert_eq!(proc.latency_samples, 59); // 4x cascaded half-band latency = 59 samples
 
         // 6. Stream audio at 4x oversampling and verify DC convergence and latency reporting
         let mut dc_audio = vec![vec![0.5f32; 128], vec![0.5f32; 128]];
         proc.process_block_f32(&mut dc_audio, &mut midi, &pos);
         assert!((dc_audio[0][100] - 0.5).abs() < 1e-4);
-        assert_eq!(proc.latency_samples, 18);
+        assert_eq!(proc.latency_samples, 59);
 
         // 7. Serialize DAW state (STATE_VERSION = 7) and verify index 11 is oversampling_factor = 4
         let state_bytes = proc.get_state_information();

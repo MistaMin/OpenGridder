@@ -136,6 +136,8 @@ struct Shared {
     active_is_b: AtomicBool,
     active_latency: AtomicU32,
     requested_latency: AtomicU32,
+    /// Transport budget chosen by the latency profile, before any block-size headroom.
+    base_transport: AtomicU32,
     processed: AtomicU32,
     status: AtomicI32,
     underruns: AtomicU32,
@@ -259,6 +261,9 @@ struct Callback {
     slow_callbacks: u32,
     auto_offline: bool,
     wait_timeouts: u32,
+    /// Largest block seen since the profile last changed (block-size headroom never shrinks mid-stream).
+    seen_frames: usize,
+    seen_base: u32,
 }
 
 /// Opaque handle. Only one audio thread may process it at a time; control
@@ -319,6 +324,7 @@ impl NativePlugin {
             active_is_b: AtomicBool::new(false),
             active_latency: AtomicU32::new(latency_pair(latency as u32, 0)),
             requested_latency: AtomicU32::new(latency_pair(latency as u32, 0)),
+            base_transport: AtomicU32::new((latency as u32).clamp(32, 8192)),
             processed: AtomicU32::new(0),
             status: AtomicI32::new(0),
             underruns: AtomicU32::new(0),
@@ -372,6 +378,8 @@ impl NativePlugin {
                 slow_callbacks: 0,
                 auto_offline: false,
                 wait_timeouts: 0,
+                seen_frames: 0,
+                seen_base: 0,
             }),
             worker: None,
         };
@@ -749,13 +757,26 @@ if let Some(v) = j.get("outputGain").and_then(|v| v.as_f64()) {
         let size = cb.dry_tags.len();
         let selection = self.shared.selected.load(Ordering::Acquire);
         let requested = self.shared.requested_latency.load(Ordering::Acquire);
-        if frames > transport_part(requested) as usize {
-            let expanded = frames.next_power_of_two().min(MAX_TRANSPORT_LATENCY) as u32;
+        // The profile is the latency budget. A block cannot come back before it has been
+        // sent, so when the host block is larger than the budget the budget would be spent
+        // on the block itself; keep one block of transit plus the whole profile as headroom.
+        let base = self.shared.base_transport.load(Ordering::Acquire);
+        if cb.seen_base != base {
+            cb.seen_base = base;
+            cb.seen_frames = 0;
+        }
+        cb.seen_frames = cb.seen_frames.max(frames);
+        let wanted = if cb.seen_frames > base as usize {
+            ((cb.seen_frames.next_power_of_two() as u32).saturating_add(base)).min(MAX_TRANSPORT_LATENCY as u32)
+        } else {
+            base
+        };
+        if wanted != transport_part(requested) {
             // At most one CAS attempt per callback: a racing worker update can
             // defer the request to the next callback, never make this callback wait.
             let _ = self.shared.requested_latency.compare_exchange(
                 requested,
-                latency_pair(expanded, plugin_part(requested)),
+                latency_pair(wanted, plugin_part(requested)),
                 Ordering::AcqRel,
                 Ordering::Acquire,
             );
@@ -1146,6 +1167,7 @@ pub unsafe extern "C" fn og_native_accept_latency(handle: *mut NativePlugin, tot
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn og_native_set_transport_latency(handle: *mut NativePlugin, transport: u32) {
     if let Some(p) = handle.as_ref() {
+        p.shared.base_transport.store(transport.clamp(32, 8192), Ordering::Release);
         let mut current = p.shared.requested_latency.load(Ordering::Acquire);
         loop {
             let updated = latency_pair(
@@ -2177,18 +2199,38 @@ mod tests {
             0
         );
         let handle = &mut plugin as *mut NativePlugin;
-        assert_eq!(unsafe { og_native_latency(handle) }, 1042);
+        assert_eq!(unsafe { og_native_latency(handle) }, 1298); // 1024-frame block + the 256 profile budget + 18 plugin
         assert_eq!(
             plugin.shared.active_latency.load(Ordering::Acquire),
             latency_pair(256, 0)
         );
         unsafe {
-            og_native_accept_latency(handle, 1042);
+            og_native_accept_latency(handle, 1298);
         }
         assert_eq!(
             plugin.shared.active_latency.load(Ordering::Acquire),
-            latency_pair(1024, 18)
+            latency_pair(1280, 18)
         );
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn callback_cost_with_drive() {
+        let plugin = NativePlugin::new(48000.0, 1024, 2, 1024, None);
+        let input = [0.25f32; 128];
+        let (mut l, mut r) = ([0.0f32; 128], [0.0f32; 128]);
+        for (label, drive, quality) in [("off", 0.0f32, 0u32), ("adaa", 1.0, 0), ("2x", 1.0, 1), ("4x", 1.0, 2)] {
+            plugin.shared.drive.store(drive.to_bits(), Ordering::Release);
+            plugin.shared.drive_quality.store(quality, Ordering::Release);
+            let start = Instant::now();
+            for _ in 0..2000 {
+                let ins = [input.as_ptr(), input.as_ptr()];
+                let outs = [l.as_mut_ptr(), r.as_mut_ptr()];
+                unsafe { plugin.process(ins.as_ptr(), outs.as_ptr(), 128) };
+            }
+            let per_block = start.elapsed().as_secs_f64() / 2000.0;
+            println!("drive {label}: {:.1} us per 128-frame block ({:.2}% of real time)", per_block * 1e6, per_block / (128.0 / 48000.0) * 100.0);
+        }
     }
 
     #[test]
