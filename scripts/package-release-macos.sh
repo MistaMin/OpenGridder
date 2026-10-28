@@ -124,10 +124,14 @@ EOF
 chmod +x "$og_stage/scripts/server/postinstall"
 
 echo "=== [4/7] Documentation and Licenses ==="
-python3 tools/build_user_manual.py
-cp output/pdf/OpenGridder-User-Manual.pdf "$og_stage/docs/Library/Application Support/OpenGridder/"
+# The illustrated manual (Docs/OpenGridder-Manual.html, with its PDF) is the user manual.
+cp Docs/OpenGridder-Manual.pdf "$og_stage/docs/Library/Application Support/OpenGridder/OpenGridder-User-Manual.pdf"
+cp Docs/OpenGridder-Manual.html "$og_stage/docs/Library/Application Support/OpenGridder/"
+cp -R Docs/images "$og_stage/docs/Library/Application Support/OpenGridder/"
 cp RELEASE_NOTES.md README.md "$og_stage/docs/Library/Application Support/OpenGridder/" 2>/dev/null || true
-cp output/pdf/OpenGridder-User-Manual.pdf "$og_stage/dmg/Documentation/"
+cp Docs/OpenGridder-Manual.pdf "$og_stage/dmg/Documentation/OpenGridder-User-Manual.pdf"
+cp Docs/OpenGridder-Manual.html "$og_stage/dmg/Documentation/"
+cp -R Docs/images "$og_stage/dmg/Documentation/"
 cp RELEASE_NOTES.md README.md "$og_stage/dmg/Documentation/" 2>/dev/null || true
 
 if [ -d "$og_root/target/release-licenses" ]; then
