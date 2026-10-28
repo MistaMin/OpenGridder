@@ -148,12 +148,14 @@ a { color:var(--accent); }
 <p>Your whole chain, and every plugin's settings, is saved with your DAW project.</p>
 
 <h2 id="editors">7. Opening a plugin's own window</h2>
-<p>Double-click a slot to open that plugin's editor.</p>
+<p>Double-click a slot to open that plugin's editor. You see and use the plugin's real window, whether the server is on the same Mac or on another computer.</p>
 <ul>
-<li><strong>Server on the same Mac:</strong> the plugin's real window opens in front of your DAW. Close it with its close button. This works with Audio Unit and VST3 plugins.</li>
-<li><strong>Server on another computer:</strong> a window with the plugin's parameters opens instead. The real window lives on the other machine's screen.</li>
+<li><strong>Server on the same Mac:</strong> the plugin's real window opens in front of your DAW. Close it with its close button.</li>
+<li><strong>Server on another computer:</strong> the server opens the plugin's real window out of sight and sends you a live picture of it, about 10 to 30 pictures a second depending on the plugin. Your mouse clicks, drags, scrolling and key presses are sent back and applied to the plugin. Nothing appears on the server computer's screen, and its own mouse and keyboard are never touched.</li>
 </ul>
+<p>Plugins that have no window of their own show a panel of their parameters instead. This works with Audio Unit and VST3 plugins on a macOS server.</p>
 <p>Plugins that use copy protection, such as those that need an iLok, load as normal.</p>
+<div class="note"><strong>Good to know:</strong> editors that are heavy to draw update more slowly than simple ones, and a wired network gives the smoothest picture. The picture is sent at normal size, so on a high-resolution display it looks a little softer than the plugin does locally.</div>
 
 <h2 id="latency">8. Latency profiles</h2>
 <p>Sending audio out and back takes time, and the server needs some spare time when a plugin is busy. A latency profile sets how much safety buffer you want. More buffer means fewer dropouts and more delay.</p>
@@ -248,7 +250,8 @@ a { color:var(--accent); }
 <tr><td>High frequencies sound dull</td><td>Check each slot's oversampling. At 1x there is no filtering. If it still sounds dull, check the plugin itself with a bypass test.</td></tr>
 <tr><td>A bounce is not processed</td><td>Make sure the server is running before the bounce starts. Check that the slot isn't bypassed.</td></tr>
 <tr><td>A plugin is missing from the list</td><td>Open the Plugin Manager and press Rescan All. Make sure the plugin is installed for all users.</td></tr>
-<tr><td>A plugin's window doesn't show in front</td><td>Allow Accessibility access for OpenGridder Server in System Settings &rarr; Privacy &amp; Security.</td></tr>
+<tr><td>A plugin's window doesn't show in front</td><td>This applies when the server is on the same Mac. Allow Accessibility access for OpenGridder Server in System Settings &rarr; Privacy &amp; Security.</td></tr>
+<tr><td>The remote plugin window is slow or blank</td><td>Wait a second after opening it. If it stays blank, close and reopen it. Heavy editors can be slow; a wired network helps. Tell us the plugin name if it never shows its real window.</td></tr>
 <tr><td>The server is disconnected after loading a plugin</td><td>Update to the latest build and restart the server. If it repeats with one plugin, tell us the plugin name and which profile you used.</td></tr>
 <tr><td>Delay between tracks</td><td>Some hosts only re-check plugin delay on playback. Stop and start playback, or reload the session.</td></tr>
 </table>
