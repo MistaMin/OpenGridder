@@ -151,8 +151,8 @@ void og_run_main_loop(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
-        NSDictionary *options = @{(__bridge id)kAXTrustedCheckOptionPrompt: @YES};
-        AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
+        // Chain workers start once per client session; only the server app asks for
+        // Accessibility, so a worker must never raise the system prompt itself.
         [NSApp run];
     }
 }

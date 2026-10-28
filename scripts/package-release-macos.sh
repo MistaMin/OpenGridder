@@ -164,19 +164,30 @@ ditto "$og_staged_app" "$og_stage/dmg/OpenGridder Server.app"
 ln -sf /Applications "$og_stage/dmg/Applications"
 
 echo "=== [5/7] Building Component Packages ==="
-pkgbuild --root "$og_stage/aax" --identifier studio.opengrid.OpenGridder.aax --version "$og_version" \
+# Bundles must install where the package says: macOS otherwise relocates them onto any
+# older copy it finds (for example a build folder), leaving /Applications empty.
+og_nonreloc() {
+    local plist="$og_stage/components/$(basename "$1").plist"
+    pkgbuild --analyze --root "$1" "$plist" >/dev/null
+    local count; count=$(grep -c "BundleIsRelocatable" "$plist" || true)
+    for ((i = 0; i < count; i++)); do
+        /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" "$plist"
+    done
+    echo "$plist"
+}
+pkgbuild --root "$og_stage/aax" --component-plist "$(og_nonreloc "$og_stage/aax")" --identifier studio.opengrid.OpenGridder.aax --version "$og_version" \
     --install-location / --ownership recommended "$og_stage/components/AAX.pkg"
 
-pkgbuild --root "$og_stage/au" --identifier studio.opengrid.OpenGridder.au --version "$og_version" \
+pkgbuild --root "$og_stage/au" --component-plist "$(og_nonreloc "$og_stage/au")" --identifier studio.opengrid.OpenGridder.au --version "$og_version" \
     --install-location / --ownership recommended "$og_stage/components/AU.pkg"
 
-pkgbuild --root "$og_stage/vst3" --identifier studio.opengrid.OpenGridder.vst3 --version "$og_version" \
+pkgbuild --root "$og_stage/vst3" --component-plist "$(og_nonreloc "$og_stage/vst3")" --identifier studio.opengrid.OpenGridder.vst3 --version "$og_version" \
     --install-location / --ownership recommended "$og_stage/components/VST3.pkg"
 
-pkgbuild --root "$og_stage/vst2" --identifier studio.opengrid.OpenGridder.vst2 --version "$og_version" \
+pkgbuild --root "$og_stage/vst2" --component-plist "$(og_nonreloc "$og_stage/vst2")" --identifier studio.opengrid.OpenGridder.vst2 --version "$og_version" \
     --install-location / --ownership recommended "$og_stage/components/VST2.pkg"
 
-pkgbuild --root "$og_stage/server" --scripts "$og_stage/scripts/server" \
+pkgbuild --root "$og_stage/server" --component-plist "$(og_nonreloc "$og_stage/server")" --scripts "$og_stage/scripts/server" \
     --identifier studio.opengrid.OpenGridder.server --version "$og_version" \
     --install-location / --ownership recommended "$og_stage/components/Server.pkg"
 

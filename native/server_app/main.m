@@ -1305,13 +1305,22 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
 }
 
 - (void)requestAccessibilityPermissions {
-    NSDictionary *options = @{(__bridge id)kAXTrustedCheckOptionPrompt: @YES};
-    BOOL trusted = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
-    if (trusted) {
+    // Ask at most once per installed version; the tray menu item can ask again on demand.
+    NSString *version = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"";
+    NSString *key = [@"AccessibilityPromptedVersion" stringByAppendingString:@""];
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    if (AXIsProcessTrusted()) {
         NSLog(@"[OpenGridder] Accessibility features are authorized.");
-    } else {
-        NSLog(@"[OpenGridder] Accessibility features requested via macOS system prompt.");
+        return;
     }
+    if ([[defaults stringForKey:key] isEqualToString:version]) {
+        NSLog(@"[OpenGridder] Accessibility not authorized; prompt already shown for this version.");
+        return;
+    }
+    [defaults setObject:version forKey:key];
+    NSDictionary *options = @{(__bridge id)kAXTrustedCheckOptionPrompt: @YES};
+    AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
+    NSLog(@"[OpenGridder] Accessibility features requested via macOS system prompt.");
 }
 
 - (void)openAccessibilitySettings:(id)sender {
