@@ -1,14 +1,8 @@
 [workspace]
 resolver = "2"
+exclude = ["server"]
 members = [
-    "crates/og-common",
-    "crates/og-dsp",
-    "crates/og-goodlookinui",
     "crates/goodlookindri",
-    "crates/og-hosting",
-    "crates/og-screen",
-    "crates/og-client",
-    "crates/og-server",
     "crates/og-plugin",
     "crates/og-tray",
 ]

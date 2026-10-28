@@ -101,17 +101,17 @@ if [ -d "$og_staged_app/Contents/PlugIns/OpenGridderAUv3.appex" ]; then
 fi
 
 # Sign Server-bin executable with entitlements
-codesign --force --timestamp --options runtime --entitlements native/server-entitlements.plist \
+codesign --force --timestamp --options runtime --entitlements server/native/server-entitlements.plist \
     --sign "$og_application" "$og_staged_app/Contents/MacOS/OpenGridderServer-bin"
 codesign --verify --strict "$og_staged_app/Contents/MacOS/OpenGridderServer-bin"
 
 # Sign launcher executable
-codesign --force --timestamp --options runtime --entitlements native/server-entitlements.plist \
+codesign --force --timestamp --options runtime --entitlements server/native/server-entitlements.plist \
     --sign "$og_application" "$og_staged_app/Contents/MacOS/OpenGridderServer"
 codesign --verify --strict "$og_staged_app/Contents/MacOS/OpenGridderServer"
 
 # Sign entire OpenGridder Server.app bundle
-codesign --force --timestamp --options runtime --entitlements native/server-entitlements.plist \
+codesign --force --timestamp --options runtime --entitlements server/native/server-entitlements.plist \
     --sign "$og_application" "$og_staged_app"
 codesign --verify --deep --strict "$og_staged_app"
 

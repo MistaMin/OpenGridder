@@ -28,7 +28,7 @@ ditto "$og_aax" "$og_stage/aax/Library/Application Support/Avid/Audio/Plug-Ins/O
 python3 scripts/stage-server.py --binary "$og_server" \
     --output "$og_stage/server/Applications/OpenGridder Server" --capabilities au-vst3
 og_staged_server="$og_stage/server/Applications/OpenGridder Server"
-codesign --force --timestamp --options runtime --entitlements native/server-entitlements.plist \
+codesign --force --timestamp --options runtime --entitlements server/native/server-entitlements.plist \
     --sign "$og_application" "$og_staged_server/OpenGridderServer"
 codesign --verify --strict "$og_staged_server/OpenGridderServer"
 "$og_staged_server/OpenGridderServer" --version

@@ -31,12 +31,12 @@ mkdir -p "$og_root/target/server-app-build"
 /usr/bin/clang -O3 -fobjc-arc -arch arm64 -mmacosx-version-min=11.0 \
     -framework Cocoa \
     -o "$og_root/target/server-app-build/launcher-arm64" \
-    "$og_root/native/server_app/main.m"
+    "$og_root/server/native/server_app/main.m"
 
 /usr/bin/clang -O3 -fobjc-arc -arch x86_64 -mmacosx-version-min=10.15 \
     -framework Cocoa \
     -o "$og_root/target/server-app-build/launcher-x86_64" \
-    "$og_root/native/server_app/main.m"
+    "$og_root/server/native/server_app/main.m"
 
 lipo -create \
     "$og_root/target/server-app-build/launcher-arm64" \
@@ -56,11 +56,11 @@ chmod 755 "$og_app_dest/Contents/MacOS/OpenGridderServer"
 cp "$og_server_bin_tmp" "$og_app_dest/Contents/MacOS/OpenGridderServer-bin"
 chmod 755 "$og_app_dest/Contents/MacOS/OpenGridderServer-bin"
 
-cp "$og_root/native/server_app/Info.plist.in" "$og_app_dest/Contents/Info.plist"
+cp "$og_root/server/native/server_app/Info.plist.in" "$og_app_dest/Contents/Info.plist"
 printf 'APPL????' > "$og_app_dest/Contents/PkgInfo"
 
-if [ -f "$og_root/Resources/OpenGridderServer.icns" ]; then
-    cp "$og_root/Resources/OpenGridderServer.icns" "$og_app_dest/Contents/Resources/OpenGridderServer.icns"
+if [ -f "$og_root/server/Resources/OpenGridderServer.icns" ]; then
+    cp "$og_root/server/Resources/OpenGridderServer.icns" "$og_app_dest/Contents/server/Resources/OpenGridderServer.icns"
 fi
 
 # Embed AUv3 App Extension if built

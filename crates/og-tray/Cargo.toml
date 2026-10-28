@@ -10,8 +10,8 @@ name = "OpenGridderPluginTray"
 path = "src/main.rs"
 
 [dependencies]
-og-common = { path = "../og-common" }
-og-goodlookinui = { path = "../og-goodlookinui" }
+og-common = { path = "../../server/crates/og-common" }
+og-goodlookinui = { path = "../../server/crates/og-goodlookinui" }
 parking_lot = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
