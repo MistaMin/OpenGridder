@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenGridder 1.0 BETA User Manual</title>
+<style>
+:root { --bg:#fff; --fg:#1d2127; --muted:#5b6470; --accent:#c7790a; --card:#f4f5f7; --line:#dfe2e7; --code:#eceef2; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#16191d; --fg:#e6e8eb; --muted:#99a1ab; --accent:#f0a030; --card:#1f2328; --line:#30363d; --code:#262b31; }
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system,"Helvetica Neue",Arial,sans-serif; }
+main { max-width:860px; margin:0 auto; padding:32px 20px 80px; }
+h1 { font-size:2.2rem; margin:0 0 4px; }
+h2 { margin:2.6rem 0 .6rem; padding-top:1rem; border-top:1px solid var(--line); font-size:1.5rem; }
+h3 { margin:1.6rem 0 .4rem; font-size:1.15rem; }
+.sub { color:var(--muted); margin:0 0 1.5rem; }
+figure { margin:1.2rem 0; text-align:center; }
+figure img { max-width:100%; height:auto; border-radius:8px; border:1px solid var(--line); }
+figcaption { color:var(--muted); font-size:.9rem; margin-top:.4rem; }
+code, kbd { background:var(--code); padding:.1em .4em; border-radius:4px; font:.9em ui-monospace,Menlo,monospace; }
+pre { background:var(--code); padding:12px 14px; border-radius:8px; overflow-x:auto; }
+pre code { padding:0; background:none; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; }
+th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { background:var(--card); }
+.note { background:var(--card); border-left:4px solid var(--accent); padding:10px 14px; border-radius:6px; margin:1rem 0; }
+nav { background:var(--card); border-radius:8px; padding:12px 18px; margin:1.5rem 0; }
+nav ol { margin:0; padding-left:1.2rem; columns:2; }
+@media (max-width:600px) { nav ol { columns:1; } }
+a { color:var(--accent); }
+@media print { h2 { break-after:avoid; } figure { break-inside:avoid; } nav { display:none; } }
+</style>
+</head>
+<body>
+<main>
+
+<h1>OpenGridder</h1>
+<p class="sub">User Manual &middot; Version 1.0 BETA</p>
+
+<p>OpenGridder lets your DAW use audio plugins that run on a different process, or on a different computer. You insert one OpenGridder plugin on a track. It sends the audio to the OpenGridder Server, which runs your effects and sends the processed audio back. Heavy plugins stop eating your DAW's CPU, and plugins that your DAW can't load directly can still be used.</p>
+
+<nav>
+<strong>Contents</strong>
+<ol>
+<li><a href="#how">How it works</a></li>
+<li><a href="#install">Installing</a></li>
+<li><a href="#server">Starting the server</a></li>
+<li><a href="#insert">Using OpenGridder in your DAW</a></li>
+<li><a href="#window">The plugin window</a></li>
+<li><a href="#slots">Adding and managing plugins</a></li>
+<li><a href="#editors">Opening a plugin's own window</a></li>
+<li><a href="#latency">Latency profiles</a></li>
+<li><a href="#drive">Drive and oversampling</a></li>
+<li><a href="#meters">Meters</a></li>
+<li><a href="#bounce">Bouncing and offline rendering</a></li>
+<li><a href="#manager">Plugin Manager</a></li>
+<li><a href="#remote">Using a second computer</a></li>
+<li><a href="#protools">Pro Tools control surfaces</a></li>
+<li><a href="#trouble">Troubleshooting</a></li>
+<li><a href="#notices">Notices</a></li>
+</ol>
+</nav>
+
+<h2 id="how">1. How it works</h2>
+<p>There are two parts:</p>
+<ul>
+<li><strong>OpenGridder Server</strong> is an app that finds your installed plugins and runs them. Each chain runs in its own helper process, so a plugin that crashes does not take down your DAW.</li>
+<li><strong>The OpenGridder plugin</strong> sits on a track in your DAW. It sends the track's audio to the server and plays back the result.</li>
+</ul>
+<p>The plugin reports its delay to the DAW, so your tracks stay in time. If the server falls behind for a moment, the plugin crossfades to the original audio instead of clicking or going silent.</p>
+
+<h3>Supported formats</h3>
+<table>
+<tr><th>Format</th><th>Works in</th></tr>
+<tr><td>AAX Native</td><td>Pro Tools</td></tr>
+<tr><td>VST3</td><td>Cubase, Nuendo, Studio One, Bitwig, REAPER and other VST3 hosts</td></tr>
+<tr><td>Audio Unit (AU and AUv3)</td><td>Logic Pro, GarageBand and other AU hosts</td></tr>
+<tr><td>VST 2.4, CLAP, LV2</td><td>Hosts that use these formats</td></tr>
+</table>
+<p>The server hosts Audio Unit and VST3 plugins. A Windows 7 or later server is also available.</p>
+
+<h2 id="install">2. Installing</h2>
+<ol>
+<li>Quit your DAW.</li>
+<li>Open <code>OpenGridder-1.0.0-beta.1-macos.pkg</code> and follow the installer.</li>
+<li>Start the server (next section), then open your DAW.</li>
+</ol>
+<p>The installer puts the plugins in the standard folders for each format and the server in your Applications folder. The installer and the disk image are notarized by Apple, so macOS opens them without warnings.</p>
+<p><strong>Windows:</strong> unzip <code>OpenGridder-1.0.0-beta.1-windows7-x86_64.zip</code> anywhere and keep the two included <code>.dll</code> files next to <code>OpenGridderServer.exe</code>.</p>
+
+<h2 id="server">3. Starting the server</h2>
+<ol>
+<li>Open <strong>OpenGridder Server</strong> from your Applications folder.</li>
+<li>A splash window scans your plugins. The first scan takes a while with a big library. Later launches only look at plugins that changed. Press <strong>Skip Scan</strong> if you want to start at once.</li>
+<li>The OpenGridder icon appears in the menu bar. Use it to see status, open the log, open the Plugin Manager, or quit.</li>
+</ol>
+<div class="note">On first launch macOS may ask for Accessibility access. OpenGridder uses it to bring a plugin's own window to the front. It asks once per version. If you decline, everything still works.</div>
+
+<h2 id="insert">4. Using OpenGridder in your DAW</h2>
+<ol>
+<li>Make sure the server is running.</li>
+<li>Insert <strong>OpenGridder</strong> on an audio track, or on an aux or master track.</li>
+<li>The window shows a green light and the server address when the connection is good.</li>
+<li>Click <strong>+ Add Plugin&hellip;</strong> and choose an effect.</li>
+</ol>
+<p>In Pro Tools, OpenGridder appears under the plugin category for AAX effects. In Logic Pro, look for it in the Audio Units menu.</p>
+
+<h2 id="window">5. The plugin window</h2>
+<figure>
+<img src="images/rack-with-plugins.png" alt="OpenGridder plugin window with two hosted plugins">
+<figcaption>The OpenGridder window with two plugins in the rack.</figcaption>
+</figure>
+
+<table>
+<tr><th>Control</th><th>What it does</th></tr>
+<tr><td><strong>Status light</strong></td><td>Green means connected to the server. Red means the server can't be reached.</td></tr>
+<tr><td><strong>A | B</strong></td><td>Two settings memories. Click to switch between them and compare.</td></tr>
+<tr><td><strong>Server address</strong></td><td>Shows which server you are connected to.</td></tr>
+<tr><td><strong>Latency profile</strong></td><td>Low, Std, High or Studio. See <a href="#latency">Latency profiles</a>.</td></tr>
+<tr><td><strong>Remote plugin slots</strong></td><td>Your chain of plugins, top to bottom.</td></tr>
+<tr><td><strong>Input Gain</strong></td><td>Level into the chain.</td></tr>
+<tr><td><strong>Wet / Dry Mix</strong></td><td>Blend between processed and original audio. 100% is fully processed.</td></tr>
+<tr><td><strong>Drive / Sat</strong></td><td>Adds saturation. See <a href="#drive">Drive and oversampling</a>.</td></tr>
+<tr><td><strong>Output Trim</strong></td><td>Level out of the chain.</td></tr>
+<tr><td><strong>Master</strong></td><td>Switches all processing on or off.</td></tr>
+<tr><td><strong>Footer</strong></td><td>Shows the delay your DAW is compensating, in samples and milliseconds.</td></tr>
+</table>
+<p>Drag a knob up or down to change it. Double-click a knob to reset it to its default.</p>
+
+<h3>Folding sections away</h3>
+<p>The three panels (plugins, console, meters) can fold down to narrow strips when you want a smaller window. Click the small arrow in the panel's corner.</p>
+<figure>
+<img src="images/folded-banks.png" alt="OpenGridder window with the console panel folded">
+<figcaption>The console panel folded to a strip, with larger VU meters.</figcaption>
+</figure>
+
+<h2 id="slots">6. Adding and managing plugins</h2>
+<ul>
+<li><strong>Add:</strong> click <strong>+ Add Plugin&hellip;</strong> and pick from the list. You can search by name or maker.</li>
+<li><strong>Order:</strong> plugins run from top to bottom. Use the <strong>&#8597;</strong> button on a slot to move it.</li>
+<li><strong>Bypass:</strong> click <strong>B</strong> on a slot to bypass only that plugin.</li>
+<li><strong>Presets:</strong> click <strong>P</strong> to see the plugin's own presets and switch between them.</li>
+<li><strong>Oversampling:</strong> click <strong>1x / 2x / 4x</strong> on a slot to change how much that plugin is oversampled.</li>
+<li><strong>Remove:</strong> click the <strong>&times;</strong> on a slot.</li>
+</ul>
+<p>Your whole chain, and every plugin's settings, is saved with your DAW project.</p>
+
+<h2 id="editors">7. Opening a plugin's own window</h2>
+<p>Double-click a slot to open that plugin's editor.</p>
+<ul>
+<li><strong>Server on the same Mac:</strong> the plugin's real window opens in front of your DAW. Close it with its close button. This works with Audio Unit and VST3 plugins.</li>
+<li><strong>Server on another computer:</strong> a window with the plugin's parameters opens instead. The real window lives on the other machine's screen.</li>
+</ul>
+<p>Plugins that use copy protection, such as those that need an iLok, load as normal.</p>
+
+<h2 id="latency">8. Latency profiles</h2>
+<p>Sending audio out and back takes time, and the server needs some spare time when a plugin is busy. A latency profile sets how much safety buffer you want. More buffer means fewer dropouts and more delay.</p>
+<table>
+<tr><th>Profile</th><th>Buffer</th><th>Use it for</th></tr>
+<tr><td>Low</td><td>128 samples</td><td>Tracking and playing live, light plugins, server on the same Mac</td></tr>
+<tr><td>Std</td><td>256 samples</td><td>General use, the default</td></tr>
+<tr><td>High</td><td>512 samples</td><td>Mixing with heavy plugins, or a second computer on your network</td></tr>
+<tr><td>Studio</td><td>1024 samples</td><td>Mixing, the heaviest plugins, and busy networks</td></tr>
+</table>
+<p>The buffer is added on top of your DAW's own buffer size. With a 1024-sample DAW buffer, High and Studio give noticeably more headroom than Low and Std. Your DAW is told the new delay and lines up your tracks automatically. The footer shows the total.</p>
+<div class="note"><strong>Tip:</strong> if you hear crackles with a heavy plugin, move to the next profile up. For mixing, also raise your DAW's buffer size.</div>
+
+<h2 id="drive">9. Drive and oversampling</h2>
+<p>The <strong>Drive / Sat</strong> knob adds saturation to the signal after your chain. Three character modes are available on the console:</p>
+<table>
+<tr><th>Mode</th><th>Sound</th></tr>
+<tr><td>Clean</td><td>Even and symmetrical, adds odd harmonics</td></tr>
+<tr><td>Tube</td><td>Warmer, adds even harmonics</td></tr>
+<tr><td>Transformer</td><td>Heavier low end, as if an iron core is being pushed</td></tr>
+</table>
+<figure>
+<img src="images/drive-and-ppm.png" alt="Drive control with mode buttons and peak meters">
+<figcaption>Drive set high, with its mode buttons and the peak meters.</figcaption>
+</figure>
+<h3>Oversampling</h3>
+<p>Saturation and some plugins can create harsh, aliased tones. Oversampling runs the plugin at twice or four times the sample rate to avoid them.</p>
+<ul>
+<li><strong>1x:</strong> off. Lowest CPU use and delay.</li>
+<li><strong>2x:</strong> a good balance.</li>
+<li><strong>4x:</strong> the cleanest, with the most CPU use.</li>
+</ul>
+<p>The oversampling filter keeps the top end intact, with a flat response to about 19.5 kHz at 44.1 kHz. It adds a few dozen samples of delay, which your DAW compensates. Heavy plugins use a lot more CPU at 2x and 4x, so only turn it up where you need it.</p>
+
+<h2 id="meters">10. Meters</h2>
+<p>The meter panel has two modes. Click the <strong>VU | PPM</strong> button to switch.</p>
+<figure>
+<img src="images/vu-meters.png" alt="Analog VU meters">
+<figcaption>VU mode: two analog needle meters with a reference selector and peak lights.</figcaption>
+</figure>
+<ul>
+<li><strong>VU:</strong> traditional needle meters. A button picks the reference level: <strong>-18</strong> (0 VU equals -18 dBFS, +4 dBu) or <strong>-3</strong> (0 VU equals -3 dBFS).</li>
+<li><strong>PPM:</strong> stacked peak bars that show peaks quickly.</li>
+<li><strong>IN | OUT:</strong> choose whether the meters show the level going in or coming out.</li>
+</ul>
+<p>The peak light turns red when the signal goes over the top of the scale.</p>
+
+<h2 id="bounce">11. Bouncing and offline rendering</h2>
+<p>OpenGridder detects when your DAW is bouncing or rendering faster than real time. It then waits for the server to return each block, so the bounce contains the fully processed audio. This applies to Pro Tools bounces and to offline renders in hosts that report offline mode.</p>
+<div class="note">Offline rendering can run slower than real time when plugins are heavy. That's normal. OpenGridder waits instead of skipping.</div>
+
+<h2 id="manager">12. Plugin Manager</h2>
+<p>Open the Plugin Manager from the server's menu bar icon, or press <kbd>&#8984;P</kbd>.</p>
+<figure>
+<img src="images/plugin-manager.png" alt="OpenGridder Plugin Manager window">
+<figcaption>The Plugin Manager lists every plugin the server found. (The list is blurred in this picture.)</figcaption>
+</figure>
+<ul>
+<li>Use the tabs to show all plugins, or only Audio Unit, VST3 or VST2 ones.</li>
+<li>Type in the search box to filter by name, maker or format.</li>
+<li>The Status column shows whether a plugin is available.</li>
+<li><strong>Rescan All</strong> (<kbd>&#8984;R</kbd>) clears the cache and looks for plugins again. Do this after you install a new plugin.</li>
+</ul>
+
+<h2 id="remote">13. Using a second computer</h2>
+<p>You can run the server on another computer on your network, for example a fast Mac next to your studio computer.</p>
+<ol>
+<li>On the server computer, start the server so it accepts network connections:
+<pre><code>"/Applications/OpenGridder Server.app/Contents/MacOS/OpenGridderServer" --bind 0.0.0.0 --port 55056</code></pre></li>
+<li>On your DAW computer, open <code>~/Library/Application Support/OpenGridder/client.json</code> and set the server address:
+<pre><code>{"server":"192.168.1.20:55056","transport_samples":256}</code></pre></li>
+<li>Reload OpenGridder in your DAW. The window shows the new address.</li>
+</ol>
+<div class="note"><strong>Safety:</strong> use this only on a network you trust. Never open the server port to the internet. A wired connection works best. Use the High or Studio profile for this.</div>
+<p>By default the server only listens on the same computer (<code>127.0.0.1:55056</code>).</p>
+
+<h2 id="protools">14. Pro Tools control surfaces</h2>
+<p>OpenGridder includes page tables for supported Avid and Digidesign surfaces.</p>
+<table>
+<tr><th>Surface</th><th>Mapping</th></tr>
+<tr><td>Control|24 and C|24</td><td>Strips 1&ndash;7: Master Bypass, Remote Plugin, Latency Profile, Input Gain, Wet/Dry Mix, Drive, Output Trim</td></tr>
+<tr><td>D-Control and D-Command</td><td>Eight-encoder channel strip</td></tr>
+<tr><td>ProControl</td><td>Sixteen faders</td></tr>
+<tr><td>HUI, Command|8, Digi 002 and 003</td><td>Eight encoders</td></tr>
+</table>
+
+<h2 id="trouble">15. Troubleshooting</h2>
+<table>
+<tr><th>Problem</th><th>What to try</th></tr>
+<tr><td>The light is red</td><td>Start OpenGridder Server. If the server is on another computer, check the address in <code>client.json</code> and your network.</td></tr>
+<tr><td>Crackles or dropouts</td><td>Choose a higher latency profile. Raise your DAW's buffer size. Turn oversampling down or off on heavy plugins. Close other heavy apps.</td></tr>
+<tr><td>High frequencies sound dull</td><td>Check each slot's oversampling. At 1x there is no filtering. If it still sounds dull, check the plugin itself with a bypass test.</td></tr>
+<tr><td>A bounce is not processed</td><td>Make sure the server is running before the bounce starts. Check that the slot isn't bypassed.</td></tr>
+<tr><td>A plugin is missing from the list</td><td>Open the Plugin Manager and press Rescan All. Make sure the plugin is installed for all users.</td></tr>
+<tr><td>A plugin's window doesn't show in front</td><td>Allow Accessibility access for OpenGridder Server in System Settings &rarr; Privacy &amp; Security.</td></tr>
+<tr><td>The server is disconnected after loading a plugin</td><td>Update to the latest build and restart the server. If it repeats with one plugin, tell us the plugin name and which profile you used.</td></tr>
+<tr><td>Delay between tracks</td><td>Some hosts only re-check plugin delay on playback. Stop and start playback, or reload the session.</td></tr>
+</table>
+<p>The server log is available from the menu bar icon. Include it when you report a problem.</p>
+
+<h2 id="notices">16. Notices</h2>
+<p>OpenGridder 1.0 BETA is proprietary software. See the LICENSE file. Pro Tools, AAX, Control|24 and C|24 are trademarks of Avid Technology, Inc. VST is a trademark of Steinberg Media Technologies GmbH. Audio Units is a trademark of Apple Inc. All other names belong to their owners.</p>
+
+</main>
+</body>
+</html>

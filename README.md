@@ -13,7 +13,7 @@ OpenGridder is **closed-source, proprietary software** (see `LICENSE`). Third-pa
 - **2x-Wide Analog VU Metering**: Dynamic window resizing (`864×420` in Analog VU mode vs `720×420` in Digital PPM mode) using pure native Cocoa (`OpenGridderEditorView`).
 - **Dual VU Calibration & I/O Source**: Switchable `-18 dBFS` and `-3 dBFS` reference calibrations, plus `[IN* | OUT]` source metering with over-detection ceiling.
 - **HybridEQ Residual ADAA & Harmonic Saturation**: Zero high-frequency loss ADAA with 2x/4x Kaiser-windowed polyphase oversampling filters, Clean/Tube/Transformer character modes, and zipper-free parameter smoothing.
-- **6 Verified Plugin Formats**: VST3, AUv2 (`aufx`), AUv3, AAX Native (PACE Eden signed), CLAP, VST 2.4, and LV2.
+- **6 Verified Plugin Formats**: VST3, AUv2 (`aufx`), AUv3, AAX Native, CLAP, VST 2.4, and LV2.
 - **Native macOS Server Application**: Menu bar status icon, dock integration, high-speed timestamp scan caching (`< 500 ms` for 1,700+ plugins), and floating startup splash window.
 - **Apple Notarized & Signed**: Signed with Apple Developer ID (Hardened Runtime), notarized via Apple notarytool, and stapled for both `.pkg` and `.dmg`.
 
