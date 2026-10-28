@@ -8,7 +8,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   pt10-aax:
-    if: github.repository == 'MistaMin/OpenGridder-Rust' && github.ref == 'refs/heads/main'
+    if: github.repository == 'MistaMin/OpenGridder-Plugins' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, macOS, ARM64, opengridder-aax-release]
     timeout-minutes: 30
     env:
