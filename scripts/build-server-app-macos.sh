@@ -15,9 +15,9 @@ og_arm_tools="${OG_ARM_TOOLCHAIN:-$HOME/.rustup/toolchains/1.98.0-aarch64-apple-
 og_intel_tools="${OG_INTEL_TOOLCHAIN:-$HOME/.rustup/toolchains/1.98.0-x86_64-apple-darwin}"
 export CARGO_PROFILE_RELEASE_STRIP=none
 RUSTC="$og_arm_tools/bin/rustc" "$og_arm_tools/bin/cargo" build \
-    --manifest-path "$og_root/Cargo.toml" --release --locked -p og-server --target-dir "$og_root/target"
+    --manifest-path "$og_root/server/Cargo.toml" --release --locked -p og-server --target-dir "$og_root/target"
 RUSTC="$og_intel_tools/bin/rustc" /usr/bin/arch -x86_64 "$og_intel_tools/bin/cargo" build \
-    --manifest-path "$og_root/Cargo.toml" --release --locked -p og-server --target x86_64-apple-darwin \
+    --manifest-path "$og_root/server/Cargo.toml" --release --locked -p og-server --target x86_64-apple-darwin \
     --target-dir "$og_root/target/rosetta-intel"
 mkdir -p "$og_root/target/server-universal"
 lipo -create "$og_root/target/release/OpenGridderServer" \
@@ -60,7 +60,7 @@ cp "$og_root/server/native/server_app/Info.plist.in" "$og_app_dest/Contents/Info
 printf 'APPL????' > "$og_app_dest/Contents/PkgInfo"
 
 if [ -f "$og_root/server/Resources/OpenGridderServer.icns" ]; then
-    cp "$og_root/server/Resources/OpenGridderServer.icns" "$og_app_dest/Contents/server/Resources/OpenGridderServer.icns"
+    cp "$og_root/server/Resources/OpenGridderServer.icns" "$og_app_dest/Contents/Resources/OpenGridderServer.icns"
 fi
 
 # Embed AUv3 App Extension if built

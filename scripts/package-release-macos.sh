@@ -20,7 +20,7 @@ og_au="$og_root/target/au-universal/OpenGridder.component"
 og_vst3="$og_root/target/vst3-universal/OpenGridder.vst3"
 og_vst2="$og_root/target/vst2-universal/OpenGridder.vst"
 og_server_app="$og_root/target/server-app/OpenGridder Server.app"
-og_win7_dir="$og_root/target/server-windows7"
+og_win7_dir="$og_root/server/target/server-windows7"
 
 echo "=== [1/7] Pre-Flight Verification ==="
 test -d "$og_aax" || { echo "ERROR: Missing AAX plugin: $og_aax" >&2; exit 1; }
@@ -81,7 +81,7 @@ codesign --force --timestamp --options runtime --sign "$og_application" "$og_vst
 codesign --verify --deep --strict "$og_vst2_mod"
 
 # Sign AAX with PACE Eden & Apple Developer ID
-"$og_wraptool" verify --in "$og_aax" > "$og_dist/pace-verification.txt"
+"$og_wraptool" verify --in "$og_aax" > "$og_root/target/pace-verification.txt"
 codesign --verify --deep --strict "$og_aax"
 
 ditto "$og_aax" "$og_stage/aax/Library/Application Support/Avid/Audio/Plug-Ins/OpenGridder.aaxplugin"
