@@ -2,6 +2,12 @@
 
 What is planned beyond 1.0 BETA. Order is not a promise; items marked "blocked" say what is missing.
 
+## Legacy server for old Macs (done, 0.1.0-beta.1)
+
+`server/legacy-server`: OS X 10.6.8 and later, i386 + x86_64, same protocol as the modern server. Audio Unit
+effects, parameters and streamed editors work. Not yet: VST/VST3 hosting, plugin state save/restore,
+per-client process isolation, a menu bar app, running on a real 10.6.8 or 32-bit Mac (untested there).
+
 ## Older Mac hardware: PowerPC (RTAS/TDM)
 
 Client only (the server never runs on PowerPC). The editor-streaming view and picture decoder are

@@ -10,4 +10,6 @@ echo "== legacy bridge tests";        cargo test --lib --manifest-path native/le
 echo "== SDK-free server build";       (cd server && cargo build --release --locked -p og-server --bins)
 echo "== legacy client: i386 archive, unit tests, real server"
 OG_LEGACY_RUN_TESTS=1 OPENGRIDDER_TEST_SERVER="$PWD/server/target/release/OpenGridderServer" bash scripts/build-legacy-client-macos.sh
+echo "== legacy server (builds natively, checks audio, parameters and the streamed editor)"
+(cd server && bash legacy-server/scripts/test-legacy-server.sh)
 echo "ALL LOCAL CI CHECKS PASSED"
