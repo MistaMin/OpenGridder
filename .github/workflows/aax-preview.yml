@@ -37,10 +37,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          submodules: recursive
-          token: ${{ secrets.SUBMODULE_TOKEN }}
           persist-credentials: false
           clean: true
+      - name: Fetch the server submodule (read-only deploy key)
+        env:
+          SUBMODULE_DEPLOY_KEY: ${{ secrets.SUBMODULE_DEPLOY_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SUBMODULE_DEPLOY_KEY" > "$HOME/.ssh/og_server_key"
+          chmod 600 "$HOME/.ssh/og_server_key"
+          ssh-keyscan -t ed25519 github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          git submodule init
+          git config submodule.server.url git@github.com:MistaMin/OpenGridder-Server.git
+          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/og_server_key -o IdentitiesOnly=yes" git submodule update --recursive
+          rm -f "$HOME/.ssh/og_server_key"
       - name: Configure pinned tools
         run: |
           echo "$HOME/.rustup/toolchains/1.98.0-aarch64-apple-darwin/bin" >> "$GITHUB_PATH"

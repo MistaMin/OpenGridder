@@ -37,7 +37,7 @@ a { color:var(--accent); }
 <main>
 
 <h1>OpenGridder</h1>
-<p class="sub">User Manual &middot; Version 1.0 BETA</p>
+<p class="sub">User Manual &middot; Version 1.0 BETA 2</p>
 
 <p>OpenGridder lets your DAW use audio plugins that run on a different process, or on a different computer. You insert one OpenGridder plugin on a track. It sends the audio to the OpenGridder Server, which runs your effects and sends the processed audio back. Heavy plugins stop eating your DAW's CPU, and plugins that your DAW can't load directly can still be used.</p>
 
@@ -84,11 +84,11 @@ a { color:var(--accent); }
 <h2 id="install">2. Installing</h2>
 <ol>
 <li>Quit your DAW.</li>
-<li>Open <code>OpenGridder-1.0.0-beta.1-macos.pkg</code> and follow the installer.</li>
+<li>Open <code>OpenGridder-1.0.0-beta.2-macos.pkg</code> and follow the installer.</li>
 <li>Start the server (next section), then open your DAW.</li>
 </ol>
 <p>The installer puts the plugins in the standard folders for each format and the server in your Applications folder. The installer and the disk image are notarized by Apple, so macOS opens them without warnings.</p>
-<p><strong>Windows:</strong> unzip <code>OpenGridder-1.0.0-beta.1-windows7-x86_64.zip</code> anywhere and keep the two included <code>.dll</code> files next to <code>OpenGridderServer.exe</code>.</p>
+<p><strong>Windows:</strong> unzip <code>OpenGridder-1.0.0-beta.2-windows7-x86_64.zip</code> anywhere and keep the two included <code>.dll</code> files next to <code>OpenGridderServer.exe</code>.</p>
 
 <h2 id="server">3. Starting the server</h2>
 <ol>
@@ -151,11 +151,11 @@ a { color:var(--accent); }
 <p>Double-click a slot to open that plugin's editor. You see and use the plugin's real window, whether the server is on the same Mac or on another computer.</p>
 <ul>
 <li><strong>Server on the same Mac:</strong> the plugin's real window opens in front of your DAW. Close it with its close button.</li>
-<li><strong>Server on another computer:</strong> the server opens the plugin's real window out of sight and sends you a live picture of it, about 10 to 30 pictures a second depending on the plugin. Your mouse clicks, drags, scrolling and key presses are sent back and applied to the plugin. Nothing appears on the server computer's screen, and its own mouse and keyboard are never touched.</li>
+<li><strong>Server on another computer:</strong> the server opens the plugin's real window out of sight and sends you a live picture of it, up to 60 pictures a second depending on the plugin. Your mouse clicks, drags, scrolling and key presses are sent back and applied to the plugin. Nothing appears on the server computer's screen, and its own mouse and keyboard are never touched.</li>
 </ul>
 <p>Plugins that have no window of their own show a panel of their parameters instead. This works with Audio Unit and VST3 plugins on a macOS server.</p>
 <p>Plugins that use copy protection, such as those that need an iLok, load as normal.</p>
-<div class="note"><strong>Good to know:</strong> editors that are heavy to draw update more slowly than simple ones, and a wired network gives the smoothest picture. The picture is sent at normal size, so on a high-resolution display it looks a little softer than the plugin does locally.</div>
+<div class="note"><strong>Good to know:</strong> editors that are heavy to draw update more slowly than simple ones, and a wired network gives the smoothest picture. While you work the picture is sent at normal size to keep up; when the plugin stops moving it is sent again at double resolution, so on a high-resolution display it becomes sharp. A gigabit wired network is plenty. Scrolling over a knob with the mouse wheel works as it does locally.</div>
 
 <h2 id="latency">8. Latency profiles</h2>
 <p>Sending audio out and back takes time, and the server needs some spare time when a plugin is busy. A latency profile sets how much safety buffer you want. More buffer means fewer dropouts and more delay.</p>

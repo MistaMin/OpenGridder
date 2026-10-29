@@ -6,7 +6,7 @@ set -euo pipefail
 og_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$og_root"
 
-og_version="1.0.0-beta.1"
+og_version="1.0.0-beta.2"
 og_stage="$og_root/target/pkg-stage/$og_version"
 og_dist="$og_root/dist/$og_version"
 

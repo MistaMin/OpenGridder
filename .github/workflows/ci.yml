@@ -29,9 +29,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          submodules: recursive
-          token: ${{ secrets.SUBMODULE_TOKEN }}
           persist-credentials: false
+      - name: Fetch the server submodule (read-only deploy key)
+        env:
+          SUBMODULE_DEPLOY_KEY: ${{ secrets.SUBMODULE_DEPLOY_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SUBMODULE_DEPLOY_KEY" > "$HOME/.ssh/og_server_key"
+          chmod 600 "$HOME/.ssh/og_server_key"
+          ssh-keyscan -t ed25519 github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          git submodule init
+          git config submodule.server.url git@github.com:MistaMin/OpenGridder-Server.git
+          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/og_server_key -o IdentitiesOnly=yes" git submodule update --recursive
+          rm -f "$HOME/.ssh/og_server_key"
       - name: Install pinned Rust
         run: |
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --no-self-update
@@ -75,9 +85,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          submodules: recursive
-          token: ${{ secrets.SUBMODULE_TOKEN }}
           persist-credentials: false
+      - name: Fetch the server submodule (read-only deploy key)
+        env:
+          SUBMODULE_DEPLOY_KEY: ${{ secrets.SUBMODULE_DEPLOY_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SUBMODULE_DEPLOY_KEY" > "$HOME/.ssh/og_server_key"
+          chmod 600 "$HOME/.ssh/og_server_key"
+          ssh-keyscan -t ed25519 github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          git submodule init
+          git config submodule.server.url git@github.com:MistaMin/OpenGridder-Server.git
+          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/og_server_key -o IdentitiesOnly=yes" git submodule update --recursive
+          rm -f "$HOME/.ssh/og_server_key"
       - name: Install last-generation 32-bit Apple Rust target
         run: |
           rustup toolchain install 1.41.1-x86_64-apple-darwin --profile minimal --force-non-host --target i686-apple-darwin --no-self-update

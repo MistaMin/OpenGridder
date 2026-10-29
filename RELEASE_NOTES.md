@@ -1,3 +1,15 @@
+# OpenGridder 1.0 BETA 2 Release
+
+### New in 1.0 BETA 2 (1.0.0-beta.2):
+- **Remote plugin editors from another computer**: when the server runs on another computer, the plugin's real editor is streamed to your DAW and answers mouse clicks, drags, the mouse wheel and the keyboard.
+- **Faster stream (up to 60 pictures a second)**: only the part of the picture that changed is sent, as PNG, or as JPEG while a large area moves and then once more losslessly when it settles. Gigabit networks are plenty.
+- **Sharp on high-resolution displays**: when the editor is still it is sent again at double resolution.
+- **Mouse wheel works in every editor**, including Soundtoys plugins that ignored it before.
+- **RTAS and TDM (legacy Pro Tools, OS X 10.6.8 and later, i386)**: the plugin windows now show the remote plugin's real editor and send input back (legacy beta 0.2.0-beta.3). RTAS and TDM bounce in real time only; Pro Tools offers no offline bounce for them.
+- Roadmap added (PowerPC, Windows XP/Vista, Windows 7 and later): see ROADMAP.md.
+
+Known: the server catalog can list VST3 plugins whose factory could not be read (about 200 on a large library); they show up but cannot load.
+
 # OpenGridder 1.0 BETA Release
 
 ### New in 1.0 BETA:
