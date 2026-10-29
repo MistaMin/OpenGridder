@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include "opengridder.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -9,6 +10,8 @@ typedef struct TdmClient TdmClient;
 TdmClient* og_tdm_create(double rate, uint32_t epoch, uint32_t selection, bool bypass);
 TdmClient* og_tdm_create_profile(double rate, uint32_t epoch, uint32_t selection, bool bypass, uint32_t profile);
 void og_tdm_destroy(TdmClient*);
+/* The network client inside (for the editor view); valid until og_tdm_destroy. */
+NativePlugin* og_tdm_native(TdmClient*);
 uint32_t og_tdm_next_capture(TdmClient*);
 int32_t og_tdm_status(TdmClient*);
 /* Returns bitmask: bit 0 = input clipped (TDM full-scale hit), bit 1 = output clipped (VST exceeded 0 dBFS and clamped).
