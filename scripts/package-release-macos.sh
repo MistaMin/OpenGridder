@@ -246,9 +246,17 @@ productbuild --distribution "$og_stage/distribution.xml" --package-path "$og_sta
 /usr/sbin/pkgutil --check-signature "$FINAL_PKG"
 
 echo "=== [6/7] Notarizing Package and Building Notarized DMG ==="
-xcrun notarytool submit "$FINAL_PKG" --keychain-profile "$og_notary_profile" --wait
-xcrun stapler staple "$FINAL_PKG"
-spctl --assess --type install -v "$FINAL_PKG"
+# OG_SKIP_NOTARIZE=1 builds signed but not notarized installers (when the notary credentials are
+# not available); notarize them afterwards with the same notarytool/stapler commands.
+if [ "${OG_SKIP_NOTARIZE:-0}" = 1 ]; then
+    echo "Skipping notarization (OG_SKIP_NOTARIZE=1): the installers are signed but NOT notarized"
+    export NOTARIZE=0
+    printf 'These installers are signed with a Developer ID but were NOT notarized.\nNotarize and staple them before giving them to anyone.\n' > "$og_dist/NOT-NOTARIZED.txt"
+else
+    xcrun notarytool submit "$FINAL_PKG" --keychain-profile "$og_notary_profile" --wait
+    xcrun stapler staple "$FINAL_PKG"
+    spctl --assess --type install -v "$FINAL_PKG"
+fi
 
 ditto "$FINAL_PKG" "$og_stage/dmg/OpenGridder-$og_version-macos.pkg"
 

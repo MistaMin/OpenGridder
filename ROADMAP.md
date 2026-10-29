@@ -36,3 +36,8 @@ windows and the remote editor stream are macOS-only so far. Plugins for DAWs on 
 - Editor capture on the server costs about 30 ms per frame for very image-heavy editors (some Soundtoys
   plugins), which caps the stream near 30 pictures a second there. Capturing only the invalidated
   rectangles would lift that; planned.
+- The server catalog lists about 200 VST3 plugins (on a large library) whose factory could not be read, with a
+  bundle identifier instead of a class ID (including our own Blue Channel, HybridEQ, Tube Channel, OpenPreamp).
+  They cannot load as VST3 ("Invalid VST3 class ID"). Fix: read the class ID from each bundle's
+  `moduleinfo.json`/factory, and mark unreadable plugins unloadable instead of listing them. The plugin QA skill
+  now checks this.
