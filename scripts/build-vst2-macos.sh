@@ -49,7 +49,7 @@ cmake --build "$og_root/target/vst2-arm64" -j "${OG_BUILD_JOBS:-4}"
 # x86_64 slice (Cubase 64-bit on OS X 10.8+)
 cmake -S "$og_root/native/vst2" -B "$og_root/target/vst2-x86_64" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-    -DCMAKE_OSX_DEPLOYMENT_TARGET=10.12 -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="${OG_INTEL_MIN:-10.12}" -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
     '-DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/arch;-x86_64' \
     -DOPENGRIDDER_RUST_LIBRARY="$og_root/target/rosetta-intel/x86_64-apple-darwin/release/libog_plugin.a"
 cmake --build "$og_root/target/vst2-x86_64" -j "${OG_BUILD_JOBS:-4}"

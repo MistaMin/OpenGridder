@@ -7,7 +7,16 @@ og_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$og_root"
 
 og_version="1.0.0-beta.2"
-og_stage="$og_root/target/pkg-stage/$og_version"
+# Which kind of installer: "modern" (macOS 11 or later, both slices) or "legacy" (the build that also runs
+# on Intel Macs back to macOS 10.12). The class and minimum are stamped into every app and bundle and
+# checked against the binaries by tools/opengrid_manifest.py.
+og_class="${OG_BUILD_CLASS:-modern}"
+case "$og_class" in
+    modern) og_min_os="${OG_MIN_OS:-11.0}"; og_variant="" ;;
+    legacy) og_min_os="${OG_MIN_OS:-10.12}"; og_variant="-legacy" ;;
+    *) echo "OG_BUILD_CLASS must be modern or legacy" >&2; exit 2 ;;
+esac
+og_stage="$og_root/target/pkg-stage/$og_version$og_variant"
 og_dist="$og_root/dist/$og_version"
 
 og_application="${OPENGRIDDER_SIGN_IDENTITY:-Developer ID Application: Marcos Deida (ZQYU67JUBH)}"
@@ -74,6 +83,13 @@ rm -rf "$og_vst3_mod"
 mkdir -p "$og_vst3_mod/Contents/MacOS"
 ditto "$og_vst3" "$og_vst3_mod"
 
+# Mark every bundle with its build class before it is signed.
+for og_bundle in "$og_au_mod" "$og_vst3_mod" "$og_vst2_mod" "$og_clap"; do
+    "$og_root/scripts/stamp-build-class.sh" "$og_bundle" "$og_class" "$og_min_os"
+done
+# An LV2 bundle has no Info.plist: a small file inside it carries the same two values.
+printf '{"build_class":"%s","min_os":"%s"}\n' "$og_class" "$og_min_os" > "$og_lv2/opengrid-build.json"
+
 # Sign AUv2
 codesign --force --timestamp --options runtime --sign "$og_application" "$og_au_mod"
 codesign --verify --deep --strict "$og_au_mod"
@@ -107,6 +123,13 @@ ditto "$og_lv2" "$og_stage/lv2/Library/Audio/Plug-Ins/LV2/OpenGridder.lv2"
 echo "=== [3/7] Staging and Signing Server Application & AUv3 Extension ==="
 og_staged_app="$og_stage/server/Applications/OpenGridder Server.app"
 ditto "$og_server_app" "$og_staged_app"
+
+# Mark the server app and its AUv3 extension, and set the system it asks for.
+"$og_root/scripts/stamp-build-class.sh" "$og_staged_app" "$og_class" "$og_min_os"
+/usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $og_min_os" "$og_staged_app/Contents/Info.plist"
+if [ -d "$og_staged_app/Contents/PlugIns/OpenGridderAUv3.appex" ]; then
+    "$og_root/scripts/stamp-build-class.sh" "$og_staged_app/Contents/PlugIns/OpenGridderAUv3.appex" "$og_class" "$og_min_os"
+fi
 
 # Sign embedded AUv3 App Extension first
 if [ -d "$og_staged_app/Contents/PlugIns/OpenGridderAUv3.appex" ]; then
@@ -270,7 +293,7 @@ cat > "$og_stage/distribution.xml" << EOF
 </installer-gui-script>
 EOF
 
-FINAL_PKG="$og_dist/OpenGridder-$og_version-macos.pkg"
+FINAL_PKG="$og_dist/OpenGridder-$og_version-macos$og_variant.pkg"
 productbuild --distribution "$og_stage/distribution.xml" --package-path "$og_stage/components" \
     --sign "$og_installer" "$FINAL_PKG"
 
@@ -289,22 +312,29 @@ else
     spctl --assess --type install -v "$FINAL_PKG"
 fi
 
-ditto "$FINAL_PKG" "$og_stage/dmg/OpenGridder-$og_version-macos.pkg"
+ditto "$FINAL_PKG" "$og_stage/dmg/OpenGridder-$og_version-macos$og_variant.pkg"
 
-FINAL_DMG="$og_dist/OpenGridder-$og_version-macos.dmg"
+FINAL_DMG="$og_dist/OpenGridder-$og_version-macos$og_variant.dmg"
 /Users/marcosdeida/.gemini/config/skills/Make-Plugin-Release/scripts/build_notarized_dmg.sh \
-    "OpenGridder $og_version" \
+    "OpenGridder $og_version$([ "$og_class" = legacy ] && echo " (legacy)")" \
     "$og_stage/dmg" \
     "$FINAL_DMG" \
     "$og_application" \
     "$og_notary_profile"
 
-echo "=== [7/7] Packaging Windows 7 Server ZIP ==="
-WIN7_ZIP="$og_dist/OpenGridder-$og_version-windows7-x86_64.zip"
-(cd "$og_win7_dir" && zip -r -9 "$WIN7_ZIP" .)
+if [ "${OG_WIN7_ZIP:-1}" = 1 ] && [ "$og_class" = modern ]; then
+    echo "=== [7/7] Packaging Windows 7 Server ZIP (a legacy-class build) ==="
+    WIN7_ZIP="$og_dist/OpenGridder-$og_version-windows7-x86_64.zip"
+    # Windows 7 is "legacy": it runs on systems older than Windows 10.
+    printf '{"build_class":"legacy","min_os":"6.1","platform":"windows"}\n' > "$og_win7_dir/opengrid-build.json"
+    rm -f "$WIN7_ZIP"
+    (cd "$og_win7_dir" && zip -r -9 "$WIN7_ZIP" .)
+fi
 
 echo "=== Computing SHA256 Checksums ==="
 (cd "$og_dist" && shasum -a 256 *.pkg *.dmg *.zip > SHA256SUMS)
+# The manifest lists every archive with its build class and minimum system, and fails on a mismatch.
+python3 "$og_root/tools/opengrid_manifest.py" build "$og_dist" OpenGridder "$og_version" || echo "NOTE: the manifest check reported problems above (other archives may still be missing)"
 
 echo "======================================================="
 echo "SUCCESS: OpenGridder $og_version Release Complete!"

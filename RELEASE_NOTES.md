@@ -6,6 +6,8 @@
 - **Sharp on high-resolution displays**: when the editor is still it is sent again at double resolution.
 - **Mouse wheel works in every editor**, including Soundtoys plugins that ignored it before.
 - **RTAS and TDM (legacy Pro Tools, OS X 10.6.8 and later, i386)**: the plugin windows now show the remote plugin's real editor and send input back (legacy beta 0.2.0-beta.3). RTAS and TDM bounce in real time only; Pro Tools offers no offline bounce for them.
+- **Modern and legacy builds**: every download now says which it is. Modern needs macOS 11 or later; legacy runs on older systems (Intel Macs back to macOS 10.12 in the legacy installer, OS X 10.6.8 for the legacy server and the RTAS/TDM plugins, Windows 7 for the Windows server). The class and the lowest system are written into every app and plugin (`OGBuildClass`, `OGMinOS`), printed by the servers' `--version`, and listed per file in `opengrid-manifest.json`, which is checked against the real binaries.
+- **Legacy server for old Macs** (OS X 10.6.8 and later): hosts Audio Unit, VST 2 and VST 3 effects, streams their editors, saves plugin settings, runs each client in its own process, and has a menu bar app.
 - Roadmap added (PowerPC, Windows XP/Vista, Windows 7 and later): see ROADMAP.md.
 
 Known: the server catalog can list VST3 plugins whose factory could not be read (about 200 on a large library); they show up but cannot load.

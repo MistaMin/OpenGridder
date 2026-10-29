@@ -90,6 +90,18 @@ a { color:var(--accent); }
 <p>The installer puts the plugins in the standard folders for each format and the server in your Applications folder. The installer and the disk image are notarized by Apple, so macOS opens them without warnings.</p>
 <p><strong>Windows:</strong> unzip <code>OpenGridder-1.0.0-beta.2-windows7-x86_64.zip</code> anywhere and keep the two included <code>.dll</code> files next to <code>OpenGridderServer.exe</code>.</p>
 
+<h3>Modern and legacy downloads</h3>
+<p>Every download is marked <strong>modern</strong> or <strong>legacy</strong>, in its release notes, in the file list that comes with the release (<code>opengrid-manifest.json</code>) and inside the programs themselves. Modern builds need macOS 11 or later (or Windows 10 or later). Legacy builds run on older systems. Pick the one that matches the computer you are installing on:</p>
+<table>
+<tr><th>Download</th><th>Class</th><th>Runs on</th></tr>
+<tr><td><code>OpenGridder-1.0.0-beta.2-macos.pkg</code> (or <code>.dmg</code>)</td><td>modern</td><td>macOS 11 or later, Apple silicon and Intel</td></tr>
+<tr><td><code>OpenGridder-1.0.0-beta.2-macos-legacy.pkg</code> (or <code>.dmg</code>)</td><td>legacy</td><td>Intel Macs back to macOS 10.12, and Apple silicon</td></tr>
+<tr><td><code>OpenGridder-LegacyServer-...-macos-10.6.zip</code></td><td>legacy</td><td>the server for old Macs, OS X 10.6.8 and later (menu bar app included)</td></tr>
+<tr><td><code>OpenGridder-Legacy-BETA-...-macos-i386-UNTESTED.zip</code></td><td>legacy</td><td>RTAS and TDM plugins for Pro Tools 9 and 10, OS X 10.6.8 and later</td></tr>
+<tr><td><code>OpenGridder-1.0.0-beta.2-windows7-x86_64.zip</code></td><td>legacy</td><td>the server for Windows 7 SP1 and later</td></tr>
+</table>
+<p>There is no modern Windows build and no Linux build yet. The legacy server speaks the same protocol as the modern one, so a plugin can use either.</p>
+
 <h2 id="server">3. Starting the server</h2>
 <ol>
 <li>Open <strong>OpenGridder Server</strong> from your Applications folder.</li>

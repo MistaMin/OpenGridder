@@ -13,6 +13,8 @@ og_stage="$(mktemp -d "$og_root/target/pace-stage.XXXXXX")"
 trap 'rm -rf "$og_stage"' EXIT
 mkdir -p "$og_stage/input" "$og_stage/output"
 ditto "$og_input" "$og_stage/input/OpenGridder.aaxplugin"
+# Mark the build as modern or legacy before any signature is made.
+"$og_root/scripts/stamp-build-class.sh" "$og_stage/input/OpenGridder.aaxplugin" "${OG_BUILD_CLASS:-modern}" "${OG_MIN_OS:-11.0}"
 codesign --force --deep --timestamp --options runtime --sign "$og_identity" "$og_stage/input/OpenGridder.aaxplugin"
 "$og_wraptool" sign --verbose --account "$og_account" --wcguid "$og_guid" \
     --signid "$og_identity" --in "$og_stage/input/OpenGridder.aaxplugin" \

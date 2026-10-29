@@ -26,7 +26,7 @@ mkdir -p "$og_root/target/lv2-arm64" "$og_root/target/lv2-x86_64"
   -o "$og_root/target/lv2-arm64/OpenGridder.dylib"
 
 /usr/bin/arch -x86_64 /usr/bin/clang++ -std=c++17 -O2 -fPIC -dynamiclib \
-  -arch x86_64 -mmacosx-version-min=10.13 \
+  -arch x86_64 -mmacosx-version-min="${OG_INTEL_MIN:-10.13}" \
   -I"$og_root/native/include" \
   "$og_root/native/lv2/OpenGridderLV2.cpp" \
   "$og_root/target/rosetta-intel/x86_64-apple-darwin/release/libog_plugin.a" \

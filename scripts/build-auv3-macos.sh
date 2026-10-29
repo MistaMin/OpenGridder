@@ -29,7 +29,7 @@ cmake --build "$og_root/target/auv3-arm64" -j "${OG_BUILD_JOBS:-4}"
 # x86_64 slice
 cmake -S "$og_root/native/auv3" -B "$og_root/target/auv3-x86_64" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-    -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="${OG_INTEL_MIN:-10.15}" \
     -DOPENGRIDDER_RUST_LIBRARY="$og_root/target/rosetta-intel/x86_64-apple-darwin/release/libog_plugin.a"
 cmake --build "$og_root/target/auv3-x86_64" -j "${OG_BUILD_JOBS:-4}"
 

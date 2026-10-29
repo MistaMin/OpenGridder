@@ -26,7 +26,7 @@ mkdir -p "$og_root/target/clap-arm64" "$og_root/target/clap-x86_64"
   -o "$og_root/target/clap-arm64/OpenGridder"
 
 /usr/bin/arch -x86_64 /usr/bin/clang++ -std=c++17 -O2 -fPIC -fobjc-arc -bundle \
-  -arch x86_64 -mmacosx-version-min=10.13 \
+  -arch x86_64 -mmacosx-version-min="${OG_INTEL_MIN:-10.13}" \
   -I"$og_root/native/include" \
   "$og_root/native/clap/OpenGridderCLAP.mm" \
   "$og_root/target/rosetta-intel/x86_64-apple-darwin/release/libog_plugin.a" \

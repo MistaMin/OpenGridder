@@ -12,4 +12,7 @@ echo "== legacy client: i386 archive, unit tests, real server"
 OG_LEGACY_RUN_TESTS=1 OPENGRIDDER_TEST_SERVER="$PWD/server/target/release/OpenGridderServer" bash scripts/build-legacy-client-macos.sh
 echo "== legacy server (builds natively, checks audio, parameters and the streamed editor)"
 (cd server && bash legacy-server/scripts/test-legacy-server.sh)
+echo "== build class flag (tools/opengrid_manifest.py)"
+python3 tools/test_opengrid_manifest.py
+for release in dist/*/opengrid-manifest.json; do [ -f "$release" ] && python3 tools/opengrid_manifest.py verify "$(dirname "$release")"; done
 echo "ALL LOCAL CI CHECKS PASSED"

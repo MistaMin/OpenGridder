@@ -14,9 +14,11 @@ echo "=== 1. Building Server Universal Rust Binary (VST3 SDK: $OPENGRIDDER_VST3_
 og_arm_tools="${OG_ARM_TOOLCHAIN:-$HOME/.rustup/toolchains/1.98.0-aarch64-apple-darwin}"
 og_intel_tools="${OG_INTEL_TOOLCHAIN:-$HOME/.rustup/toolchains/1.98.0-x86_64-apple-darwin}"
 export CARGO_PROFILE_RELEASE_STRIP=none
-RUSTC="$og_arm_tools/bin/rustc" "$og_arm_tools/bin/cargo" build \
+OG_BUILD_CLASS="${OG_BUILD_CLASS:-modern}" RUSTC="$og_arm_tools/bin/rustc" "$og_arm_tools/bin/cargo" build \
     --manifest-path "$og_root/server/Cargo.toml" --release --locked -p og-server --target-dir "$og_root/target"
-RUSTC="$og_intel_tools/bin/rustc" /usr/bin/arch -x86_64 "$og_intel_tools/bin/cargo" build \
+# The deployment target is read when linking: make sure the program is linked again.
+rm -f "$og_root/target/rosetta-intel/x86_64-apple-darwin/release/OpenGridderServer"
+MACOSX_DEPLOYMENT_TARGET="${OG_INTEL_MIN:-10.12}" OG_BUILD_CLASS="${OG_BUILD_CLASS:-modern}" RUSTC="$og_intel_tools/bin/rustc" /usr/bin/arch -x86_64 "$og_intel_tools/bin/cargo" build \
     --manifest-path "$og_root/server/Cargo.toml" --release --locked -p og-server --target x86_64-apple-darwin \
     --target-dir "$og_root/target/rosetta-intel"
 mkdir -p "$og_root/target/server-universal"
@@ -33,7 +35,7 @@ mkdir -p "$og_root/target/server-app-build"
     -o "$og_root/target/server-app-build/launcher-arm64" \
     "$og_root/server/native/server_app/main.m"
 
-/usr/bin/clang -O3 -fobjc-arc -arch x86_64 -mmacosx-version-min=10.15 \
+/usr/bin/clang -O3 -fobjc-arc -arch x86_64 -mmacosx-version-min="${OG_INTEL_MIN:-10.15}" \
     -framework Cocoa \
     -o "$og_root/target/server-app-build/launcher-x86_64" \
     "$og_root/server/native/server_app/main.m"
