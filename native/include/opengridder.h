@@ -34,6 +34,11 @@ bool og_native_hide_plugin(NativePlugin*);
 // --- Screen Streaming & Input Forwarding API ---
 bool og_native_get_screen_info(NativePlugin*, uint32_t* width, uint32_t* height, double* scale, uint64_t* frame_id);
 bool og_native_copy_screen_frame(NativePlugin*, uint8_t* dest, uint32_t dest_cap, uint64_t* frame_id);
+// Legacy (RTAS/TDM) client only: takes the oldest waiting editor update as the server sent it (20-byte
+// picture header, PNG or JPEG, and for a partial update an "OGRC" trailer with x,y,w,h as little-endian
+// uint32). Returns 1 with *out_len set when copied, 0 when nothing waits, -1 with the needed *out_len
+// when dest_cap is too small. The caller decodes with the system image code.
+int32_t og_native_pop_screen_message(NativePlugin*, uint8_t* dest, uint32_t dest_cap, uint32_t* out_len);
 void og_native_send_mouse(NativePlugin*, uint8_t ev_type, float x, float y, bool shift, bool ctrl, bool alt, float delta_x, float delta_y, bool is_smooth);
 void og_native_send_key(NativePlugin*, const uint16_t* keys, uint32_t count);
 bool og_native_is_editor_open(NativePlugin*);
