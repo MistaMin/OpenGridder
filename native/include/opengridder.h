@@ -44,6 +44,7 @@ void og_native_send_key(NativePlugin*, const uint16_t* keys, uint32_t count);
 bool og_native_is_editor_open(NativePlugin*);
 bool og_native_is_server_local_mode(NativePlugin*);
 // Host renders faster than real time (bounce): wait for the server instead of falling back to dry audio.
+// Not used by the RTAS/TDM wrappers: Pro Tools bounces those in real time and offers no offline hook.
 void og_native_set_offline(NativePlugin*, bool offline);
 
 // --- Local Console DSP Parameters & Real-Time Peak Meters (Phase 1) ---

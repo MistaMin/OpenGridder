@@ -29,3 +29,10 @@ windows and the remote editor stream are macOS-only so far. Plugins for DAWs on 
 
 - Work: run and test the server on Windows 7 and 10/11; load VST3 plugins on Windows; capture and stream
   their editors; build the VST3/CLAP/AAX plugins for Windows.
+
+## Known limits that stay
+
+- RTAS and TDM bounce in real time only; Pro Tools gives those formats no offline-render hook.
+- Editor capture on the server costs about 30 ms per frame for very image-heavy editors (some Soundtoys
+  plugins), which caps the stream near 30 pictures a second there. Capturing only the invalidated
+  rectangles would lift that; planned.
