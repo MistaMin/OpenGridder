@@ -19,6 +19,8 @@ og_aax="$og_root/target/aax-pace-signed/OpenGridder.aaxplugin"
 og_au="$og_root/target/au-universal/OpenGridder.component"
 og_vst3="$og_root/target/vst3-universal/OpenGridder.vst3"
 og_vst2="$og_root/target/vst2-universal/OpenGridder.vst"
+og_clap="$og_root/target/clap-universal/OpenGridder.clap"
+og_lv2="$og_root/target/lv2-universal/OpenGridder.lv2"
 og_server_app="$og_root/target/server-app/OpenGridder Server.app"
 og_win7_dir="$og_root/server/target/server-windows7"
 
@@ -27,6 +29,8 @@ test -d "$og_aax" || { echo "ERROR: Missing AAX plugin: $og_aax" >&2; exit 1; }
 test -d "$og_au" || { echo "ERROR: Missing AU component: $og_au" >&2; exit 1; }
 test -d "$og_vst3" || { echo "ERROR: Missing VST3 plugin: $og_vst3" >&2; exit 1; }
 test -d "$og_vst2" || { echo "ERROR: Missing VST2 plugin: $og_vst2" >&2; exit 1; }
+test -d "$og_clap" || { echo "ERROR: Missing CLAP plugin: $og_clap" >&2; exit 1; }
+test -d "$og_lv2" || { echo "ERROR: Missing LV2 plugin: $og_lv2" >&2; exit 1; }
 test -d "$og_server_app" || { echo "ERROR: Missing Server App: $og_server_app" >&2; exit 1; }
 test -d "$og_win7_dir" || { echo "ERROR: Missing Windows 7 server dir: $og_win7_dir" >&2; exit 1; }
 
@@ -35,6 +39,8 @@ mkdir -p "$og_stage/aax/Library/Application Support/Avid/Audio/Plug-Ins" \
          "$og_stage/au/Library/Audio/Plug-Ins/Components" \
          "$og_stage/vst3/Library/Audio/Plug-Ins/VST3" \
          "$og_stage/vst2/Library/Audio/Plug-Ins/VST" \
+         "$og_stage/clap/Library/Audio/Plug-Ins/CLAP" \
+         "$og_stage/lv2/Library/Audio/Plug-Ins/LV2" \
          "$og_stage/server/Applications" \
          "$og_stage/docs/Library/Application Support/OpenGridder" \
          "$og_stage/components" \
@@ -80,6 +86,13 @@ codesign --verify --deep --strict "$og_vst3_mod"
 codesign --force --timestamp --options runtime --sign "$og_application" "$og_vst2_mod"
 codesign --verify --deep --strict "$og_vst2_mod"
 
+# Sign CLAP and LV2 (universal)
+codesign --force --timestamp --options runtime --sign "$og_application" "$og_clap"
+codesign --verify --deep --strict "$og_clap"
+# An LV2 bundle is a plain folder (no Info.plist), so its library is what gets signed.
+codesign --force --timestamp --options runtime --sign "$og_application" "$og_lv2/OpenGridder.dylib"
+codesign --verify --strict "$og_lv2/OpenGridder.dylib"
+
 # Sign AAX with PACE Eden & Apple Developer ID
 "$og_wraptool" verify --in "$og_aax" > "$og_root/target/pace-verification.txt"
 codesign --verify --deep --strict "$og_aax"
@@ -88,6 +101,8 @@ ditto "$og_aax" "$og_stage/aax/Library/Application Support/Avid/Audio/Plug-Ins/O
 ditto "$og_au_mod" "$og_stage/au/Library/Audio/Plug-Ins/Components/OpenGridder.component"
 ditto "$og_vst3_mod" "$og_stage/vst3/Library/Audio/Plug-Ins/VST3/OpenGridder.vst3"
 ditto "$og_vst2_mod" "$og_stage/vst2/Library/Audio/Plug-Ins/VST/OpenGridder.vst"
+ditto "$og_clap" "$og_stage/clap/Library/Audio/Plug-Ins/CLAP/OpenGridder.clap"
+ditto "$og_lv2" "$og_stage/lv2/Library/Audio/Plug-Ins/LV2/OpenGridder.lv2"
 
 echo "=== [3/7] Staging and Signing Server Application & AUv3 Extension ==="
 og_staged_app="$og_stage/server/Applications/OpenGridder Server.app"
@@ -191,6 +206,12 @@ pkgbuild --root "$og_stage/vst3" --component-plist "$(og_nonreloc "$og_stage/vst
 pkgbuild --root "$og_stage/vst2" --component-plist "$(og_nonreloc "$og_stage/vst2")" --identifier studio.opengrid.OpenGridder.vst2 --version "$og_version" \
     --install-location / --ownership recommended "$og_stage/components/VST2.pkg"
 
+pkgbuild --root "$og_stage/clap" --component-plist "$(og_nonreloc "$og_stage/clap")" --identifier studio.opengrid.OpenGridder.clap --version "$og_version" \
+    --install-location / --ownership recommended "$og_stage/components/CLAP.pkg"
+
+pkgbuild --root "$og_stage/lv2" --component-plist "$(og_nonreloc "$og_stage/lv2")" --identifier studio.opengrid.OpenGridder.lv2 --version "$og_version" \
+    --install-location / --ownership recommended "$og_stage/components/LV2.pkg"
+
 pkgbuild --root "$og_stage/server" --component-plist "$(og_nonreloc "$og_stage/server")" --scripts "$og_stage/scripts/server" \
     --identifier studio.opengrid.OpenGridder.server --version "$og_version" \
     --install-location / --ownership recommended "$og_stage/components/Server.pkg"
@@ -209,6 +230,8 @@ cat > "$og_stage/distribution.xml" << EOF
     <line choice="au"/>
     <line choice="vst3"/>
     <line choice="vst2"/>
+    <line choice="clap"/>
+    <line choice="lv2"/>
     <line choice="server"/>
     <line choice="docs"/>
   </choices-outline>
@@ -224,6 +247,12 @@ cat > "$og_stage/distribution.xml" << EOF
   <choice id="vst2" title="VST 2.4 Plugin" description="Universal VST2 plugin for Cubase 4/5/6/7, Nuendo, and vintage Mac DAWs.">
     <pkg-ref id="studio.opengrid.OpenGridder.vst2"/>
   </choice>
+  <choice id="clap" title="CLAP Plugin" description="Universal CLAP plugin for Bitwig Studio, Reaper and other CLAP hosts.">
+    <pkg-ref id="studio.opengrid.OpenGridder.clap"/>
+  </choice>
+  <choice id="lv2" title="LV2 Plugin" description="Universal LV2 plugin for Ardour, Reaper and other LV2 hosts.">
+    <pkg-ref id="studio.opengrid.OpenGridder.lv2"/>
+  </choice>
   <choice id="server" title="OpenGridder Server Application" description="Native macOS Application bundle with menu bar status item, dock integration, and AUv3 extension for Logic Pro / GarageBand.">
     <pkg-ref id="studio.opengrid.OpenGridder.server"/>
   </choice>
@@ -234,6 +263,8 @@ cat > "$og_stage/distribution.xml" << EOF
   <pkg-ref id="studio.opengrid.OpenGridder.au" version="$og_version">AU.pkg</pkg-ref>
   <pkg-ref id="studio.opengrid.OpenGridder.vst3" version="$og_version">VST3.pkg</pkg-ref>
   <pkg-ref id="studio.opengrid.OpenGridder.vst2" version="$og_version">VST2.pkg</pkg-ref>
+  <pkg-ref id="studio.opengrid.OpenGridder.clap" version="$og_version">CLAP.pkg</pkg-ref>
+  <pkg-ref id="studio.opengrid.OpenGridder.lv2" version="$og_version">LV2.pkg</pkg-ref>
   <pkg-ref id="studio.opengrid.OpenGridder.server" version="$og_version">Server.pkg</pkg-ref>
   <pkg-ref id="studio.opengrid.OpenGridder.docs" version="$og_version">Docs.pkg</pkg-ref>
 </installer-gui-script>
