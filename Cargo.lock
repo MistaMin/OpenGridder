@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "og-client"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "crossbeam-channel",
  "log",
@@ -414,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "og-common"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "libc",
  "rmp-serde",
@@ -424,14 +424,14 @@ dependencies = [
 
 [[package]]
 name = "og-dsp"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "og-common",
 ]
 
 [[package]]
 name = "og-goodlookinui"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "og-common",
  "og-dsp",
@@ -441,7 +441,7 @@ dependencies = [
 
 [[package]]
 name = "og-hosting"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "base64",
  "libc",
@@ -455,7 +455,7 @@ dependencies = [
 
 [[package]]
 name = "og-plugin"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "base64",
  "log",
@@ -473,7 +473,7 @@ dependencies = [
 
 [[package]]
 name = "og-screen"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "image",
  "libc",
@@ -484,7 +484,7 @@ dependencies = [
 
 [[package]]
 name = "og-server"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "dirs",
  "env_logger",
@@ -502,7 +502,7 @@ dependencies = [
 
 [[package]]
 name = "og-tray"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "env_logger",
  "log",
