@@ -48,9 +48,11 @@ OSStatus property_info(void*,AudioUnitPropertyID id,AudioUnitScope scope,AudioUn
  case kAudioUnitProperty_ParameterInfo:if(scope!=kAudioUnitScope_Global)return kAudioUnitErr_InvalidScope;if(element>=ag_insert_param_count())return kAudioUnitErr_InvalidParameter;n=sizeof(AudioUnitParameterInfo);break;
  case kAudioUnitProperty_SupportedNumChannels:n=2*sizeof(AUChannelInfo);break;
  case kAudioUnitProperty_ElementCount:n=sizeof(UInt32);break;
- case kAudioUnitProperty_MaximumFramesPerSlice:case kAudioUnitProperty_BypassEffect:case kAudioUnitProperty_ShouldAllocateBuffer:case kAudioUnitProperty_RenderQuality:n=sizeof(UInt32);write=true;break;
+ case kAudioUnitProperty_MaximumFramesPerSlice:case kAudioUnitProperty_BypassEffect:if(scope!=kAudioUnitScope_Global)return kAudioUnitErr_InvalidScope;n=sizeof(UInt32);write=true;break;
+ case kAudioUnitProperty_ShouldAllocateBuffer:case kAudioUnitProperty_RenderQuality:n=sizeof(UInt32);write=true;break;
  case kAudioUnitProperty_LastRenderError:n=sizeof(OSStatus);break;
- case kAudioUnitProperty_Latency:case kAudioUnitProperty_TailTime:n=sizeof(Float64);break;
+ case kAudioUnitProperty_Latency:case kAudioUnitProperty_TailTime:if(scope!=kAudioUnitScope_Global)return kAudioUnitErr_InvalidScope;n=sizeof(Float64);break;
+ case kAudioUnitProperty_PresentPreset:if(scope!=kAudioUnitScope_Global)return kAudioUnitErr_InvalidScope;n=sizeof(AUPreset);write=true;break;
  case kAudioUnitProperty_SetRenderCallback:n=sizeof(AURenderCallbackStruct);write=true;break;
  case kAudioUnitProperty_MakeConnection:n=sizeof(AudioUnitConnection);write=true;break;
  default:return kAudioUnitErr_InvalidProperty;
@@ -85,6 +87,7 @@ OSStatus get_property(void* self,AudioUnitPropertyID id,AudioUnitScope scope,Aud
  case kAudioUnitProperty_LastRenderError:*(OSStatus*)out=a->last_error;break;
  case kAudioUnitProperty_Latency:*(Float64*)out=ag_insert_latency(a->processor)/a->format.mSampleRate;break;
  case kAudioUnitProperty_TailTime:*(Float64*)out=0;break;
+ case kAudioUnitProperty_PresentPreset:{if(scope!=kAudioUnitScope_Global)return kAudioUnitErr_InvalidScope;auto* pr=(AUPreset*)out;pr->presetNumber=0;pr->presetName=CFSTR("Default");break;}
  case kAudioUnitProperty_SetRenderCallback:*(AURenderCallbackStruct*)out=a->callback;break;
  case kAudioUnitProperty_MakeConnection:*(AudioUnitConnection*)out=a->connection;break;
  case kAudioUnitProperty_SupportedNumChannels:{auto* list=(AUChannelInfo*)out;list[0]={1,1};list[1]={2,2};break;}
@@ -103,11 +106,12 @@ OSStatus set_property(void* self,AudioUnitPropertyID id,AudioUnitScope scope,Aud
   if(!std::isfinite(f.mSampleRate)||f.mSampleRate<8000||f.mSampleRate>768000||f.mFormatID!=kAudioFormatLinearPCM||f.mFormatFlags!=flags||f.mBitsPerChannel!=32||f.mBytesPerPacket!=4||f.mBytesPerFrame!=4||f.mFramesPerPacket!=1||f.mChannelsPerFrame<1||f.mChannelsPerFrame>2)return kAudioUnitErr_FormatNotSupported;
   a->format=f;a->changed(id,scope,element);return OK;
  }
- case kAudioUnitProperty_SampleRate:{if(size!=sizeof(Float64)||a->initialized)break;double rate=*(const Float64*)input;if(!std::isfinite(rate)||rate<8000||rate>768000)break;a->format.mSampleRate=rate;return OK;}
- case kAudioUnitProperty_MaximumFramesPerSlice:{if(size!=4||a->initialized)break;UInt32 n=*(const UInt32*)input;if(n<1||n>8192)break;a->maximum=n;return OK;}
+ case kAudioUnitProperty_SampleRate:{if(size!=sizeof(Float64)||a->initialized||scope!=kAudioUnitScope_Global)break;double rate=*(const Float64*)input;if(!std::isfinite(rate)||rate<8000||rate>768000)break;a->format.mSampleRate=rate;a->changed(id,scope,element);return OK;}
+ case kAudioUnitProperty_MaximumFramesPerSlice:{if(size!=4||a->initialized||scope!=kAudioUnitScope_Global)break;UInt32 n=*(const UInt32*)input;if(n<1||n>8192)break;a->maximum=n;a->changed(id,scope,element);return OK;}
  case kAudioUnitProperty_SetRenderCallback:if(size!=sizeof(AURenderCallbackStruct)||scope!=kAudioUnitScope_Input||element!=0)break;a->callback=*(const AURenderCallbackStruct*)input;a->connection={};return OK;
  case kAudioUnitProperty_MakeConnection:if(size!=sizeof(AudioUnitConnection))break;a->connection=*(const AudioUnitConnection*)input;a->callback={};return OK;
- case kAudioUnitProperty_BypassEffect:if(size!=4)break;ag_insert_set(a->processor,0,*(const UInt32*)input?1:0);return OK;
+ case kAudioUnitProperty_BypassEffect:if(size!=4||scope!=kAudioUnitScope_Global)break;ag_insert_set(a->processor,0,*(const UInt32*)input?1:0);a->changed(id,scope,element);return OK;
+ case kAudioUnitProperty_PresentPreset:if(size!=sizeof(AUPreset)||scope!=kAudioUnitScope_Global)break;a->changed(id,scope,element);return OK;
  case kAudioUnitProperty_ShouldAllocateBuffer:case kAudioUnitProperty_RenderQuality:if(size==4)return OK;break;
  default:return kAudioUnitErr_InvalidProperty;
  }return kAudioUnitErr_InvalidPropertyValue;
@@ -137,9 +141,17 @@ OSStatus remove_listener_data(void* self,AudioUnitPropertyID id,AudioUnitPropert
 OSStatus remove_listener(void* self,AudioUnitPropertyID id,AudioUnitPropertyListenerProc proc){auto& ls=au(self)->listeners;ls.erase(std::remove_if(ls.begin(),ls.end(),[=](const Listener& l){return l.id==id&&l.proc==proc;}),ls.end());return OK;}
 OSStatus add_notify(void* self,AURenderCallback proc,void* data){if(!proc)return kAudioUnitErr_InvalidPropertyValue;au(self)->notifies.push_back({proc,data});return OK;}
 OSStatus remove_notify(void* self,AURenderCallback proc,void* data){auto& ns=au(self)->notifies;ns.erase(std::remove_if(ns.begin(),ns.end(),[=](const Notify& n){return n.proc==proc&&n.data==data;}),ns.end());return OK;}
+OSStatus schedule_parameters(void* self,const AudioUnitParameterEvent* events,UInt32 count){
+ if(!events)return kAudioUnitErr_InvalidPropertyValue;
+ for(UInt32 i=0;i<count;i++){
+  const auto& ev=events[i];
+  if(ev.eventType==kParameterEvent_Immediate)set_parameter(self,ev.parameter,ev.scope,ev.element,ev.eventValues.immediate.value,0);
+ }
+ return OK;
+}
 AudioComponentMethod lookup(SInt16 selector){switch(selector){
 #define METHOD(s,f) case s:return reinterpret_cast<AudioComponentMethod>(f)
- METHOD(kAudioUnitInitializeSelect,initialize);METHOD(kAudioUnitUninitializeSelect,uninitialize);METHOD(kAudioUnitResetSelect,reset);METHOD(kAudioUnitGetPropertyInfoSelect,property_info);METHOD(kAudioUnitGetPropertySelect,get_property);METHOD(kAudioUnitSetPropertySelect,set_property);METHOD(kAudioUnitGetParameterSelect,get_parameter);METHOD(kAudioUnitSetParameterSelect,set_parameter);METHOD(kAudioUnitRenderSelect,render);METHOD(kAudioUnitAddPropertyListenerSelect,add_listener);METHOD(kAudioUnitRemovePropertyListenerSelect,remove_listener);METHOD(kAudioUnitRemovePropertyListenerWithUserDataSelect,remove_listener_data);METHOD(kAudioUnitAddRenderNotifySelect,add_notify);METHOD(kAudioUnitRemoveRenderNotifySelect,remove_notify);
+ METHOD(kAudioUnitInitializeSelect,initialize);METHOD(kAudioUnitUninitializeSelect,uninitialize);METHOD(kAudioUnitResetSelect,reset);METHOD(kAudioUnitGetPropertyInfoSelect,property_info);METHOD(kAudioUnitGetPropertySelect,get_property);METHOD(kAudioUnitSetPropertySelect,set_property);METHOD(kAudioUnitGetParameterSelect,get_parameter);METHOD(kAudioUnitSetParameterSelect,set_parameter);METHOD(kAudioUnitScheduleParametersSelect,schedule_parameters);METHOD(kAudioUnitRenderSelect,render);METHOD(kAudioUnitAddPropertyListenerSelect,add_listener);METHOD(kAudioUnitRemovePropertyListenerSelect,remove_listener);METHOD(kAudioUnitRemovePropertyListenerWithUserDataSelect,remove_listener_data);METHOD(kAudioUnitAddRenderNotifySelect,add_notify);METHOD(kAudioUnitRemoveRenderNotifySelect,remove_notify);
 #undef METHOD
  default:return nullptr;}}
 }
