@@ -1,0 +1,148 @@
+name: OpenGridder Cross-Platform & Legacy Builds
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  # -------------------------------------------------------------
+  # Windows x86_64 Build (VST3, CLAP, LV2, Standalone Server/Tray)
+  # -------------------------------------------------------------
+  windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Windows binaries
+        shell: pwsh
+        run: |
+          cargo build --release --locked
+
+      - name: Package Windows assets
+        shell: pwsh
+        run: |
+          $ver = if (Test-Path "VERSION") { (Get-Content "VERSION").Trim() } else { "0.1.0-alpha" }
+          $pkgName = "OpenGridder-$ver-windows-x86_64"
+          New-Item -ItemType Directory -Force -Path "dist/$pkgName/plugins"
+          New-Item -ItemType Directory -Force -Path "dist/$pkgName/bin"
+
+          if (Test-Path "target/release/ag_formats.dll") {
+            Copy-Item "target/release/ag_formats.dll" "dist/$pkgName/plugins/OpenGridder.vst3"
+            Copy-Item "target/release/ag_formats.dll" "dist/$pkgName/plugins/OpenGridder.clap"
+          }
+          if (Test-Path "target/release/ag-server.exe") {
+            Copy-Item "target/release/ag-server.exe" "dist/$pkgName/bin/OpenGridderServer.exe"
+          }
+          if (Test-Path "target/release/ag-tray.exe") {
+            Copy-Item "target/release/ag-tray.exe" "dist/$pkgName/bin/OpenGridderTray.exe"
+          }
+
+          Get-ChildItem -Path "README.md", "COPYING", "VERSION" -ErrorAction SilentlyContinue | Copy-Item -Destination "dist/$pkgName/"
+          Compress-Archive -Path "dist/$pkgName" -DestinationPath "dist/$pkgName.zip"
+          (Get-FileHash -Algorithm SHA256 "dist/$pkgName.zip").Hash | Out-File -FilePath "dist/$pkgName.zip.sha256"
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenGridder-windows-x86_64
+          path: dist/*-windows-x86_64.zip*
+
+  # -------------------------------------------------------------
+  # Linux x86_64 Build (VST3, CLAP, LV2, Standalone Server/Tray)
+  # -------------------------------------------------------------
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libjack-jackd2-dev pkg-config
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Linux binaries
+        run: |
+          cargo build --release --locked
+
+      - name: Package Linux assets
+        run: |
+          VER=$(cat VERSION 2>/dev/null || echo "0.1.0-alpha")
+          PKG_NAME="OpenGridder-${VER}-linux-x86_64"
+          mkdir -p "dist/${PKG_NAME}/plugins"
+          mkdir -p "dist/${PKG_NAME}/bin"
+
+          cp target/release/libag_formats.so "dist/${PKG_NAME}/plugins/OpenGridder.vst3" 2>/dev/null || true
+          cp target/release/libag_formats.so "dist/${PKG_NAME}/plugins/OpenGridder.clap" 2>/dev/null || true
+          cp target/release/ag-server "dist/${PKG_NAME}/bin/OpenGridderServer" 2>/dev/null || true
+          cp target/release/ag-tray "dist/${PKG_NAME}/bin/OpenGridderTray" 2>/dev/null || true
+          cp README.md COPYING VERSION "dist/${PKG_NAME}/" 2>/dev/null || true
+
+          tar -C dist -czf "dist/${PKG_NAME}.tar.gz" "${PKG_NAME}"
+          sha256sum "dist/${PKG_NAME}.tar.gz" > "dist/${PKG_NAME}.tar.gz.sha256"
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenGridder-linux-x86_64
+          path: dist/*-linux-x86_64.tar.gz*
+
+  # -------------------------------------------------------------
+  # Legacy RTAS & TDM (i386 & PPC / DSP56300) Build Harness
+  # -------------------------------------------------------------
+  legacy-rtas-tdm:
+    name: Legacy RTAS (i386) & TDM (PPC / DSP56300)
+    runs-on: macos-13
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.70.0 and i686/PPC targets
+        run: |
+          rustup toolchain install 1.70.0 --profile minimal
+          rustup default 1.70.0
+          rustup target add i686-apple-darwin || true
+
+      - name: Build Legacy Crate & Binaries (RTAS & TDM entries)
+        run: |
+          cargo build --manifest-path crates/ag-legacy/Cargo.toml --release --bin rtas --bin tdm
+          cargo test --manifest-path crates/ag-legacy/Cargo.toml
+
+      - name: Run DSP56300 Firmware Offload Verification
+        run: |
+          cargo test --manifest-path legacy/firmware/Cargo.toml
+
+      - name: Package Legacy RTAS & TDM Deliverables
+        run: |
+          VER=$(cat VERSION 2>/dev/null || echo "0.1.0-alpha")
+          PKG_NAME="OpenGridder-${VER}-legacy-rtas-tdm"
+          mkdir -p "dist/${PKG_NAME}/bin"
+          mkdir -p "dist/${PKG_NAME}/firmware"
+
+          cp target/release/rtas "dist/${PKG_NAME}/bin/OpenGridderRTAS" 2>/dev/null || cp crates/ag-legacy/target/release/rtas "dist/${PKG_NAME}/bin/" 2>/dev/null || true
+          cp target/release/tdm "dist/${PKG_NAME}/bin/OpenGridderTDM" 2>/dev/null || cp crates/ag-legacy/target/release/tdm "dist/${PKG_NAME}/bin/" 2>/dev/null || true
+          cp legacy/firmware/firmware/* "dist/${PKG_NAME}/firmware/" 2>/dev/null || true
+          cp legacy/PROVENANCE.md "dist/${PKG_NAME}/" 2>/dev/null || true
+
+          tar -C dist -czf "dist/${PKG_NAME}.tar.gz" "${PKG_NAME}"
+          shasum -a 256 "dist/${PKG_NAME}.tar.gz" > "dist/${PKG_NAME}.tar.gz.sha256"
+
+      - name: Upload Legacy Deliverables
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenGridder-legacy-rtas-tdm
+          path: dist/*-legacy-rtas-tdm.tar.gz*
