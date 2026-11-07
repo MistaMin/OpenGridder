@@ -75,7 +75,7 @@ mod tests {
 
     #[test]
     fn h12_server_menu_and_cli_status_commands() {
-        let menu = ServerMenu::new("Studio-Main", 0, "2.0.0-alpha.1");
+        let menu = ServerMenu::new("Studio-Main", 0, "0.1.0-alpha");
         let items = menu.items();
         assert_eq!(items.len(), 6);
         assert_eq!(items[0], ServerMenuItem::Name("Studio-Main".to_string()));
@@ -85,7 +85,7 @@ mod tests {
         assert_eq!(items[4], ServerMenuItem::About);
         assert_eq!(items[5], ServerMenuItem::Quit);
 
-        let menu_with_id = ServerMenu::new("Studio-Worker", 2, "2.0.0-alpha.1");
+        let menu_with_id = ServerMenu::new("Studio-Worker", 2, "0.1.0-alpha");
         assert_eq!(menu_with_id.items()[0], ServerMenuItem::Name("Studio-Worker:2".to_string()));
 
         let text = menu.render_cli();

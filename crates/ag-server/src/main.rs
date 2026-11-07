@@ -15,7 +15,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|arg| arg == "--menu" || arg == "-m" || arg == "menu" || arg == "--status") {
         let id = args.windows(2).find(|pair| pair[0] == "--id").and_then(|pair| pair[1].parse::<u16>().ok()).unwrap_or(0);
-        let menu = ag_server::menu::ServerMenu::new("AudioGridder Server", id, "2.0.0-alpha.1");
+        let menu = ag_server::menu::ServerMenu::new("AudioGridder Server", id, "0.1.0-alpha");
         print!("{}", menu.render_cli());
         return;
     }
@@ -52,7 +52,7 @@ fn main() {
             println!("master {port}");
             let _ = std::io::stdout().flush();
         }
-        eprintln!("AudioGridder server 2.0.0-alpha.1 chain sandbox on port {port}.");
+        eprintln!("AudioGridder server 0.1.0-alpha chain sandbox on port {port}.");
         if let Err(err) = serve_chain(listener) {
             eprintln!("ag-server: {err}");
             std::process::exit(1);
@@ -78,7 +78,7 @@ fn main() {
             println!("master {port}");
             let _ = std::io::stdout().flush();
         }
-        eprintln!("AudioGridder server 2.0.0-alpha.1 plugin sandbox on port {port}.");
+        eprintln!("AudioGridder server 0.1.0-alpha plugin sandbox on port {port}.");
         if let Err(err) = serve_plugin(listener) {
             eprintln!("ag-server: {err}");
             std::process::exit(1);
@@ -98,7 +98,7 @@ fn main() {
         std::process::exit(1);
     });
     eprintln!(
-        "AudioGridder server 2.0.0-alpha.1 on port {port}. Hosts builtin gain plus scanned AudioUnit, LV2, and VST3 plug-ins."
+        "AudioGridder server 0.1.0-alpha on port {port}. Hosts builtin gain plus scanned AudioUnit, LV2, and VST3 plug-ins."
     );
     if let Err(err) = serve_clients(listener) {
         eprintln!("ag-server: {err}");

@@ -3,7 +3,7 @@ members = ["crates/ag-protocol", "crates/ag-plugin", "crates/ag-server", "crates
 resolver = "2"
 
 [workspace.package]
-version = "2.0.0-alpha.1"
+version = "0.1.0-alpha"
 edition = "2021"
 license = "MIT"
 publish = false

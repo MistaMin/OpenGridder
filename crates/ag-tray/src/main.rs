@@ -3,7 +3,7 @@ use ag_protocol::TRAY_PORT;
 use ag_tray::PluginTrayServer;
 
 fn main() {
-    println!("AudioGridder PluginTray 2.0.0-alpha.1 on 127.0.0.1:{}", TRAY_PORT);
+    println!("AudioGridder PluginTray 0.1.0-alpha on 127.0.0.1:{}", TRAY_PORT);
     let tray = PluginTrayServer::new();
     if let Err(e) = tray.start("127.0.0.1", TRAY_PORT) {
         eprintln!("Failed to start ag-tray: {}", e);

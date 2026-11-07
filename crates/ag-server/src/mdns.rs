@@ -169,7 +169,7 @@ mod tests {
             uuid: "12345678-1234-1234-1234-123456789abc".to_string(),
             local_mode: false,
             load: 15.5,
-            version: "2.0.0-alpha.1".to_string(),
+            version: "0.1.0-alpha".to_string(),
             port: 55057,
             hostname: "Studio-Mini".to_string(),
         };
@@ -180,7 +180,7 @@ mod tests {
         assert!(txt.contains("\"UUID\":\"12345678-1234-1234-1234-123456789abc\""));
         assert!(txt.contains("\"LM\":false"));
         assert!(txt.contains("\"LOAD\":15.5"));
-        assert!(txt.contains("\"V\":\"2.0.0-alpha.1\""));
+        assert!(txt.contains("\"V\":\"0.1.0-alpha\""));
 
         let packet = info.build_mdns_response();
         assert!(!packet.is_empty());
