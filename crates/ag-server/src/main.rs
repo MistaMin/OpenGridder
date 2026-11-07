@@ -52,7 +52,7 @@ fn main() {
             println!("master {port}");
             let _ = std::io::stdout().flush();
         }
-        eprintln!("AudioGridder server 0.1.0-alpha chain sandbox on port {port}.");
+        eprintln!("AudioGridder server 0.1.1-alpha chain sandbox on port {port}.");
         if let Err(err) = serve_chain(listener) {
             eprintln!("ag-server: {err}");
             std::process::exit(1);
@@ -78,7 +78,7 @@ fn main() {
             println!("master {port}");
             let _ = std::io::stdout().flush();
         }
-        eprintln!("AudioGridder server 0.1.0-alpha plugin sandbox on port {port}.");
+        eprintln!("AudioGridder server 0.1.1-alpha plugin sandbox on port {port}.");
         if let Err(err) = serve_plugin(listener) {
             eprintln!("ag-server: {err}");
             std::process::exit(1);
@@ -98,8 +98,22 @@ fn main() {
         std::process::exit(1);
     });
     eprintln!(
-        "AudioGridder server 0.1.0-alpha on port {port}. Hosts builtin gain plus scanned AudioUnit, LV2, and VST3 plug-ins."
+        "AudioGridder server 0.1.1-alpha on port {port}. Hosts builtin gain plus scanned AudioUnit, LV2, and VST3 plug-ins."
     );
+    let host_name = std::env::var("HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let mdns_info = ag_server::mdns::ServiceInfo {
+        id: id as i32,
+        uuid: format!("{:08x}-0000-4000-8000-{:012x}", std::process::id(), port),
+        local_mode: false,
+        load: 0.0,
+        version: "0.1.1-alpha".to_string(),
+        port,
+        hostname: host_name,
+    };
+    let mut _responder = ag_server::mdns::ServiceResponder::new(mdns_info);
+    if let Err(err) = _responder.start() {
+        eprintln!("ag-server: mDNS responder warning: {err}");
+    }
     if let Err(err) = serve_clients(listener) {
         eprintln!("ag-server: {err}");
         std::process::exit(1);

@@ -22,11 +22,13 @@ echo "=== 2. Assembling Plugin Formats ==="
 cp -R "$og_root/crates/ag-formats/bundle/AudioGridder.vst3" "$STAGE/VST3/OpenGridder.vst3"
 mkdir -p "$STAGE/VST3/OpenGridder.vst3/Contents/MacOS"
 cp "$DYLIB" "$STAGE/VST3/OpenGridder.vst3/Contents/MacOS/OpenGridder"
+ln -sf "OpenGridder" "$STAGE/VST3/OpenGridder.vst3/Contents/MacOS/AudioGridder"
 
 # AU
 cp -R "$og_root/crates/ag-formats/bundle/AudioGridder.component" "$STAGE/AU/OpenGridder.component"
 mkdir -p "$STAGE/AU/OpenGridder.component/Contents/MacOS"
 cp "$DYLIB" "$STAGE/AU/OpenGridder.component/Contents/MacOS/OpenGridder"
+ln -sf "OpenGridder" "$STAGE/AU/OpenGridder.component/Contents/MacOS/AudioGridder"
 
 # CLAP
 cp "$DYLIB" "$STAGE/CLAP/OpenGridder.clap"
@@ -34,11 +36,13 @@ cp "$DYLIB" "$STAGE/CLAP/OpenGridder.clap"
 # LV2
 cp -R "$og_root/crates/ag-formats/bundle/AudioGridder.lv2" "$STAGE/LV2/OpenGridder.lv2"
 cp "$DYLIB" "$STAGE/LV2/OpenGridder.lv2/OpenGridder.dylib"
+ln -sf "OpenGridder.dylib" "$STAGE/LV2/OpenGridder.lv2/AudioGridder.dylib"
 
 # AAX
 cp -R "$og_root/crates/ag-formats/bundle/AudioGridder.aaxplugin" "$STAGE/AAX/OpenGridder.aaxplugin"
 mkdir -p "$STAGE/AAX/OpenGridder.aaxplugin/Contents/MacOS"
 cp "$DYLIB" "$STAGE/AAX/OpenGridder.aaxplugin/Contents/MacOS/OpenGridder"
+ln -sf "OpenGridder" "$STAGE/AAX/OpenGridder.aaxplugin/Contents/MacOS/AudioGridder"
 cat << 'PLIST' > "$STAGE/AAX/OpenGridder.aaxplugin/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -75,16 +79,21 @@ cp -R "$og_root/build/OpenGridder Server.app" "$STAGE/Standalone/OpenGridder Ser
 cp "$og_root/target/release/ag-tray" "$STAGE/Standalone/OpenGridderTray"
 
 echo "=== 3. PACE Eden AAX Signing via physical iLok ==="
-/Users/marcosdeida/.gemini/config/skills/Make-Plugin-Release/scripts/sign_aax.sh \
-    "$STAGE/AAX/OpenGridder.aaxplugin" "807F4D50-CFDB-11F1-A0CD-00505692AD3E" "mistamin"
+if /Users/marcosdeida/.gemini/config/skills/Make-Plugin-Release/scripts/sign_aax.sh \
+    "$STAGE/AAX/OpenGridder.aaxplugin" "807F4D50-CFDB-11F1-A0CD-00505692AD3E" "mistamin"; then
+    echo "PACE AAX signing succeeded."
+else
+    echo "WARNING: PACE AAX signing skipped or failed (iLok session); continuing with Developer ID signing."
+fi
 
 echo "=== 4. Apple Developer ID Signing ==="
 IDENTITY="Developer ID Application: Marcos Deida (ZQYU67JUBH)"
+ENTITLEMENTS="$og_root/package/OpenGridderServer.entitlements"
 
 codesign --force --timestamp --options runtime --sign "$IDENTITY" "$STAGE/Standalone/OpenGridderTray"
-codesign --force --timestamp --options runtime --sign "$IDENTITY" "$STAGE/Standalone/OpenGridder Server.app/Contents/MacOS/OpenGridderServer-bin"
-codesign --force --timestamp --options runtime --sign "$IDENTITY" "$STAGE/Standalone/OpenGridder Server.app/Contents/MacOS/OpenGridderServer"
-codesign --force --timestamp --options runtime --sign "$IDENTITY" "$STAGE/Standalone/OpenGridder Server.app"
+codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$STAGE/Standalone/OpenGridder Server.app/Contents/MacOS/OpenGridderServer-bin"
+codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$STAGE/Standalone/OpenGridder Server.app/Contents/MacOS/OpenGridderServer"
+codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$STAGE/Standalone/OpenGridder Server.app"
 
 codesign --force --timestamp --options runtime --sign "$IDENTITY" "$STAGE/CLAP/OpenGridder.clap"
 codesign --force --timestamp --options runtime --sign "$IDENTITY" "$STAGE/LV2/OpenGridder.lv2/OpenGridder.dylib"

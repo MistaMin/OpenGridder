@@ -26,6 +26,7 @@ struct Native {
     values: Vec<AtomicU32>,
     control: Mutex<AudioGridder>,
     meters: [AtomicU32; 4],
+    latency: AtomicU32,
     revision: AtomicU64,
     framebuffer: Mutex<goodlookindri_shell::Framebuffer>,
 }
@@ -48,6 +49,7 @@ fn apply(n: &Native, a: &mut Audio) {
             a.applied[i] = bits;
         }
     }
+    n.latency.store(a.plugin.latency() as u32, Ordering::Relaxed);
 }
 #[no_mangle]
 pub extern "C" fn ag_insert_create() -> *mut c_void {
@@ -69,6 +71,7 @@ pub extern "C" fn ag_insert_create() -> *mut c_void {
         values,
         control: Mutex::new(AudioGridder::new()),
         meters: std::array::from_fn(|_| AtomicU32::new((-100.0f32).to_bits())),
+        latency: AtomicU32::new(ag_plugin::profile_samples(1) as u32),
         revision: AtomicU64::new(1),
         framebuffer: Mutex::new(goodlookindri_shell::Framebuffer::new(720, 420)),
     })) as *mut c_void
@@ -180,9 +183,6 @@ pub unsafe extern "C" fn ag_insert_param_info(
 }
 #[no_mangle]
 pub unsafe extern "C" fn ag_insert_get(p: *mut c_void, i: u32) -> f64 {
-    if i >= 9 {
-        return 0.0;
-    }
     let Some(n) = native(p) else {
         return 0.0;
     };
@@ -202,9 +202,6 @@ pub unsafe extern "C" fn ag_insert_set(p: *mut c_void, i: u32, normalized: f64) 
     if !normalized.is_finite() {
         return false;
     }
-    if i >= 9 {
-        return true;
-    }
     let value = param.from_normalized(normalized as f32).to_bits();
     if n.values[i as usize].swap(value, Ordering::Relaxed) != value {
         n.revision.fetch_add(1, Ordering::Relaxed);
@@ -213,12 +210,7 @@ pub unsafe extern "C" fn ag_insert_set(p: *mut c_void, i: u32, normalized: f64) 
 }
 #[no_mangle]
 pub unsafe extern "C" fn ag_insert_latency(p: *mut c_void) -> u32 {
-    native(p)
-        .map(|n| {
-            ag_plugin::profile_samples(f32::from_bits(n.values[2].load(Ordering::Relaxed)) as i32)
-                as u32
-        })
-        .unwrap_or(0)
+    native(p).map(|n| n.latency.load(Ordering::Relaxed)).unwrap_or(0)
 }
 #[no_mangle]
 pub unsafe extern "C" fn ag_insert_process(

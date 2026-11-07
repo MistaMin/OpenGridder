@@ -148,7 +148,7 @@ fn scan_fresh() -> Vec<CatalogPlugin> {
 }
 
 pub fn instantiate(id: &str, sample_rate: f32, max_block: usize, channels: usize) -> Option<Box<dyn Hosted>> {
-    if id.starts_with("lv2:") || id.starts_with("vst3:") {
+    if id.starts_with("lv2:") || id.starts_with("vst3:") || id.starts_with("clap:") {
         return crate::native::instantiate(id, sample_rate, max_block, channels);
     }
     let (kind, subtype, maker) = parse_id(id)?;

@@ -5,22 +5,22 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleExecutable</key>
-	<string>AudioGridder</string>
+	<string>OpenGridder</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.opengrid.audiogridder.vst3</string>
+	<string>com.opengrid.opengridder.vst3</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>AudioGridder</string>
+	<string>OpenGridder</string>
 	<key>CFBundleDisplayName</key>
-	<string>AudioGridder</string>
+	<string>OpenGridder</string>
 	<key>CFBundlePackageType</key>
 	<string>BNDL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.0.0</string>
+	<string>0.1.1-alpha</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
-	<string>2.0.0</string>
+	<string>0.1.1-alpha</string>
 </dict>
 </plist>

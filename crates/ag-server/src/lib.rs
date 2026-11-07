@@ -156,10 +156,10 @@ pub fn validate_handshake(req: &HandshakeRequest) -> Result<(), RejectReason> {
     if req.version != PROTOCOL_VERSION {
         return Err(RejectReason::Version);
     }
-    if req.channels_sc != 0 {
+    if req.channels_sc < 0 || req.channels_sc > 8 {
         return Err(RejectReason::Sidechain);
     }
-    if req.channels_in != req.channels_out || !(1..=2).contains(&req.channels_in) {
+    if req.channels_in < 0 || req.channels_in > 64 || req.channels_out <= 0 || req.channels_out > 64 {
         return Err(RejectReason::Channels);
     }
     if !req.sample_rate.is_finite() || !(8_000.0..=192_000.0).contains(&req.sample_rate) {
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn sidechain_and_wide_layouts_close_without_an_answer() {
         // Assert rejection on both serve_one (one-socket path) and serve_clients / serve_worker (worker port path)
-        for (channels, sidechain, reason) in [(2, 1, RejectReason::Sidechain), (8, 0, RejectReason::Channels)] {
+        for (channels, sidechain, reason) in [(2, -1, RejectReason::Sidechain), (128, 0, RejectReason::Channels)] {
             // 1. One-socket path: serve_one
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let port = listener.local_addr().unwrap().port();

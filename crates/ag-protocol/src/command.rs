@@ -232,17 +232,21 @@ fn read_msgpack(bytes: &[u8]) -> Option<(Value, usize)> {
             let len = u16::from_be_bytes(bytes.get(1..3)?.try_into().ok()?) as usize;
             read_msgpack_str(bytes, 3, len)
         }
+        0xca => {
+            let value = f32::from_be_bytes(bytes.get(1..5)?.try_into().ok()?) as f64;
+            Some((Value::from(value), 5))
+        }
         0xcb => {
             let value = f64::from_be_bytes(bytes.get(1..9)?.try_into().ok()?);
             Some((Value::from(value), 9))
         }
-        0xd2 => {
-            let value = i32::from_be_bytes(bytes.get(1..5)?.try_into().ok()?) as i64;
-            Some((Value::from(value), 5))
+        0xcc => {
+            let value = *bytes.get(1)? as u64;
+            Some((Value::from(value), 2))
         }
-        0xd3 => {
-            let value = i64::from_be_bytes(bytes.get(1..9)?.try_into().ok()?);
-            Some((Value::from(value), 9))
+        0xcd => {
+            let value = u16::from_be_bytes(bytes.get(1..3)?.try_into().ok()?) as u64;
+            Some((Value::from(value), 3))
         }
         0xce => {
             let value = u32::from_be_bytes(bytes.get(1..5)?.try_into().ok()?) as u64;
@@ -252,15 +256,43 @@ fn read_msgpack(bytes: &[u8]) -> Option<(Value, usize)> {
             let value = u64::from_be_bytes(bytes.get(1..9)?.try_into().ok()?);
             Some((Value::from(value), 9))
         }
+        0xd0 => {
+            let value = *bytes.get(1)? as i8 as i64;
+            Some((Value::from(value), 2))
+        }
+        0xd1 => {
+            let value = i16::from_be_bytes(bytes.get(1..3)?.try_into().ok()?) as i64;
+            Some((Value::from(value), 3))
+        }
+        0xd2 => {
+            let value = i32::from_be_bytes(bytes.get(1..5)?.try_into().ok()?) as i64;
+            Some((Value::from(value), 5))
+        }
+        0xd3 => {
+            let value = i64::from_be_bytes(bytes.get(1..9)?.try_into().ok()?);
+            Some((Value::from(value), 9))
+        }
+        0xdb => {
+            let len = u32::from_be_bytes(bytes.get(1..5)?.try_into().ok()?) as usize;
+            read_msgpack_str(bytes, 5, len)
+        }
         0x90..=0x9f => read_msgpack_array(bytes, 1, (tag & 0x0f) as usize),
         0xdc => {
             let len = u16::from_be_bytes(bytes.get(1..3)?.try_into().ok()?) as usize;
             read_msgpack_array(bytes, 3, len)
         }
+        0xdd => {
+            let len = u32::from_be_bytes(bytes.get(1..5)?.try_into().ok()?) as usize;
+            read_msgpack_array(bytes, 5, len)
+        }
         0x80..=0x8f => read_msgpack_map(bytes, 1, (tag & 0x0f) as usize),
         0xde => {
             let len = u16::from_be_bytes(bytes.get(1..3)?.try_into().ok()?) as usize;
             read_msgpack_map(bytes, 3, len)
+        }
+        0xdf => {
+            let len = u32::from_be_bytes(bytes.get(1..5)?.try_into().ok()?) as usize;
+            read_msgpack_map(bytes, 5, len)
         }
         _ => None,
     }
@@ -520,6 +552,22 @@ mod tests {
         let packed = msgpack_payload(&serde_json::json!({"a": 1}));
         assert_eq!(read_number(&packed), Some(4));
         assert_eq!(&packed[4..], &[0x81, 0xa1, b'a', 0x01]);
+    }
+
+    #[test]
+    fn msgpack_extended_types_decode_properly() {
+        // 0xcc (u8): 200
+        assert_eq!(decode_msgpack(&[0xcc, 200]), Some(Value::from(200)));
+        // 0xcd (u16): 3000
+        assert_eq!(decode_msgpack(&[0xcd, 0x0b, 0xb8]), Some(Value::from(3000)));
+        // 0xd0 (i8): -50
+        assert_eq!(decode_msgpack(&[0xd0, (-50i8) as u8]), Some(Value::from(-50)));
+        // 0xd1 (i16): -500
+        let val_d1 = (-500i16).to_be_bytes();
+        assert_eq!(decode_msgpack(&[0xd1, val_d1[0], val_d1[1]]), Some(Value::from(-500)));
+        // 0xca (f32): 1.5
+        let val_ca = 1.5f32.to_be_bytes();
+        assert_eq!(decode_msgpack(&[0xca, val_ca[0], val_ca[1], val_ca[2], val_ca[3]]), Some(Value::from(1.5f64)));
     }
 
     #[test]

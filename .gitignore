@@ -1,2 +1,5 @@
 /target
 /target-formats
+/build
+/dist
+.DS_Store
