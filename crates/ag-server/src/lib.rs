@@ -13,7 +13,7 @@ mod channels;
 mod clipboard;
 mod screen;
 mod cpu;
-mod host;
+pub mod host;
 mod native;
 pub mod menu;
 pub mod scanner;

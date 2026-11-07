@@ -100,6 +100,49 @@ fn main() {
     eprintln!(
         "AudioGridder server 0.1.1-alpha on port {port}. Hosts builtin gain plus scanned AudioUnit, LV2, and VST3 plug-ins."
     );
+    let rescan = args.iter().any(|arg| arg == "--rescan");
+    if rescan {
+        ag_server::host::rescan(true);
+    }
+    let no_scan = args.iter().any(|arg| arg == "--no-scan");
+    if no_scan {
+        println!("SCAN_COMPLETE:{}", serde_json::json!({"total": 0, "port": port}));
+        let _ = std::io::stdout().flush();
+    } else {
+        let plugins = ag_server::host::scan();
+        for (i, p) in plugins.iter().enumerate() {
+            println!(
+                "SCAN_PROGRESS:{}",
+                serde_json::json!({
+                    "current": i + 1,
+                    "total": plugins.len(),
+                    "name": p.name,
+                    "format": p.format
+                })
+            );
+            let _ = std::io::stdout().flush();
+        }
+        let catalog_json = serde_json::to_string(
+            &plugins
+                .iter()
+                .map(|p| {
+                    serde_json::json!({
+                        "id": p.id,
+                        "name": p.name,
+                        "company": p.company,
+                        "format": p.format,
+                        "category": p.category,
+                        "is_instrument": p.is_instrument
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_else(|_| "[]".to_string());
+        println!("SCAN_CATALOG:{catalog_json}");
+        let _ = std::io::stdout().flush();
+        println!("SCAN_COMPLETE:{}", serde_json::json!({"total": plugins.len(), "port": port}));
+        let _ = std::io::stdout().flush();
+    }
     let host_name = std::env::var("HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let mdns_info = ag_server::mdns::ServiceInfo {
         id: id as i32,
