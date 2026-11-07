@@ -1,0 +1,247 @@
+   Compiling ag-plugin v2.0.0-alpha.1 (/Volumes/Developer/OpenGrid/audiogridder-open/crates/ag-plugin)
+warning: variable does not need to be mutable
+   --> crates/ag-server/src/host.rs:593:9
+    |
+593 |     let mut max_frames = max_block as u32;
+    |         ----^^^^^^^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> crates/ag-server/src/host.rs:597:9
+    |
+597 |     let mut rate = f64::from(sample_rate);
+    |         ----^^^^
+    |         |
+    |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/ag-server/src/host.rs:701:9
+    |
+701 |     let mut description = AudioComponentDescription {
+    |         ----^^^^^^^^^^^
+    |         |
+    |         help: remove this `mut`
+
+warning: methods `process`, `process_midi`, and `process_f64` are never used
+   --> crates/ag-server/src/chain.rs:151:12
+    |
+ 81 | impl PluginChain {
+    | ---------------- methods in this implementation
+...
+151 |     pub fn process(&mut self, audio: &mut [Vec<f32>], frames: usize) {
+    |            ^^^^^^^
+...
+155 |     pub fn process_midi(&mut self, audio: &mut [Vec<f32>], midi: &[[u8; 3]], frames: usize) {
+    |            ^^^^^^^^^^^^
+...
+178 |     pub fn process_f64(&mut self, audio: &mut [Vec<f64>], midi: &[[u8; 3]], frames: usize) {
+    |            ^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `host_callback_transport` is never used
+  --> crates/ag-server/src/host.rs:55:8
+   |
+30 | pub trait Hosted: Send {
+   |           ------ method in this trait
+...
+55 |     fn host_callback_transport(&self) -> Option<(f64, f64, bool, f64)> {
+   |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: structure field `componentType` should have a snake case name
+    --> crates/ag-server/src/host.rs:1078:5
+     |
+1078 |     componentType: u32,
+     |     ^^^^^^^^^^^^^ help: convert the identifier to snake case: `component_type`
+     |
+     = note: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+warning: structure field `componentSubType` should have a snake case name
+    --> crates/ag-server/src/host.rs:1079:5
+     |
+1079 |     componentSubType: u32,
+     |     ^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `component_sub_type`
+
+warning: structure field `componentManufacturer` should have a snake case name
+    --> crates/ag-server/src/host.rs:1080:5
+     |
+1080 |     componentManufacturer: u32,
+     |     ^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `component_manufacturer`
+
+warning: structure field `componentFlags` should have a snake case name
+    --> crates/ag-server/src/host.rs:1081:5
+     |
+1081 |     componentFlags: u32,
+     |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `component_flags`
+
+warning: structure field `componentFlagsMask` should have a snake case name
+    --> crates/ag-server/src/host.rs:1082:5
+     |
+1082 |     componentFlagsMask: u32,
+     |     ^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `component_flags_mask`
+
+warning: structure field `mSampleRate` should have a snake case name
+    --> crates/ag-server/src/host.rs:1093:5
+     |
+1093 |     mSampleRate: f64,
+     |     ^^^^^^^^^^^ help: convert the identifier to snake case: `m_sample_rate`
+
+warning: structure field `mFormatID` should have a snake case name
+    --> crates/ag-server/src/host.rs:1094:5
+     |
+1094 |     mFormatID: u32,
+     |     ^^^^^^^^^ help: convert the identifier to snake case: `m_format_id`
+
+warning: structure field `mFormatFlags` should have a snake case name
+    --> crates/ag-server/src/host.rs:1095:5
+     |
+1095 |     mFormatFlags: u32,
+     |     ^^^^^^^^^^^^ help: convert the identifier to snake case: `m_format_flags`
+
+warning: structure field `mBytesPerPacket` should have a snake case name
+    --> crates/ag-server/src/host.rs:1096:5
+     |
+1096 |     mBytesPerPacket: u32,
+     |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_bytes_per_packet`
+
+warning: structure field `mFramesPerPacket` should have a snake case name
+    --> crates/ag-server/src/host.rs:1097:5
+     |
+1097 |     mFramesPerPacket: u32,
+     |     ^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_frames_per_packet`
+
+warning: structure field `mBytesPerFrame` should have a snake case name
+    --> crates/ag-server/src/host.rs:1098:5
+     |
+1098 |     mBytesPerFrame: u32,
+     |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_bytes_per_frame`
+
+warning: structure field `mChannelsPerFrame` should have a snake case name
+    --> crates/ag-server/src/host.rs:1099:5
+     |
+1099 |     mChannelsPerFrame: u32,
+     |     ^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_channels_per_frame`
+
+warning: structure field `mBitsPerChannel` should have a snake case name
+    --> crates/ag-server/src/host.rs:1100:5
+     |
+1100 |     mBitsPerChannel: u32,
+     |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_bits_per_channel`
+
+warning: structure field `mReserved` should have a snake case name
+    --> crates/ag-server/src/host.rs:1101:5
+     |
+1101 |     mReserved: u32,
+     |     ^^^^^^^^^ help: convert the identifier to snake case: `m_reserved`
+
+warning: structure field `mNumberChannels` should have a snake case name
+    --> crates/ag-server/src/host.rs:1107:5
+     |
+1107 |     mNumberChannels: u32,
+     |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_number_channels`
+
+warning: structure field `mDataByteSize` should have a snake case name
+    --> crates/ag-server/src/host.rs:1108:5
+     |
+1108 |     mDataByteSize: u32,
+     |     ^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_data_byte_size`
+
+warning: structure field `mData` should have a snake case name
+    --> crates/ag-server/src/host.rs:1109:5
+     |
+1109 |     mData: *mut c_void,
+     |     ^^^^^ help: convert the identifier to snake case: `m_data`
+
+warning: structure field `mNumberBuffers` should have a snake case name
+    --> crates/ag-server/src/host.rs:1114:5
+     |
+1114 |     mNumberBuffers: u32,
+     |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_number_buffers`
+
+warning: structure field `mBuffers` should have a snake case name
+    --> crates/ag-server/src/host.rs:1115:5
+     |
+1115 |     mBuffers: [AudioBuffer; 2],
+     |     ^^^^^^^^ help: convert the identifier to snake case: `m_buffers`
+
+warning: structure field `mSampleTime` should have a snake case name
+    --> crates/ag-server/src/host.rs:1120:5
+     |
+1120 |     mSampleTime: f64,
+     |     ^^^^^^^^^^^ help: convert the identifier to snake case: `m_sample_time`
+
+warning: structure field `mHostTime` should have a snake case name
+    --> crates/ag-server/src/host.rs:1121:5
+     |
+1121 |     mHostTime: u64,
+     |     ^^^^^^^^^ help: convert the identifier to snake case: `m_host_time`
+
+warning: structure field `mRateScalar` should have a snake case name
+    --> crates/ag-server/src/host.rs:1122:5
+     |
+1122 |     mRateScalar: f64,
+     |     ^^^^^^^^^^^ help: convert the identifier to snake case: `m_rate_scalar`
+
+warning: structure field `mWordClockTime` should have a snake case name
+    --> crates/ag-server/src/host.rs:1123:5
+     |
+1123 |     mWordClockTime: u64,
+     |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_word_clock_time`
+
+warning: structure field `mSmpte` should have a snake case name
+    --> crates/ag-server/src/host.rs:1124:5
+     |
+1124 |     mSmpte: [u8; 24],
+     |     ^^^^^^ help: convert the identifier to snake case: `m_smpte`
+
+warning: structure field `mFlags` should have a snake case name
+    --> crates/ag-server/src/host.rs:1125:5
+     |
+1125 |     mFlags: u32,
+     |     ^^^^^^ help: convert the identifier to snake case: `m_flags`
+
+warning: structure field `mReserved` should have a snake case name
+    --> crates/ag-server/src/host.rs:1126:5
+     |
+1126 |     mReserved: u32,
+     |     ^^^^^^^^^ help: convert the identifier to snake case: `m_reserved`
+
+warning: structure field `inputProc` should have a snake case name
+    --> crates/ag-server/src/host.rs:1145:5
+     |
+1145 |     inputProc: unsafe extern "C" fn(*mut c_void, *mut u32, *const AudioTimeStamp, u32, u32, *mut AudioBufferList) -> i32,
+     |     ^^^^^^^^^ help: convert the identifier to snake case: `input_proc`
+
+warning: structure field `inputProcRefCon` should have a snake case name
+    --> crates/ag-server/src/host.rs:1146:5
+     |
+1146 |     inputProcRefCon: *mut c_void,
+     |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `input_proc_ref_con`
+
+warning: `ag-server` (lib) generated 33 warnings (run `cargo fix --lib -p ag-server` to apply 3 suggestions)
+warning: method `reset` is never used
+  --> crates/ag-plugin/src/drive.rs:34:8
+   |
+29 | impl ResidualAdaa {
+   | ----------------- method in this implementation
+...
+34 |     fn reset(&mut self) {
+   |        ^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ag-plugin` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.15s
+     Running tests/client_contract.rs (target/debug/deps/client_contract-af173a11ee2e78f8)
+
+running 4 tests
+test rejected_state_is_transactional_and_nonfinite_ag1_is_rejected ... ok
+test all_console_state_keys_roundtrip_in_json_and_ag1 ... ok
+test intermediate_mix_is_linear_and_output_trim_follows_drive ... ok
+test profiles_and_bypass_threshold_have_the_declared_audio_behavior ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

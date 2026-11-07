@@ -1,0 +1,10 @@
+PASS UI parameter 3 0.500000 -> 0.333333
+PASS UI parameter 5 0.000000 -> 0.166667
+PASS UI parameter 4 1.000000 -> 0.833333
+PASS UI parameter 6 0.500000 -> 0.333333
+PASS UI parameter 0 0.000000 -> 1.000000
+PASS UI parameter 1 0.000000 -> 0.007812
+PASS UI parameter 2 0.333333 -> 0.666667
+PASS UI parameter 7 0.000000 -> 0.500000
+PASS UI parameter 8 0.000000 -> 0.500000
+PASS native editor attach, 9 bindings, gestures, remove/reopen; hidden window only

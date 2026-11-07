@@ -1,0 +1,6 @@
+PASS AU 1 channels 44100 Hz gain +6 dB latency 128
+PASS AU 1 channels 48000 Hz gain +6 dB latency 128
+PASS AU 1 channels 96000 Hz gain +6 dB latency 128
+PASS AU 2 channels 44100 Hz gain +6 dB latency 128
+PASS AU 2 channels 48000 Hz gain +6 dB latency 128
+PASS AU 2 channels 96000 Hz gain +6 dB latency 128

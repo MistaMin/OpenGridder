@@ -1,0 +1,28 @@
+use std::{env, path::PathBuf, process::Command};
+fn main() {
+    let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let sdk = env::var_os("VST3_SDK_ROOT").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/Volumes/Developer 2/Dependencies/clap-wrapper/build/cpm/vst3sdk"));
+    let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    let src = root.join("native/vst3.cpp");
+    let obj = out.join("vst3.o");
+    assert!(Command::new("c++").args(["-std=c++17", "-DINIT_CLASS_IID", "-O2", "-fPIC", "-c"]).arg(&src).arg("-I").arg(&sdk).arg("-o").arg(&obj).status().unwrap().success(), "VST3 interface compilation failed");
+    let au_obj = out.join("au.o");
+    assert!(Command::new("c++").args(["-std=c++17", "-O2", "-fPIC", "-c"]).arg(root.join("native/au.cpp")).arg("-o").arg(&au_obj).status().unwrap().success(), "AU interface compilation failed");
+    let editor_obj = out.join("editor.o");
+    assert!(Command::new("c++").args(["-std=c++17", "-fobjc-arc", "-O2", "-fPIC", "-c"]).arg(root.join("native/editor.mm")).arg("-o").arg(&editor_obj).status().unwrap().success(), "Native editor compilation failed");
+    let lib = out.join("libagvst3.a");
+    assert!(Command::new("ar").arg("rcs").arg(&lib).arg(&obj).arg(&au_obj).arg(&editor_obj).status().unwrap().success());
+    println!("cargo:rustc-link-search=native={}", out.display());
+    println!("cargo:rustc-link-lib=static=agvst3");
+    println!("cargo:rustc-link-lib=dylib=c++");
+    println!("cargo:rerun-if-changed={}", src.display());
+    println!("cargo:rerun-if-env-changed=VST3_SDK_ROOT");
+    println!("cargo:rerun-if-changed={}", root.join("native/au.cpp").display());
+    println!("cargo:rerun-if-changed={}", root.join("native/bridge.h").display());
+    println!("cargo:rustc-link-lib=framework=AudioToolbox");
+    println!("cargo:rustc-link-lib=framework=AudioUnit");
+    println!("cargo:rustc-link-lib=framework=CoreFoundation");
+    println!("cargo:rustc-link-lib=framework=Cocoa");
+    println!("cargo:rerun-if-changed={}", root.join("native/editor.mm").display());
+    println!("cargo:rerun-if-changed={}", root.join("native/editor.h").display());
+}

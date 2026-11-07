@@ -1,0 +1,12 @@
+PASS 1 channels f32 44100 Hz latency 128 gain 0.498816
+PASS 1 channels f32 48000 Hz latency 128 gain 0.498816
+PASS 1 channels f32 96000 Hz latency 128 gain 0.498816
+PASS 1 channels f64 44100 Hz latency 128 gain 0.498816
+PASS 1 channels f64 48000 Hz latency 128 gain 0.498816
+PASS 1 channels f64 96000 Hz latency 128 gain 0.498816
+PASS 2 channels f32 44100 Hz latency 128 gain 0.498816
+PASS 2 channels f32 48000 Hz latency 128 gain 0.498816
+PASS 2 channels f32 96000 Hz latency 128 gain 0.498816
+PASS 2 channels f64 44100 Hz latency 128 gain 0.498816
+PASS 2 channels f64 48000 Hz latency 128 gain 0.498816
+PASS 2 channels f64 96000 Hz latency 128 gain 0.498816

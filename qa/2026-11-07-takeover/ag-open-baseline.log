@@ -1,0 +1,415 @@
+warning: variable does not need to be mutable
+   --> crates/ag-server/src/host.rs:593:9
+    |
+593 |     let mut max_frames = max_block as u32;
+    |         ----^^^^^^^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> crates/ag-server/src/host.rs:597:9
+    |
+597 |     let mut rate = f64::from(sample_rate);
+    |         ----^^^^
+    |         |
+    |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/ag-server/src/host.rs:701:9
+    |
+701 |     let mut description = AudioComponentDescription {
+    |         ----^^^^^^^^^^^
+    |         |
+    |         help: remove this `mut`
+
+warning: methods `process`, `process_midi`, and `process_f64` are never used
+   --> crates/ag-server/src/chain.rs:151:12
+    |
+ 81 | impl PluginChain {
+    | ---------------- methods in this implementation
+...
+151 |     pub fn process(&mut self, audio: &mut [Vec<f32>], frames: usize) {
+    |            ^^^^^^^
+...
+155 |     pub fn process_midi(&mut self, audio: &mut [Vec<f32>], midi: &[[u8; 3]], frames: usize) {
+    |            ^^^^^^^^^^^^
+...
+178 |     pub fn process_f64(&mut self, audio: &mut [Vec<f64>], midi: &[[u8; 3]], frames: usize) {
+    |            ^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `host_callback_transport` is never used
+  --> crates/ag-server/src/host.rs:55:8
+   |
+30 | pub trait Hosted: Send {
+   |           ------ method in this trait
+...
+55 |     fn host_callback_transport(&self) -> Option<(f64, f64, bool, f64)> {
+   |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: structure field `componentType` should have a snake case name
+    --> crates/ag-server/src/host.rs:1078:5
+     |
+1078 |     componentType: u32,
+     |     ^^^^^^^^^^^^^ help: convert the identifier to snake case: `component_type`
+     |
+     = note: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+warning: structure field `componentSubType` should have a snake case name
+    --> crates/ag-server/src/host.rs:1079:5
+     |
+1079 |     componentSubType: u32,
+     |     ^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `component_sub_type`
+
+warning: structure field `componentManufacturer` should have a snake case name
+    --> crates/ag-server/src/host.rs:1080:5
+     |
+1080 |     componentManufacturer: u32,
+     |     ^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `component_manufacturer`
+
+warning: structure field `componentFlags` should have a snake case name
+    --> crates/ag-server/src/host.rs:1081:5
+     |
+1081 |     componentFlags: u32,
+     |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `component_flags`
+
+warning: structure field `componentFlagsMask` should have a snake case name
+    --> crates/ag-server/src/host.rs:1082:5
+     |
+1082 |     componentFlagsMask: u32,
+     |     ^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `component_flags_mask`
+
+warning: structure field `mSampleRate` should have a snake case name
+    --> crates/ag-server/src/host.rs:1093:5
+     |
+1093 |     mSampleRate: f64,
+     |     ^^^^^^^^^^^ help: convert the identifier to snake case: `m_sample_rate`
+
+warning: structure field `mFormatID` should have a snake case name
+    --> crates/ag-server/src/host.rs:1094:5
+     |
+1094 |     mFormatID: u32,
+     |     ^^^^^^^^^ help: convert the identifier to snake case: `m_format_id`
+
+warning: structure field `mFormatFlags` should have a snake case name
+    --> crates/ag-server/src/host.rs:1095:5
+     |
+1095 |     mFormatFlags: u32,
+     |     ^^^^^^^^^^^^ help: convert the identifier to snake case: `m_format_flags`
+
+warning: structure field `mBytesPerPacket` should have a snake case name
+    --> crates/ag-server/src/host.rs:1096:5
+     |
+1096 |     mBytesPerPacket: u32,
+     |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_bytes_per_packet`
+
+warning: structure field `mFramesPerPacket` should have a snake case name
+    --> crates/ag-server/src/host.rs:1097:5
+     |
+1097 |     mFramesPerPacket: u32,
+     |     ^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_frames_per_packet`
+
+warning: structure field `mBytesPerFrame` should have a snake case name
+    --> crates/ag-server/src/host.rs:1098:5
+     |
+1098 |     mBytesPerFrame: u32,
+     |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_bytes_per_frame`
+
+warning: structure field `mChannelsPerFrame` should have a snake case name
+    --> crates/ag-server/src/host.rs:1099:5
+     |
+1099 |     mChannelsPerFrame: u32,
+     |     ^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_channels_per_frame`
+
+warning: structure field `mBitsPerChannel` should have a snake case name
+    --> crates/ag-server/src/host.rs:1100:5
+     |
+1100 |     mBitsPerChannel: u32,
+     |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_bits_per_channel`
+
+warning: structure field `mReserved` should have a snake case name
+    --> crates/ag-server/src/host.rs:1101:5
+     |
+1101 |     mReserved: u32,
+     |     ^^^^^^^^^ help: convert the identifier to snake case: `m_reserved`
+
+warning: structure field `mNumberChannels` should have a snake case name
+    --> crates/ag-server/src/host.rs:1107:5
+     |
+1107 |     mNumberChannels: u32,
+     |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_number_channels`
+
+warning: structure field `mDataByteSize` should have a snake case name
+    --> crates/ag-server/src/host.rs:1108:5
+     |
+1108 |     mDataByteSize: u32,
+     |     ^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_data_byte_size`
+
+warning: structure field `mData` should have a snake case name
+    --> crates/ag-server/src/host.rs:1109:5
+     |
+1109 |     mData: *mut c_void,
+     |     ^^^^^ help: convert the identifier to snake case: `m_data`
+
+warning: structure field `mNumberBuffers` should have a snake case name
+    --> crates/ag-server/src/host.rs:1114:5
+     |
+1114 |     mNumberBuffers: u32,
+     |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_number_buffers`
+
+warning: structure field `mBuffers` should have a snake case name
+    --> crates/ag-server/src/host.rs:1115:5
+     |
+1115 |     mBuffers: [AudioBuffer; 2],
+     |     ^^^^^^^^ help: convert the identifier to snake case: `m_buffers`
+
+warning: structure field `mSampleTime` should have a snake case name
+    --> crates/ag-server/src/host.rs:1120:5
+     |
+1120 |     mSampleTime: f64,
+     |     ^^^^^^^^^^^ help: convert the identifier to snake case: `m_sample_time`
+
+warning: structure field `mHostTime` should have a snake case name
+    --> crates/ag-server/src/host.rs:1121:5
+     |
+1121 |     mHostTime: u64,
+     |     ^^^^^^^^^ help: convert the identifier to snake case: `m_host_time`
+
+warning: structure field `mRateScalar` should have a snake case name
+    --> crates/ag-server/src/host.rs:1122:5
+     |
+1122 |     mRateScalar: f64,
+     |     ^^^^^^^^^^^ help: convert the identifier to snake case: `m_rate_scalar`
+
+warning: structure field `mWordClockTime` should have a snake case name
+    --> crates/ag-server/src/host.rs:1123:5
+     |
+1123 |     mWordClockTime: u64,
+     |     ^^^^^^^^^^^^^^ help: convert the identifier to snake case: `m_word_clock_time`
+
+warning: structure field `mSmpte` should have a snake case name
+    --> crates/ag-server/src/host.rs:1124:5
+     |
+1124 |     mSmpte: [u8; 24],
+     |     ^^^^^^ help: convert the identifier to snake case: `m_smpte`
+
+warning: structure field `mFlags` should have a snake case name
+    --> crates/ag-server/src/host.rs:1125:5
+     |
+1125 |     mFlags: u32,
+     |     ^^^^^^ help: convert the identifier to snake case: `m_flags`
+
+warning: structure field `mReserved` should have a snake case name
+    --> crates/ag-server/src/host.rs:1126:5
+     |
+1126 |     mReserved: u32,
+     |     ^^^^^^^^^ help: convert the identifier to snake case: `m_reserved`
+
+warning: structure field `inputProc` should have a snake case name
+    --> crates/ag-server/src/host.rs:1145:5
+     |
+1145 |     inputProc: unsafe extern "C" fn(*mut c_void, *mut u32, *const AudioTimeStamp, u32, u32, *mut AudioBufferList) -> i32,
+     |     ^^^^^^^^^ help: convert the identifier to snake case: `input_proc`
+
+warning: structure field `inputProcRefCon` should have a snake case name
+    --> crates/ag-server/src/host.rs:1146:5
+     |
+1146 |     inputProcRefCon: *mut c_void,
+     |     ^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `input_proc_ref_con`
+
+warning: method `reset` is never used
+  --> crates/ag-plugin/src/drive.rs:34:8
+   |
+29 | impl ResidualAdaa {
+   | ----------------- method in this implementation
+...
+34 |     fn reset(&mut self) {
+   |        ^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `process_f64` is never used
+   --> crates/ag-server/src/chain.rs:178:12
+    |
+ 81 | impl PluginChain {
+    | ---------------- method in this implementation
+...
+178 |     pub fn process_f64(&mut self, audio: &mut [Vec<f64>], midi: &[[u8; 3]], frames: usize) {
+    |            ^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ag-server` (lib) generated 33 warnings (run `cargo fix --lib -p ag-server` to apply 3 suggestions)
+warning: `ag-plugin` (lib) generated 1 warning
+warning: `ag-server` (lib test) generated 32 warnings (31 duplicates)
+warning: `ag-plugin` (lib test) generated 1 warning (1 duplicate)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.28s
+     Running unittests src/lib.rs (target/debug/deps/ag_formats-fe924e44f9bdbc04)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/ag_legacy-7c01e230942dc3b1)
+
+running 2 tests
+test tests::q123_clips_rounds_and_rejects_nonfinite ... ok
+test tests::schedule_returns_audio_sixteen_blocks_later ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/ag_legacy-fac9e9f97af0c93c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/ag_plugin-3cd5ce67e1e6be11)
+
+running 48 tests
+test drive::tests::impulse_peak_matches_quality_latency ... ok
+test session::tests::insert_automation_changes_the_next_block ... ok
+test session::tests::audio_callback_does_not_wait_on_a_socket ... ok
+test session::tests::add_keeps_the_parameter_list_from_the_worker ... ok
+test session::tests::insert_midi_rides_the_audio_request ... ok
+test session::tests::insert_exchange_sends_the_host_playhead ... ok
+test session::tests::assigned_automation_slot_sets_the_hosted_gain ... ok
+test session::tests::command_and_screen_wait_10s_and_audio_waits_500ms ... ok
+test session::tests::insert_latency_compensates_the_chain ... ok
+test session::tests::insert_plays_the_hosted_gain ... ok
+test tests::bypass_ignores_gain ... ok
+test tests::ab_toggle_restores_the_console_gain ... ok
+test tests::adaa_differs_from_raw_saturation_and_is_skipped_when_drive_is_off ... ok
+test tests::bypass_keeps_the_drive_delay_and_does_not_replay ... ok
+test tests::editor_draws_generic_knobs_for_the_active_plugin ... ok
+test tests::editor_is_720_by_420_and_draws_chain_buttons ... ok
+test tests::drive_changes_level_and_tube_differs_from_clean ... ok
+test tests::f64_block_matches_the_f32_process ... ok
+test tests::hostile_parameter_is_clamped ... ok
+test tests::drive_ramps_instead_of_jumping ... ok
+test tests::input_gain_is_minus_24_db ... ok
+test tests::insert_queues_256_midi_events_onto_the_audio_block ... ok
+test tests::mix_selects_the_server_return ... ok
+test tests::non_finite_parameter_write_is_ignored ... ok
+test tests::oversampled_drive_keeps_the_reported_latency ... ok
+test tests::oversampled_drive_stays_finite ... ok
+test tests::prepare_rejects_a_rate_block_or_channel_count_outside_the_create_limits ... ok
+test tests::smoother_steps_once_per_sample_with_a_10_ms_pole ... ok
+test tests::stale_wet_tag_is_dropped ... ok
+test tests::state_records_loaded_plugins ... ok
+test tests::state_remembers_the_active_server ... ok
+test tests::state_roundtrip_and_editor_draw ... ok
+test tests::state_version_is_7_and_versions_2_through_7_load ... ok
+test tests::input_meter_follows_post_gain_not_the_wet_return ... ok
+test tests::transport_budget_uses_32_through_8192_and_falls_back_to_256 ... ok
+test tests::unassigned_automation_slots_stay_zero ... ok
+test tests::underruns_increment_only_when_the_ready_chain_misses_wet ... ok
+test tests::unity_is_delayed_and_otherwise_unchanged ... ok
+test tests::vu_reads_silence_and_a_sine ... ok
+test session::tests::insert_reads_command_in_and_the_screen_socket ... ok
+test session::tests::offline_render_waits_for_the_server_instead_of_dry ... ok
+test session::tests::insert_loads_unloads_bypasses_and_reorders_the_chain ... ok
+test session::tests::set_server_reconnects_and_remembers_the_endpoint ... ok
+test session::tests::insert_add_sends_layout_and_the_channel_mask ... ok
+test session::tests::selection_loads_catalog_plugin_n_minus_one ... ok
+test tests::input_gain_is_applied_before_the_block_is_sent ... ok
+test tests::status_bar_shows_the_server_and_the_worker_cpu ... ok
+test session::tests::add_keeps_factory_preset_names_and_can_select_one ... ok
+
+test result: ok. 48 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s
+
+     Running tests/formats.rs (target/debug/deps/formats-f16d6a1553159c00)
+
+running 1 test
+test insert_formats_export_real_entry_points ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running unittests src/lib.rs (target/debug/deps/ag_protocol-d3da24afb350b54b)
+
+running 7 tests
+test command::tests::msgpack_map_matches_the_fixmap_encoding ... ok
+test command::tests::preset_message_keeps_the_channel ... ok
+test tests::audio_block_roundtrip_is_planar_f32 ... ok
+test command::tests::type_numbers_match_message_hpp ... ok
+test tests::handshake_keeps_the_v13_offsets ... ok
+test command::tests::header_and_payloads_roundtrip ... ok
+test tests::sidechain_and_wide_layouts_are_refused ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/ag_server-8ff5f232192feb73)
+
+running 48 tests
+test chain::tests::add_plugin_replies_with_result_presets_and_parameters ... ok
+test chain::tests::multi_mono_mask_uses_a_separate_instance_per_channel ... ok
+test chain::tests::mono_layout_leaves_the_unselected_channel_dry ... ok
+test feature_tests::double_precision_block_keeps_a_value_f32_cannot_hold ... ok
+test feature_tests::any_message_gets_no_reply_and_the_next_command_still_answers ... ok
+test feature_tests::handshake_block_size_limits_the_hosted_block ... ok
+test feature_tests::editor_image_and_mouse_change_the_hosted_plugin ... ok
+test feature_tests::get_all_parameter_values_lists_every_hosted_parameter ... ok
+test feature_tests::key_on_the_open_editor_steps_a_parameter ... ok
+test feature_tests::msgpack_parser_reads_the_protocol_writer ... ok
+test feature_tests::midi_note_on_an_instrument_is_not_silent ... ok
+test feature_tests::editor_mouse_pushes_a_gesture_around_the_value ... ok
+test feature_tests::editor_mouse_pushes_parameter_value_on_command_in ... ok
+test feature_tests::multi_slot_chain_bypasses_reorders_and_roundtrips_a_parameter ... ok
+test feature_tests::loaded_plugin_pushes_status_on_command_in ... ok
+test feature_tests::open_editor_reports_screen_bounds ... ok
+test feature_tests::oversampling_changes_the_impulse_and_the_latency ... ok
+test feature_tests::processed_midi_returns_on_the_audio_response ... FAILED
+test feature_tests::close_box_pushes_hide_plugin_and_client_hide_is_not_echoed ... ok
+test feature_tests::plugin_settings_round_trip_is_a_parameter_chunk ... ok
+test feature_tests::quit_closes_the_worker ... ok
+test feature_tests::plugin_list_hides_instruments_until_the_filter_flag_is_set ... ok
+test feature_tests::plugin_list_layouts_follow_the_session_output_count ... ok
+test feature_tests::narrow_buffer_follows_the_active_channel_map ... ok
+test feature_tests::requested_channels_and_samples_widen_the_processed_block ... ok
+test feature_tests::cpu_load_reports_host_percent ... ok
+test feature_tests::factory_preset_on_channel_zero_changes_a_hosted_plugin ... ok
+test feature_tests::clipboard_and_capture_area_follow_the_open_editor ... ok
+test feature_tests::server_forwards_applied_key_on_command_in ... ok
+test feature_tests::scanned_third_party_effect_is_not_a_copy_of_the_input ... ok
+test feature_tests::unknown_command_gets_no_reply_and_the_next_command_still_answers ... ok
+test feature_tests::unbypass_restores_the_bypassed_gain ... ok
+test feature_tests::wheel_on_the_open_editor_steps_a_parameter ... ok
+test host::tests::apple_effect_host_callbacks_report_the_block_position ... ok
+test host::tests::scan_includes_an_apple_effect ... ok
+test tests::hosted_gain_is_minus_6_db ... ok
+test host::tests::apple_effect_is_not_a_copy_of_the_input ... ok
+test tests::one_socket_session_returns_the_hosted_gain ... ok
+test tests::sidechain_and_wide_layouts_close_without_an_answer ... ok
+test feature_tests::lv2_effect_is_not_a_copy_of_the_input ... ok
+test host::tests::dls_note_on_is_not_silent ... ok
+test worker::tests::accept_loop_hosts_a_second_client_while_the_first_worker_is_open ... ok
+test feature_tests::worker_playhead_follows_each_audio_block ... ok
+test feature_tests::vst3_effect_is_not_a_copy_of_the_input ... ok
+test feature_tests::rescan_and_restart_control_the_catalog ... ok
+test worker::tests::four_sockets_add_a_gain_and_process_audio ... ok
+test feature_tests::recents_are_newest_first_and_capped_at_ten ... ok
+test feature_tests::screen_diff_sends_a_delta_a_full_refresh_and_resets_a_black_frame ... ok
+
+failures:
+
+---- feature_tests::processed_midi_returns_on_the_audio_response stdout ----
+gain midi channels 2 samples 4 events 1 first Some((7, [144, 60, 100]))
+plugin midi events 0 body 0
+bypassed plugin midi events 0 first None
+
+thread 'feature_tests::processed_midi_returns_on_the_audio_response' (4574696) panicked at crates/ag-server/src/feature_tests.rs:737:5:
+assertion `left == right` failed: bypass ate the MIDI buffer
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    feature_tests::processed_midi_returns_on_the_audio_response
+
+test result: FAILED. 47 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.96s
+
+error: test failed, to rerun pass `-p ag-server --lib`

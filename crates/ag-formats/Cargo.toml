@@ -1,0 +1,17 @@
+[package]
+name = "ag-formats"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "AudioGridder AU, VST3, CLAP, LV2, and AAX entry points"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ag-plugin = { workspace = true }
+openplugin = { workspace = true }
+goodlookindri-shell = { path = "/Volumes/Developer 2/Dependencies/GoodLookinDri/shell" }
+
+ag-protocol = { workspace = true }

@@ -1,0 +1,4 @@
+absent
+Searched maxdepth 4 for aeffect.h (VST2 SDK). No header was found.
+/Volumes/Developer 2/SDKs
+/Volumes/Developer 2/Dependencies
