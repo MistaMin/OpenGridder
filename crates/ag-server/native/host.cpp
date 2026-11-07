@@ -966,7 +966,7 @@ static clap_host g_ag_clap_host = {
     "AudioGridder",
     "OpenGrid",
     "https://audiogridder.com",
-    "0.1.0-alpha",
+    "0.1.1-alpha",
     clap_host_cb_get_extension,
     clap_host_cb_request_restart,
     clap_host_cb_request_process,

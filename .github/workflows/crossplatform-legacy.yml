@@ -31,7 +31,7 @@ jobs:
       - name: Package Windows assets
         shell: pwsh
         run: |
-          $ver = if (Test-Path "VERSION") { (Get-Content "VERSION").Trim() } else { "0.1.0-alpha" }
+          $ver = if (Test-Path "VERSION") { (Get-Content "VERSION").Trim() } else { "0.1.1-alpha" }
           $pkgName = "OpenGridder-$ver-windows-x86_64"
           New-Item -ItemType Directory -Force -Path "dist/$pkgName/plugins"
           New-Item -ItemType Directory -Force -Path "dist/$pkgName/bin"
@@ -81,7 +81,7 @@ jobs:
 
       - name: Package Linux assets
         run: |
-          VER=$(cat VERSION 2>/dev/null || echo "0.1.0-alpha")
+          VER=$(cat VERSION 2>/dev/null || echo "0.1.1-alpha")
           PKG_NAME="OpenGridder-${VER}-linux-x86_64"
           mkdir -p "dist/${PKG_NAME}/plugins"
           mkdir -p "dist/${PKG_NAME}/bin"
@@ -128,7 +128,7 @@ jobs:
 
       - name: Package Legacy RTAS & TDM Deliverables
         run: |
-          VER=$(cat VERSION 2>/dev/null || echo "0.1.0-alpha")
+          VER=$(cat VERSION 2>/dev/null || echo "0.1.1-alpha")
           PKG_NAME="OpenGridder-${VER}-legacy-rtas-tdm"
           mkdir -p "dist/${PKG_NAME}/bin"
           mkdir -p "dist/${PKG_NAME}/firmware"

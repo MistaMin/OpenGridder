@@ -46,7 +46,7 @@ static GAIN_INFO: PluginInfo = PluginInfo {
     vendor: "OpenGrid",
     url: "https://opengrid.studio",
     email: "contact@mistamin.com",
-    version: "0.1.0-alpha",
+    version: "0.1.1-alpha",
     category: Category::Utility,
     params: &GAIN_PARAMS,
     is_instrument: false,

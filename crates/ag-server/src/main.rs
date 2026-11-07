@@ -15,7 +15,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|arg| arg == "--menu" || arg == "-m" || arg == "menu" || arg == "--status") {
         let id = args.windows(2).find(|pair| pair[0] == "--id").and_then(|pair| pair[1].parse::<u16>().ok()).unwrap_or(0);
-        let menu = ag_server::menu::ServerMenu::new("AudioGridder Server", id, "0.1.0-alpha");
+        let menu = ag_server::menu::ServerMenu::new("AudioGridder Server", id, "0.1.1-alpha");
         print!("{}", menu.render_cli());
         return;
     }

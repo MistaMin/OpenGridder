@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ag-formats"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "ag-plugin",
  "ag-protocol",
@@ -14,11 +14,11 @@ dependencies = [
 
 [[package]]
 name = "ag-legacy"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 
 [[package]]
 name = "ag-plugin"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "ag-protocol",
  "ag-server",
@@ -28,14 +28,14 @@ dependencies = [
 
 [[package]]
 name = "ag-protocol"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "ag-server"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "ag-protocol",
  "openplugin",
@@ -44,7 +44,7 @@ dependencies = [
 
 [[package]]
 name = "ag-tray"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "ag-protocol",
  "serde",
