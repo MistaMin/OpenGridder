@@ -3,7 +3,7 @@
 //! those packets, copies samples, and touches atomics; sockets and UI mutexes
 //! belong to the worker. Missing/stale packets retain the existing dry fallback.
 use crate::{
-    session::{LoadedSlot, ScreenFrame},
+    session::{CatalogItem, LoadedSlot, ScreenFrame},
     spsc::{self, Consumer, Producer},
     AudioGridder, QueuedMidi, RemoteSession,
 };
@@ -55,7 +55,7 @@ impl Packet {
 pub struct LiveInfo {
     pub connected: bool,
     pub endpoint: String,
-    pub catalog: Vec<String>,
+    pub catalog: Vec<CatalogItem>,
     pub slots: Vec<LoadedSlot>,
     pub error: Option<String>,
     pub cpu: Option<f32>,
@@ -89,6 +89,7 @@ pub enum LiveCommand {
     Edit(i32),
     Hide,
     Oversampling(i32, i32),
+    Preset(i32, i32),
 }
 struct Owner {
     shared: Arc<Shared>,
@@ -341,7 +342,7 @@ fn run(
                             .info
                             .lock()
                             .unwrap_or_else(|p| p.into_inner())
-                            .catalog = s.catalog_ids().to_vec();
+                            .catalog = s.catalog_items().to_vec();
                         snapshot(&shared, &s);
                         shared.connected.store(true, Ordering::Release);
                         session = Some(s);
@@ -370,6 +371,7 @@ fn run(
                 LiveCommand::Edit(i) => s.edit_plugin(i),
                 LiveCommand::Hide => s.hide_plugin(),
                 LiveCommand::Oversampling(i, n) => s.set_oversampling(i, n),
+                LiveCommand::Preset(i, p) => s.set_preset(i, p, 0),
                 _ => Ok(()),
             };
             if let Err(e) = result {
@@ -457,13 +459,15 @@ mod tests {
                 ..HandshakeRequest::default()
             },
             saved: vec![LoadedSlot {
+                name: "AudioGridder Host Gain".into(),
                 id: crate::BUILTIN_GAIN_ID.into(),
                 settings: "6".into(),
                 layout: "Stereo".into(),
                 mono: 0,
                 bypassed: false,
+                oversampling: 1,
                 params: Vec::new(),
-                presets: Vec::new()
+                presets: Vec::new(),
             }]
         }));
         let limit = Instant::now() + Duration::from_secs(5);

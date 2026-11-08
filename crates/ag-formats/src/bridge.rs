@@ -15,6 +15,7 @@ use std::{
 struct Audio {
     position: ag_protocol::PositionInfo,
     plugin: AudioGridder,
+    live: ag_plugin::live::LiveAudio,
     scratch: Vec<Vec<f32>>,
     scratch64: Vec<Vec<f64>>,
     applied: Vec<u32>,
@@ -25,6 +26,7 @@ struct Native {
     audio: UnsafeCell<Audio>,
     values: Vec<AtomicU32>,
     control: Mutex<AudioGridder>,
+    live_ctrl: ag_plugin::live::LiveController,
     meters: [AtomicU32; 4],
     latency: AtomicU32,
     revision: AtomicU64,
@@ -49,11 +51,23 @@ fn apply(n: &Native, a: &mut Audio) {
             a.applied[i] = bits;
         }
     }
-    n.latency.store(a.plugin.latency() as u32, Ordering::Relaxed);
+    let total_lat = a.plugin.latency().max(n.live_ctrl.latency());
+    n.latency.store(total_lat as u32, Ordering::Relaxed);
 }
 #[no_mangle]
 pub extern "C" fn ag_insert_create() -> *mut c_void {
     let plugin = AudioGridder::new();
+    let (live, live_ctrl) = ag_plugin::live::LiveAudio::new();
+    live_ctrl.connect(
+        "127.0.0.1:55056",
+        ag_protocol::HandshakeRequest {
+            samples_per_block: 64,
+            sample_rate: 48000.0,
+            channels_in: 2,
+            channels_out: 2,
+            ..Default::default()
+        },
+    );
     let values = params()
         .iter()
         .map(|p| AtomicU32::new(p.default.to_bits()))
@@ -64,12 +78,14 @@ pub extern "C" fn ag_insert_create() -> *mut c_void {
         audio: UnsafeCell::new(Audio {
             position: ag_protocol::PositionInfo::default(),
             plugin,
+            live,
             scratch: vec![vec![0.0; 8192]; 2],
             scratch64: vec![vec![0.0; 8192]; 2],
             applied: vec![u32::MAX; params().len()],
         }),
         values,
         control: Mutex::new(AudioGridder::new()),
+        live_ctrl,
         meters: std::array::from_fn(|_| AtomicU32::new((-100.0f32).to_bits())),
         latency: AtomicU32::new(ag_plugin::profile_samples(1) as u32),
         revision: AtomicU64::new(1),
@@ -132,6 +148,18 @@ pub unsafe extern "C" fn ag_insert_prepare(
         .resize_with(channels as usize, || vec![0.0; 8192]);
     a.plugin
         .prepare(rate as f32, frames as usize, channels as usize);
+    if !n.live_ctrl.connected() {
+        n.live_ctrl.connect(
+            "127.0.0.1:55056",
+            ag_protocol::HandshakeRequest {
+                samples_per_block: frames as i32,
+                sample_rate: rate,
+                channels_in: channels as i32,
+                channels_out: channels as i32,
+                ..Default::default()
+            },
+        );
+    }
     true
 }
 #[no_mangle]
@@ -232,7 +260,6 @@ pub unsafe extern "C" fn ag_insert_process(
         return false;
     }
     apply(n, a);
-    a.plugin.set_offline(offline);
     for ch in 0..channels as usize {
         let input = *inputs.add(ch);
         if input.is_null() {
@@ -242,7 +269,7 @@ pub unsafe extern "C" fn ag_insert_process(
                 .copy_from_slice(std::slice::from_raw_parts(input, frames as usize));
         }
     }
-    a.plugin.process(&mut a.scratch, frames as usize);
+    a.live.process(&mut a.plugin, &mut a.scratch[..channels as usize], frames as usize, a.position.clone(), offline);
     publish_meters(n, &a.plugin);
     for ch in 0..channels as usize {
         let output = *outputs.add(ch);
@@ -272,7 +299,6 @@ pub unsafe extern "C" fn ag_insert_process64(
         return false;
     }
     apply(n, a);
-    a.plugin.set_offline(offline);
     for ch in 0..channels as usize {
         let input = *inputs.add(ch);
         if input.is_null() {
@@ -282,7 +308,7 @@ pub unsafe extern "C" fn ag_insert_process64(
                 .copy_from_slice(std::slice::from_raw_parts(input, frames as usize));
         }
     }
-    a.plugin.process_f64(&mut a.scratch64, frames as usize);
+    a.live.process_f64(&mut a.plugin, &mut a.scratch64[..channels as usize], frames as usize, a.position.clone(), offline);
     publish_meters(n, &a.plugin);
     for ch in 0..channels as usize {
         let output = *outputs.add(ch);
@@ -506,6 +532,210 @@ pub unsafe extern "C" fn ag_insert_position(
             looping,
         };
     }
+}
+
+unsafe fn copy_cstr(src: &str, dest: *mut c_char, cap: u32) {
+    if dest.is_null() || cap == 0 {
+        return;
+    }
+    let bytes = src.as_bytes();
+    let len = bytes.len().min(cap as usize - 1);
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), dest as *mut u8, len);
+    *dest.add(len) = 0;
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_status(p: *mut c_void) -> i32 {
+    let Some(n) = native(p) else { return 0 };
+    if n.live_ctrl.connected() { 1 } else { 0 }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_num_available_plugins(p: *mut c_void) -> u32 {
+    let Some(n) = native(p) else { return 0 };
+    n.live_ctrl.with_info(|info| info.catalog.len() as u32)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_get_available_plugin_ext(
+    p: *mut c_void,
+    idx: u32,
+    name_buf: *mut c_char,
+    name_cap: u32,
+    id_buf: *mut c_char,
+    id_cap: u32,
+    type_buf: *mut c_char,
+    type_cap: u32,
+    company_buf: *mut c_char,
+    company_cap: u32,
+    cat_buf: *mut c_char,
+    cat_cap: u32,
+) -> bool {
+    let Some(n) = native(p) else { return false };
+    n.live_ctrl.with_info(|info| {
+        let Some(item) = info.catalog.get(idx as usize) else { return false };
+        copy_cstr(&item.name, name_buf, name_cap);
+        copy_cstr(&item.id, id_buf, id_cap);
+        copy_cstr(&item.format, type_buf, type_cap);
+        copy_cstr(&item.company, company_buf, company_cap);
+        copy_cstr(&item.category, cat_buf, cat_cap);
+        true
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_load_plugin(p: *mut c_void, available_idx: u32) -> bool {
+    let Some(n) = native(p) else { return false };
+    let id_opt = n.live_ctrl.with_info(|info| {
+        info.catalog.get(available_idx as usize).map(|item| item.id.clone())
+    });
+    if let Some(id) = id_opt {
+        n.live_ctrl.send(ag_plugin::live::LiveCommand::Add { id, settings: String::new() })
+    } else {
+        false
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_num_loaded_plugins(p: *mut c_void) -> u32 {
+    let Some(n) = native(p) else { return 0 };
+    n.live_ctrl.with_info(|info| info.slots.len() as u32)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_get_loaded_plugin(
+    p: *mut c_void,
+    idx: u32,
+    name_buf: *mut c_char,
+    name_cap: u32,
+    bypassed: *mut bool,
+    oversampling: *mut u32,
+) -> bool {
+    let Some(n) = native(p) else { return false };
+    n.live_ctrl.with_info(|info| {
+        let Some(slot) = info.slots.get(idx as usize) else { return false };
+        let display_name = if slot.name.is_empty() { &slot.id } else { &slot.name };
+        copy_cstr(display_name, name_buf, name_cap);
+        if !bypassed.is_null() { *bypassed = slot.bypassed; }
+        if !oversampling.is_null() { *oversampling = slot.oversampling; }
+        true
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_unload_plugin(p: *mut c_void, loaded_idx: u32) -> bool {
+    let Some(n) = native(p) else { return false };
+    n.live_ctrl.send(ag_plugin::live::LiveCommand::Delete(loaded_idx as i32))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_set_plugin_bypassed(p: *mut c_void, loaded_idx: u32, bypassed: bool) -> bool {
+    let Some(n) = native(p) else { return false };
+    n.live_ctrl.send(ag_plugin::live::LiveCommand::Bypass(loaded_idx as i32, bypassed))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_set_plugin_oversampling(p: *mut c_void, loaded_idx: u32, factor: u32) -> bool {
+    let Some(n) = native(p) else { return false };
+    n.live_ctrl.send(ag_plugin::live::LiveCommand::Oversampling(loaded_idx as i32, factor as i32))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_exchange_plugins(p: *mut c_void, idx1: u32, idx2: u32) -> bool {
+    let Some(n) = native(p) else { return false };
+    n.live_ctrl.send(ag_plugin::live::LiveCommand::Move(idx1 as i32, idx1 < idx2))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_edit_plugin(p: *mut c_void, loaded_idx: u32) -> bool {
+    let Some(n) = native(p) else { return false };
+    n.live_ctrl.send(ag_plugin::live::LiveCommand::Edit(loaded_idx as i32))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_hide_plugin(p: *mut c_void) -> bool {
+    let Some(n) = native(p) else { return false };
+    n.live_ctrl.send(ag_plugin::live::LiveCommand::Hide)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_num_presets(p: *mut c_void, slot_idx: u32) -> u32 {
+    let Some(n) = native(p) else { return 0 };
+    n.live_ctrl.with_info(|info| {
+        info.slots.get(slot_idx as usize).map(|s| s.presets.len() as u32).unwrap_or(0)
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_get_preset_name(
+    p: *mut c_void,
+    slot_idx: u32,
+    preset_idx: u32,
+    buf: *mut c_char,
+    cap: u32,
+) -> bool {
+    let Some(n) = native(p) else { return false };
+    n.live_ctrl.with_info(|info| {
+        let Some(slot) = info.slots.get(slot_idx as usize) else { return false };
+        let Some(name) = slot.presets.get(preset_idx as usize) else { return false };
+        copy_cstr(name, buf, cap);
+        true
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_set_preset(p: *mut c_void, slot_idx: u32, preset_idx: u32) -> bool {
+    let Some(n) = native(p) else { return false };
+    n.live_ctrl.send(ag_plugin::live::LiveCommand::Preset(slot_idx as i32, preset_idx as i32))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_num_plugin_params(p: *mut c_void, slot_idx: u32) -> u32 {
+    let Some(n) = native(p) else { return 0 };
+    n.live_ctrl.with_info(|info| {
+        info.slots.get(slot_idx as usize).map(|s| s.params.len() as u32).unwrap_or(0)
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_get_plugin_param_info(
+    p: *mut c_void,
+    slot_idx: u32,
+    param_idx: u32,
+    name_buf: *mut c_char,
+    name_cap: u32,
+    default_val: *mut f32,
+    current_val: *mut f32,
+) -> bool {
+    let Some(n) = native(p) else { return false };
+    n.live_ctrl.with_info(|info| {
+        let Some(slot) = info.slots.get(slot_idx as usize) else { return false };
+        let Some(param) = slot.params.get(param_idx as usize) else { return false };
+        copy_cstr(&param.name, name_buf, name_cap);
+        if !default_val.is_null() { *default_val = param.default_value; }
+        if !current_val.is_null() { *current_val = param.current; }
+        true
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_set_plugin_param(p: *mut c_void, slot_idx: u32, param_idx: u32, val: f32) -> bool {
+    let Some(n) = native(p) else { return false };
+    n.live_ctrl.send(ag_plugin::live::LiveCommand::Parameter(slot_idx as i32, param_idx as i32, val))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_connect(p: *mut c_void, endpoint: *const c_char) -> bool {
+    let Some(n) = native(p) else { return false };
+    if endpoint.is_null() { return false };
+    let ep = std::ffi::CStr::from_ptr(endpoint).to_string_lossy().to_string();
+    n.live_ctrl.connect(&ep, ag_protocol::HandshakeRequest {
+        samples_per_block: 64,
+        sample_rate: 48000.0,
+        channels_in: 2,
+        channels_out: 2,
+        ..Default::default()
+    })
 }
 
 #[cfg(test)]

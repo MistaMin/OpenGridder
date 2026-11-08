@@ -49,15 +49,27 @@ pub struct RemoteParam {
     pub label: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CatalogItem {
+    pub name: String,
+    pub company: String,
+    pub id: String,
+    pub format: String,
+    pub category: String,
+    pub is_instrument: bool,
+}
+
 /// One slot in the insert's chain. AudioGridder keeps this list across reconnect
 /// and sends bypass again after each plugin is re-added.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct LoadedSlot {
+    pub name: String,
     pub id: String,
     pub settings: String,
     pub layout: String,
     pub mono: u64,
     pub bypassed: bool,
+    pub oversampling: u32,
     /// Parameters read from the add reply. Empty until that body is kept.
     pub params: Vec<RemoteParam>,
     /// Factory preset names from the add reply, split on a vertical bar.
@@ -77,6 +89,7 @@ pub struct RemoteSession {
     last_add: serde_json::Value,
     slots: Vec<LoadedSlot>,
     catalog: Vec<String>,
+    catalog_items: Vec<CatalogItem>,
     applied_selection: i32,
 }
 
@@ -135,6 +148,7 @@ impl RemoteSession {
             last_add: serde_json::Value::Null,
             slots: Vec::new(),
             catalog: Vec::new(),
+            catalog_items: Vec::new(),
             applied_selection: 0,
         };
         let (message_type, body) = session.read_cmd()?;
@@ -146,7 +160,13 @@ impl RemoteSession {
             return Err(invalid("plugin list"));
         }
         session.catalog = plugin_ids(packed);
+        session.catalog_items = parse_catalog(packed);
         Ok(session)
+    }
+
+    /// Full catalog items from the connect-time list.
+    pub fn catalog_items(&self) -> &[CatalogItem] {
+        &self.catalog_items
     }
 
     /// Plugin ids from the connect-time list, in catalog order.
@@ -219,12 +239,15 @@ impl RemoteSession {
             return Err(invalid("parameters"));
         }
         let params = parameter_list(&param_body).ok_or_else(|| invalid("parameters"))?;
+        let name = self.last_add.get("name").and_then(|value| value.as_str()).unwrap_or(id).to_string();
         self.slots.push(LoadedSlot {
+            name,
             id: id.to_string(),
             settings: settings.to_string(),
             layout: layout.to_string(),
             mono: mono_channels,
             bypassed: false,
+            oversampling: 1,
             params,
             presets,
         });
@@ -454,7 +477,11 @@ impl RemoteSession {
         let mut body = [0u8; 8];
         body[..4].copy_from_slice(&index.to_le_bytes());
         body[4..].copy_from_slice(&factor.to_le_bytes());
-        self.write_cmd(SET_PLUGIN_OVERSAMPLING, &body)
+        self.write_cmd(SET_PLUGIN_OVERSAMPLING, &body)?;
+        if let Some(slot) = self.slots.get_mut(index as usize) {
+            slot.oversampling = factor.max(1) as u32;
+        }
+        Ok(())
     }
 
     /// Send one planar block and return the server's block. Call this off the audio thread.
@@ -686,6 +713,37 @@ fn plugin_ids(packed: &[u8]) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn parse_catalog(packed: &[u8]) -> Vec<CatalogItem> {
+    let Some(value) = command::decode_msgpack(packed) else {
+        return Vec::new();
+    };
+    value
+        .get("plugins")
+        .and_then(|plugins| plugins.as_array())
+        .map(|plugins| {
+            plugins
+                .iter()
+                .filter_map(|p| {
+                    let id = p.get("id").and_then(|v| v.as_str())?.to_string();
+                    let name = p.get("name").and_then(|v| v.as_str()).unwrap_or(&id).to_string();
+                    let company = p.get("company").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let format = p.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let category = p.get("category").and_then(|v| v.as_str()).unwrap_or("Effect").to_string();
+                    let is_instrument = p.get("isInstrument").and_then(|v| v.as_bool()).unwrap_or(false);
+                    Some(CatalogItem {
+                        name,
+                        company,
+                        id,
+                        format,
+                        category,
+                        is_instrument,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -885,6 +943,7 @@ mod tests {
         assert!((params[0].default_value - 0.5).abs() < 1.0e-5, "default {}", params[0].default_value);
 
         session.set_parameter(0, 0, 0.625).unwrap();
+        thread::sleep(Duration::from_millis(20));
         let updated = session.slot_parameters(0)[0].current;
         let audio = session.exchange(&[vec![1.0; 32], vec![1.0; 32]]).unwrap();
         let expected = 10.0f32.powf(6.0 / 20.0);

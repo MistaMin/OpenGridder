@@ -175,8 +175,7 @@ void og_native_set_transport_latency(NativePlugin* p, uint32_t transport) {
 }
 
 int32_t og_native_status(NativePlugin* p) {
-    (void)p;
-    return 1; // Connected
+    return ag_insert_status((void*)p);
 }
 
 void og_native_name(NativePlugin* p, uint32_t index, char* buffer, uint32_t capacity) {
@@ -185,74 +184,55 @@ void og_native_name(NativePlugin* p, uint32_t index, char* buffer, uint32_t capa
 }
 
 uint32_t og_native_num_loaded_plugins(NativePlugin* p) {
-    (void)p;
-    return 1;
+    return ag_insert_num_loaded_plugins((void*)p);
 }
 
 bool og_native_get_loaded_plugin(NativePlugin* p, uint32_t idx, char* name_buf, uint32_t name_cap, bool* bypassed, uint32_t* oversampling) {
-    (void)p; (void)idx;
-    if (name_buf && name_cap > 0) snprintf(name_buf, name_cap, "Remote DSP");
-    if (bypassed) *bypassed = false;
-    if (oversampling) *oversampling = 1;
-    return true;
+    return ag_insert_get_loaded_plugin((void*)p, idx, name_buf, name_cap, bypassed, oversampling);
 }
 
 uint32_t og_native_num_available_plugins(NativePlugin* p) {
-    (void)p;
-    return 1;
+    return ag_insert_num_available_plugins((void*)p);
 }
 
 bool og_native_get_available_plugin(NativePlugin* p, uint32_t idx, char* name_buf, uint32_t name_cap, char* id_buf, uint32_t id_cap, char* cat_buf, uint32_t cat_cap) {
-    (void)p; (void)idx;
-    if (name_buf && name_cap > 0) snprintf(name_buf, name_cap, "Builtin-gain");
-    if (id_buf && id_cap > 0) snprintf(id_buf, id_cap, "Builtin-gain");
-    if (cat_buf && cat_cap > 0) snprintf(cat_buf, cat_cap, "Utility");
-    return true;
+    char type_buf[32] = {0};
+    char company_buf[64] = {0};
+    return ag_insert_get_available_plugin_ext((void*)p, idx, name_buf, name_cap, id_buf, id_cap, type_buf, sizeof(type_buf), company_buf, sizeof(company_buf), cat_buf, cat_cap);
 }
 
 bool og_native_get_available_plugin_ext(NativePlugin* p, uint32_t idx, char* name_buf, uint32_t name_cap, char* id_buf, uint32_t id_cap, char* type_buf, uint32_t type_cap, char* company_buf, uint32_t company_cap, char* cat_buf, uint32_t cat_cap) {
-    (void)p; (void)idx;
-    if (name_buf && name_cap > 0) snprintf(name_buf, name_cap, "Builtin-gain");
-    if (id_buf && id_cap > 0) snprintf(id_buf, id_cap, "Builtin-gain");
-    if (type_buf && type_cap > 0) snprintf(type_buf, type_cap, "AU");
-    if (company_buf && company_cap > 0) snprintf(company_buf, company_cap, "OpenGrid");
-    if (cat_buf && cat_cap > 0) snprintf(cat_buf, cat_cap, "Utility");
-    return true;
+    return ag_insert_get_available_plugin_ext((void*)p, idx, name_buf, name_cap, id_buf, id_cap, type_buf, type_cap, company_buf, company_cap, cat_buf, cat_cap);
 }
 
 bool og_native_load_plugin(NativePlugin* p, uint32_t available_idx) {
-    (void)p; (void)available_idx;
-    return true;
+    return ag_insert_load_plugin((void*)p, available_idx);
 }
 
 bool og_native_load_plugin_at(NativePlugin* p, uint32_t available_idx, int32_t x, int32_t y) {
-    (void)p; (void)available_idx; (void)x; (void)y;
-    return true;
+    (void)x; (void)y;
+    return ag_insert_load_plugin((void*)p, available_idx);
 }
 
 bool og_native_unload_plugin(NativePlugin* p, uint32_t loaded_idx) {
-    (void)p; (void)loaded_idx;
-    return true;
+    return ag_insert_unload_plugin((void*)p, loaded_idx);
 }
 
 bool og_native_set_plugin_oversampling(NativePlugin* p, uint32_t loaded_idx, uint32_t factor) {
-    (void)p; (void)loaded_idx; (void)factor;
-    return true;
+    return ag_insert_set_plugin_oversampling((void*)p, loaded_idx, factor);
 }
 
 bool og_native_set_plugin_bypassed(NativePlugin* p, uint32_t loaded_idx, bool bypassed) {
-    (void)p; (void)loaded_idx; (void)bypassed;
-    return true;
+    return ag_insert_set_plugin_bypassed((void*)p, loaded_idx, bypassed);
 }
 
 bool og_native_edit_plugin(NativePlugin* p, uint32_t loaded_idx, int32_t x, int32_t y) {
-    (void)p; (void)loaded_idx; (void)x; (void)y;
-    return true;
+    (void)x; (void)y;
+    return ag_insert_edit_plugin((void*)p, loaded_idx);
 }
 
 bool og_native_hide_plugin(NativePlugin* p) {
-    (void)p;
-    return true;
+    return ag_insert_hide_plugin((void*)p);
 }
 
 bool og_native_get_screen_info(NativePlugin* p, uint32_t* width, uint32_t* height, double* scale, uint64_t* frame_id) {
@@ -311,38 +291,31 @@ void og_native_get_input_meters(NativePlugin* p, float* left, float* right) {
 }
 
 bool og_native_exchange_plugins(NativePlugin* p, uint32_t idx_a, uint32_t idx_b) {
-    (void)p; (void)idx_a; (void)idx_b;
-    return true;
+    return ag_insert_exchange_plugins((void*)p, idx_a, idx_b);
 }
 
 uint32_t og_native_num_presets(NativePlugin* p, uint32_t loaded_idx) {
-    (void)p; (void)loaded_idx;
-    return 0;
+    return ag_insert_num_presets((void*)p, loaded_idx);
 }
 
 bool og_native_get_preset_name(NativePlugin* p, uint32_t loaded_idx, uint32_t preset_idx, char* buf, uint32_t cap) {
-    (void)p; (void)loaded_idx; (void)preset_idx; (void)buf; (void)cap;
-    return false;
+    return ag_insert_get_preset_name((void*)p, loaded_idx, preset_idx, buf, cap);
 }
 
 bool og_native_set_preset(NativePlugin* p, uint32_t loaded_idx, uint32_t preset_idx) {
-    (void)p; (void)loaded_idx; (void)preset_idx;
-    return true;
+    return ag_insert_set_preset((void*)p, loaded_idx, preset_idx);
 }
 
 uint32_t og_native_num_plugin_params(NativePlugin* p, uint32_t loaded_idx) {
-    (void)p; (void)loaded_idx;
-    return 0;
+    return ag_insert_num_plugin_params((void*)p, loaded_idx);
 }
 
 bool og_native_get_plugin_param_info(NativePlugin* p, uint32_t loaded_idx, uint32_t param_idx, char* name_buf, uint32_t name_cap, float* default_val, float* current_val) {
-    (void)p; (void)loaded_idx; (void)param_idx; (void)name_buf; (void)name_cap; (void)default_val; (void)current_val;
-    return false;
+    return ag_insert_get_plugin_param_info((void*)p, loaded_idx, param_idx, name_buf, name_cap, default_val, current_val);
 }
 
 bool og_native_set_plugin_param(NativePlugin* p, uint32_t loaded_idx, uint32_t param_idx, float val) {
-    (void)p; (void)loaded_idx; (void)param_idx; (void)val;
-    return true;
+    return ag_insert_set_plugin_param((void*)p, loaded_idx, param_idx, val);
 }
 
 void og_native_store_a(NativePlugin* p) { (void)p; }
@@ -356,8 +329,7 @@ void og_native_get_active_server(NativePlugin* p, char* buf, uint32_t cap) {
 }
 
 bool og_native_set_server(NativePlugin* p, const char* host_port) {
-    (void)p; (void)host_port;
-    return true;
+    return ag_insert_connect((void*)p, host_port);
 }
 
 uint32_t og_native_num_discovered_servers(NativePlugin* p) {

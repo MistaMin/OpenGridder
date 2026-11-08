@@ -20,6 +20,7 @@ struct Au {
  AudioStreamBasicDescription format{};
  UInt32 maximum=512;
  bool initialized=false;
+ bool offline=false;
  AURenderCallbackStruct callback{};
  AudioUnitConnection connection{};
  OSStatus last_error=0;
@@ -48,7 +49,7 @@ OSStatus property_info(void*,AudioUnitPropertyID id,AudioUnitScope scope,AudioUn
  case kAudioUnitProperty_ParameterInfo:if(scope!=kAudioUnitScope_Global)return kAudioUnitErr_InvalidScope;if(element>=ag_insert_param_count())return kAudioUnitErr_InvalidParameter;n=sizeof(AudioUnitParameterInfo);break;
  case kAudioUnitProperty_SupportedNumChannels:n=2*sizeof(AUChannelInfo);break;
  case kAudioUnitProperty_ElementCount:n=sizeof(UInt32);break;
- case kAudioUnitProperty_MaximumFramesPerSlice:case kAudioUnitProperty_BypassEffect:if(scope!=kAudioUnitScope_Global)return kAudioUnitErr_InvalidScope;n=sizeof(UInt32);write=true;break;
+ case kAudioUnitProperty_OfflineRender:case kAudioUnitProperty_MaximumFramesPerSlice:case kAudioUnitProperty_BypassEffect:if(scope!=kAudioUnitScope_Global)return kAudioUnitErr_InvalidScope;n=sizeof(UInt32);write=true;break;
  case kAudioUnitProperty_ShouldAllocateBuffer:case kAudioUnitProperty_RenderQuality:n=sizeof(UInt32);write=true;break;
  case kAudioUnitProperty_LastRenderError:n=sizeof(OSStatus);break;
  case kAudioUnitProperty_Latency:case kAudioUnitProperty_TailTime:if(scope!=kAudioUnitScope_Global)return kAudioUnitErr_InvalidScope;n=sizeof(Float64);break;
@@ -79,6 +80,7 @@ OSStatus get_property(void* self,AudioUnitPropertyID id,AudioUnitScope scope,Aud
  }
  case kAudioUnitProperty_SampleRate:*(Float64*)out=a->format.mSampleRate;break;
  case kAudioUnitProperty_StreamFormat:*(AudioStreamBasicDescription*)out=a->format;break;
+ case kAudioUnitProperty_OfflineRender:*(UInt32*)out=a->offline?1:0;break;
  case kAudioUnitProperty_ElementCount:*(UInt32*)out=1;break;
  case kAudioUnitProperty_MaximumFramesPerSlice:*(UInt32*)out=a->maximum;break;
  case kAudioUnitProperty_BypassEffect:*(UInt32*)out=ag_insert_get(a->processor,0)>=0.5;break;
@@ -111,6 +113,7 @@ OSStatus set_property(void* self,AudioUnitPropertyID id,AudioUnitScope scope,Aud
  case kAudioUnitProperty_SetRenderCallback:if(size!=sizeof(AURenderCallbackStruct)||scope!=kAudioUnitScope_Input||element!=0)break;a->callback=*(const AURenderCallbackStruct*)input;a->connection={};return OK;
  case kAudioUnitProperty_MakeConnection:if(size!=sizeof(AudioUnitConnection))break;a->connection=*(const AudioUnitConnection*)input;a->callback={};return OK;
  case kAudioUnitProperty_BypassEffect:if(size!=4||scope!=kAudioUnitScope_Global)break;ag_insert_set(a->processor,0,*(const UInt32*)input?1:0);a->changed(id,scope,element);return OK;
+ case kAudioUnitProperty_OfflineRender:if(size!=4||scope!=kAudioUnitScope_Global)break;a->offline=(*(const UInt32*)input!=0);a->changed(id,scope,element);return OK;
  case kAudioUnitProperty_PresentPreset:if(size!=sizeof(AUPreset)||scope!=kAudioUnitScope_Global)break;a->changed(id,scope,element);return OK;
  case kAudioUnitProperty_ShouldAllocateBuffer:case kAudioUnitProperty_RenderQuality:if(size==4)return OK;break;
  default:return kAudioUnitErr_InvalidProperty;
@@ -131,7 +134,7 @@ OSStatus render(void* self,AudioUnitRenderActionFlags* flags,const AudioTimeStam
  if(status){a->last_error=status;return status;}
  const float* inputs[2]{};float* outputs[2]{};
  for(UInt32 ch=0;ch<channels;ch++){inputs[ch]=(const float*)in.buffers[ch].mData;outputs[ch]=a->output[ch];}
- if(!ag_insert_process(a->processor,inputs,outputs,channels,frames,false))return kAudioUnitErr_CannotDoInCurrentContext;
+ if(!ag_insert_process(a->processor,inputs,outputs,channels,frames,a->offline))return kAudioUnitErr_CannotDoInCurrentContext;
  bool silence=true;for(UInt32 ch=0;ch<channels;ch++){auto& b=data->mBuffers[ch];if(!b.mData)b.mData=a->output[ch];else std::memcpy(b.mData,a->output[ch],frames*4);b.mDataByteSize=frames*4;b.mNumberChannels=1;for(UInt32 i=0;i<frames;i++)silence=silence&&a->output[ch][i]==0;}
  *flags&=~kAudioUnitRenderAction_OutputIsSilence;if(silence)*flags|=kAudioUnitRenderAction_OutputIsSilence;
  for(const auto& n:a->notifies){auto post=*flags|kAudioUnitRenderAction_PostRender;n.proc(n.data,&post,time,bus,frames,data);}a->last_error=OK;return OK;

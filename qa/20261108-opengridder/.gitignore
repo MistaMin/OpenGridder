@@ -1,0 +1,8 @@
+hide_pid
+*.pid
+*.log
+cmd.txt
+resp.txt
+seq.txt
+ready.txt
+*.wav
