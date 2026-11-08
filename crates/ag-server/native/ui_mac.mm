@@ -108,7 +108,7 @@ static void keep_on_screen(NSWindow* window) {
             if (NSIntersectsRect(candidate.frame, frame)) { screen = candidate; break; }
         }
     }
-    if (!screen) screen = [NSScreen mainScreen];
+    if (!screen) screen = [NSScreen screens].firstObject;
     const NSRect area = screen.visibleFrame;
     if (NSMaxX(frame) > NSMaxX(area)) frame.origin.x = NSMaxX(area) - frame.size.width;
     if (NSMinX(frame) < NSMinX(area)) frame.origin.x = NSMinX(area);
@@ -257,11 +257,14 @@ static uint64_t show_editor(NSView* view, void* native, const char* title, int x
     window.title = title && title[0] ? [NSString stringWithUTF8String:title] : @"Plugin";
     window.acceptsMouseMovedEvents = YES;
     window.contentView = view;
-    // (x, y) is the top-left corner in top-left-origin screen coordinates, as the client
-    // sends it (ProcessorWindow::move). Without one, use the main screen's top-left.
-    NSRect visible = [NSScreen mainScreen].visibleFrame;
-    CGFloat primary = NSMaxY([NSScreen screens].firstObject.frame);
-    NSPoint topLeft = (x > 0 || y > 0) ? NSMakePoint(x, primary - y) : NSMakePoint(NSMinX(visible) + 40, NSMaxY(visible) - 40);
+    // (x, y) is the top-left corner in top-left-origin screen coordinates, as a client on this
+    // Mac sends it (local mode, ProcessorWindow::move). Without one, AudioGridder's placement:
+    // the top-left of the primary display's usable area (setTopLeftPosition(userArea.topLeft)),
+    // not whichever display macOS calls "main" at that moment.
+    NSScreen* primaryScreen = [NSScreen screens].firstObject;
+    NSRect visible = primaryScreen.visibleFrame;
+    CGFloat primary = NSMaxY(primaryScreen.frame);
+    NSPoint topLeft = (x > 0 || y > 0) ? NSMakePoint(x, primary - y) : NSMakePoint(NSMinX(visible), NSMaxY(visible));
     [window setFrameTopLeftPoint:topLeft];
     keep_on_screen(window);
 
