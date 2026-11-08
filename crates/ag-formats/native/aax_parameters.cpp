@@ -255,7 +255,11 @@ AAX_Result OpenGridder_Parameters::GetChunkSize(AAX_CTypeID iChunkID, uint32_t* 
 AAX_Result OpenGridder_Parameters::GetChunk(AAX_CTypeID iChunkID, AAX_SPlugInChunk* oChunk) const {
     if (iChunkID != cOpenGridder_StateChunkID) return AAX_CEffectParameters::GetChunk(iChunkID, oChunk);
     if (!oChunk) return AAX_ERROR_NULL_ARGUMENT;
-    // The host sized the chunk from GetChunkSize; write exactly those bytes.
+    // Normally the host sized the chunk from GetChunkSize just before. Pro Tools also asks for
+    // the chunk straight after instantiation without that call; build the state here then, so
+    // the chunk is never empty ("chunk 'OGst' size is 0").
+    if (mChunkCache.empty()) mChunkCache = SaveState();
+    if (mChunkCache.empty()) return AAX_ERROR_INCORRECT_CHUNK_SIZE;
     if (oChunk->fSize < 0 || (size_t)oChunk->fSize < mChunkCache.size()) return AAX_ERROR_INCORRECT_CHUNK_SIZE;
     oChunk->fSize = (int32_t)mChunkCache.size();
     oChunk->fVersion = 1;

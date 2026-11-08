@@ -33,13 +33,14 @@ unsafe extern "C" {
 }
 
 pub fn scan() -> Vec<CatalogPlugin> {
+    let total = unsafe { ag_native_scan(std::ptr::null_mut(), 0) }.max(0) as usize;
     let mut items = vec![AgCatalogItem {
         name: [0; 128],
         company: [0; 128],
         id: [0; 768],
         format: [0; 16],
         is_instrument: 0,
-    }; 24];
+    }; total];
     let count = unsafe { ag_native_scan(items.as_mut_ptr(), items.len() as c_int) };
     let count = count.max(0) as usize;
     items.truncate(count.min(items.len()));

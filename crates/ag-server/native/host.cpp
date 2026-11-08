@@ -11,6 +11,7 @@
 #include <cstring>
 #include <filesystem>
 #include <mutex>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -1216,11 +1217,15 @@ int ag_native_scan(AgCatalogItem* out, int cap) {
     std::lock_guard<std::mutex> lock(gate());
     if (!catalog_ready()) {
         std::vector<Catalog> items;
-        collect_lv2(items, 12);
+        collect_lv2(items, std::numeric_limits<int>::max());  // lilv metadata only, no instances
         collect_vst3(items, static_cast<int>(items.size()) + 8);
         collect_clap(items, static_cast<int>(items.size()) + 8);
         catalog_cache() = std::move(items);
         catalog_ready() = true;
+    }
+    // out == nullptr asks for the catalog size, so the caller can size its buffer.
+    if (out == nullptr) {
+        return static_cast<int>(catalog_cache().size());
     }
     const int count = std::min(cap, static_cast<int>(catalog_cache().size()));
     for (int index = 0; index < count; ++index) {

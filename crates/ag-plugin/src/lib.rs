@@ -9,7 +9,7 @@ mod session;
 mod spsc;
 pub mod live;
 
-pub use session::{RemoteSession, BUILTIN_GAIN_ID};
+pub use session::{LoadedSlot, RemoteSession, BUILTIN_GAIN_ID};
 
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -378,6 +378,11 @@ impl AudioGridder {
     /// Remember one chain slot for the DAW state document. This does not open a socket.
     pub fn note_loaded_plugin(&mut self, plugin: ChainPlugin) {
         self.loaded_plugins.push(plugin);
+    }
+
+    /// Replace the chain stored for the state document (the live chain at save time).
+    pub fn set_loaded_plugins(&mut self, plugins: Vec<ChainPlugin>) {
+        self.loaded_plugins = plugins;
     }
 
     /// Chain slots stored for the state document.

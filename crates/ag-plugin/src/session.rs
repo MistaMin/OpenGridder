@@ -374,6 +374,21 @@ impl RemoteSession {
     }
 
     /// GetPluginSettings. The chunk includes the playhead from the last audio block.
+    /// Re-read every slot's settings from the server so a reconnect replay and the DAW state
+    /// carry the plugin's current values, not the ones it was added with.
+    pub fn refresh_settings(&mut self) -> std::io::Result<()> {
+        for index in 0..self.slots.len() {
+            let mut value = self.plugin_settings(index as i32)?;
+            if let Some(object) = value.as_object_mut() {
+                object.remove("playhead");
+            }
+            if let Some(slot) = self.slots.get_mut(index) {
+                slot.settings = value.to_string();
+            }
+        }
+        Ok(())
+    }
+
     pub fn plugin_settings(&mut self, index: i32) -> std::io::Result<serde_json::Value> {
         self.write_cmd(GET_PLUGIN_SETTINGS, &command::number(index))?;
         let (message_type, body) = self.read_cmd()?;

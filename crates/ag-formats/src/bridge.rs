@@ -31,6 +31,11 @@ struct Native {
     latency: AtomicU32,
     revision: AtomicU64,
     framebuffer: Mutex<goodlookindri_shell::Framebuffer>,
+    // Last ag_insert_prepare format, so a server picked later handshakes with the host's real
+    // rate, block size and channel count. Zero until prepared.
+    prepared_rate: AtomicU64,
+    prepared_frames: AtomicU32,
+    prepared_channels: AtomicU32,
 }
 // The native wrapper follows VST3's lifecycle: prepare/reset/process are exclusive.
 // Controller calls only access `values` and `control`, never `audio`.
@@ -90,6 +95,9 @@ pub extern "C" fn ag_insert_create() -> *mut c_void {
         latency: AtomicU32::new(ag_plugin::profile_samples(1) as u32),
         revision: AtomicU64::new(1),
         framebuffer: Mutex::new(goodlookindri_shell::Framebuffer::new(720, 420)),
+        prepared_rate: AtomicU64::new(0),
+        prepared_frames: AtomicU32::new(0),
+        prepared_channels: AtomicU32::new(0),
     })) as *mut c_void
 }
 #[no_mangle]
@@ -148,6 +156,9 @@ pub unsafe extern "C" fn ag_insert_prepare(
         .resize_with(channels as usize, || vec![0.0; 8192]);
     a.plugin
         .prepare(rate as f32, frames as usize, channels as usize);
+    n.prepared_rate.store(rate.to_bits(), Ordering::Relaxed);
+    n.prepared_frames.store(frames, Ordering::Relaxed);
+    n.prepared_channels.store(channels, Ordering::Relaxed);
     if !n.live_ctrl.connected() {
         n.live_ctrl.connect(
             "127.0.0.1:55056",
@@ -355,6 +366,12 @@ pub unsafe extern "C" fn ag_insert_save(p: *mut c_void, out: *mut u8, capacity: 
             f32::from_bits(n.values[i].load(Ordering::Relaxed)),
         );
     }
+    // The remote chain lives in the network worker. Save what it last saw (settings are
+    // refreshed every few seconds); with no session yet, keep the chain restored by load.
+    let (connected, slots) = n.live_ctrl.with_info(|info| (info.connected, info.slots.clone()));
+    if connected || !slots.is_empty() {
+        control.set_loaded_plugins(slots.iter().map(slot_to_chain).collect());
+    }
     let Some(bytes) = control.save_state() else {
         return 0;
     };
@@ -382,8 +399,38 @@ pub unsafe extern "C" fn ag_insert_load(p: *mut c_void, data: *const u8, length:
             n.values[i].store(value.to_bits(), Ordering::Relaxed);
         }
     }
+    // Rebuild the saved remote chain on the server (now, or as soon as one answers).
+    let chain: Vec<ag_plugin::LoadedSlot> = control.loaded_plugins().iter().map(chain_to_slot).collect();
+    n.live_ctrl.restore(chain);
     n.revision.fetch_add(1, Ordering::Relaxed);
     true
+}
+
+fn slot_to_chain(slot: &ag_plugin::LoadedSlot) -> ag_plugin::ChainPlugin {
+    ag_plugin::ChainPlugin {
+        id: slot.id.clone(),
+        settings: slot.settings.clone(),
+        bypassed: slot.bypassed,
+        layout: slot.layout.clone(),
+        mono_channels: slot.mono,
+        latency: 0,
+        sidechain_disabled: false,
+        oversampling: slot.oversampling as i32,
+        params: Vec::new(),
+    }
+}
+
+fn chain_to_slot(plugin: &ag_plugin::ChainPlugin) -> ag_plugin::LoadedSlot {
+    ag_plugin::LoadedSlot {
+        name: plugin.id.clone(),
+        id: plugin.id.clone(),
+        settings: plugin.settings.clone(),
+        layout: plugin.layout.clone(),
+        mono: plugin.mono_channels,
+        bypassed: plugin.bypassed,
+        oversampling: plugin.oversampling.max(1) as u32,
+        ..Default::default()
+    }
 }
 
 fn publish_meters(n: &Native, p: &AudioGridder) {
@@ -752,11 +799,15 @@ pub unsafe extern "C" fn ag_insert_connect(p: *mut c_void, endpoint: *const c_ch
     let Some(n) = native(p) else { return false };
     if endpoint.is_null() { return false };
     let ep = std::ffi::CStr::from_ptr(endpoint).to_string_lossy().to_string();
+    let rate = f64::from_bits(n.prepared_rate.load(Ordering::Relaxed));
+    let frames = n.prepared_frames.load(Ordering::Relaxed);
+    let channels = n.prepared_channels.load(Ordering::Relaxed);
+    let prepared = rate > 0.0 && frames > 0 && channels > 0;
     n.live_ctrl.connect(&ep, ag_protocol::HandshakeRequest {
-        samples_per_block: 64,
-        sample_rate: 48000.0,
-        channels_in: 2,
-        channels_out: 2,
+        samples_per_block: if prepared { frames as i32 } else { 64 },
+        sample_rate: if prepared { rate } else { 48000.0 },
+        channels_in: if prepared { channels as i32 } else { 2 },
+        channels_out: if prepared { channels as i32 } else { 2 },
         ..Default::default()
     })
 }

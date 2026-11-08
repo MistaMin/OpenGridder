@@ -78,6 +78,8 @@ pub enum LiveCommand {
         saved: Vec<LoadedSlot>,
     },
     Disconnect,
+    /// Chain restored from the DAW state; it is (re)built on the next connect.
+    Restore(Vec<LoadedSlot>),
     Add {
         id: String,
         settings: String,
@@ -124,6 +126,10 @@ impl LiveController {
             request,
             saved: Vec::new(),
         })
+    }
+    /// Rebuild `saved` on the server, now if connected (by reconnecting) or once a server answers.
+    pub fn restore(&self, saved: Vec<LoadedSlot>) -> bool {
+        self.send(LiveCommand::Restore(saved))
     }
     pub fn with_info<R>(&self, f: impl FnOnce(&LiveInfo) -> R) -> R {
         let info = self.0.shared.info.lock().unwrap_or_else(|p| p.into_inner());
@@ -279,6 +285,25 @@ impl LiveAudio {
         }
     }
 }
+const RETRY_INTERVAL: Duration = Duration::from_secs(2);
+/// How often loaded plugins' settings are re-read for state saves and reconnect replays.
+const SETTINGS_INTERVAL: Duration = Duration::from_secs(3);
+struct Target {
+    endpoint: String,
+    request: HandshakeRequest,
+    saved: Vec<LoadedSlot>,
+}
+/// Keep the chain of a session that just died so the reconnect restores the same plugins.
+fn remember_chain(target: &mut Option<Target>, session: &RemoteSession) {
+    if let Some(t) = target.as_mut() {
+        t.saved = session.loaded().to_vec();
+    }
+}
+/// Socket errors that mean the server went away (restart, rescan, crash), not a refused command.
+fn is_connection_lost(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind::*;
+    matches!(e.kind(), BrokenPipe | ConnectionReset | ConnectionAborted | NotConnected | UnexpectedEof)
+}
 fn snapshot(shared: &Shared, session: &RemoteSession) {
     shared
         .latency
@@ -315,6 +340,12 @@ fn run(
     let mut session: Option<RemoteSession> = None;
     let mut selected = 0;
     let mut last_cpu = Instant::now();
+    // The server this insert should be connected to. While there is no session the worker
+    // retries it, so an insert created before the server is up (or one whose server restarted,
+    // e.g. for a rescan) connects on its own. `saved` is the chain to restore on reconnect.
+    let mut target: Option<Target> = None;
+    let mut next_retry = Instant::now();
+    let mut last_settings = Instant::now();
     while !shared.stop.load(Ordering::Acquire) {
         while let Ok(command) = commands.try_recv() {
             if let LiveCommand::Connect {
@@ -323,37 +354,41 @@ fn run(
                 saved,
             } = command
             {
+                // Switching or re-announcing the server keeps the chain: the live one if there
+                // is a session, otherwise the one waiting to be restored.
+                let saved = if !saved.is_empty() {
+                    saved
+                } else if let Some(s) = session.as_ref() {
+                    s.loaded().to_vec()
+                } else {
+                    target.take().map(|t| t.saved).unwrap_or_default()
+                };
                 disconnect(&shared, None);
                 session = None;
-                let (host, port) = crate::parse_server(&endpoint);
-                shared
-                    .info
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .endpoint = endpoint;
-                match RemoteSession::connect_host(&host, port, request).and_then(|mut s| {
-                    s.replay(&saved)?;
-                    Ok(s)
-                }) {
-                    Ok(s) => {
-                        *shared.sockets.lock().unwrap_or_else(|p| p.into_inner()) =
-                            s.shutdown_handles().unwrap_or_default();
-                        shared
-                            .info
-                            .lock()
-                            .unwrap_or_else(|p| p.into_inner())
-                            .catalog = s.catalog_items().to_vec();
-                        snapshot(&shared, &s);
-                        shared.connected.store(true, Ordering::Release);
-                        session = Some(s);
-                        selected = 0;
+                target = Some(Target { endpoint, request, saved });
+                next_retry = Instant::now();
+                continue;
+            }
+            if let LiveCommand::Restore(saved) = command {
+                match target.as_mut() {
+                    Some(t) => t.saved = saved,
+                    None => {
+                        target = Some(Target {
+                            endpoint: format!("127.0.0.1:{}", ag_protocol::SERVER_PORT),
+                            request: HandshakeRequest::default(),
+                            saved,
+                        })
                     }
-                    Err(e) => disconnect(&shared, Some(e.to_string())),
                 }
+                if session.take().is_some() {
+                    disconnect(&shared, None);
+                }
+                next_retry = Instant::now();
                 continue;
             }
             if matches!(command, LiveCommand::Disconnect) {
                 session = None;
+                target = None;
                 disconnect(&shared, None);
                 continue;
             }
@@ -374,10 +409,47 @@ fn run(
                 LiveCommand::Preset(i, p) => s.set_preset(i, p, 0),
                 _ => Ok(()),
             };
-            if let Err(e) = result {
-                shared.info.lock().unwrap_or_else(|p| p.into_inner()).error = Some(e.to_string());
-            } else {
-                snapshot(&shared, s);
+            match result {
+                Err(e) if is_connection_lost(&e) => {
+                    remember_chain(&mut target, s);
+                    disconnect(&shared, Some(e.to_string()));
+                    session = None;
+                    next_retry = Instant::now() + RETRY_INTERVAL;
+                }
+                Err(e) => {
+                    shared.info.lock().unwrap_or_else(|p| p.into_inner()).error = Some(e.to_string());
+                }
+                Ok(()) => snapshot(&shared, s),
+            }
+        }
+        if session.is_none() && Instant::now() >= next_retry {
+            if let Some(t) = target.as_ref() {
+                shared.info.lock().unwrap_or_else(|p| p.into_inner()).endpoint = t.endpoint.clone();
+                let (host, port) = crate::parse_server(&t.endpoint);
+                match RemoteSession::connect_host(&host, port, t.request.clone()).and_then(|mut s| {
+                    s.replay(&t.saved)?;
+                    Ok(s)
+                }) {
+                    Ok(s) => {
+                        *shared.sockets.lock().unwrap_or_else(|p| p.into_inner()) =
+                            s.shutdown_handles().unwrap_or_default();
+                        shared
+                            .info
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .catalog = s.catalog_items().to_vec();
+                        snapshot(&shared, &s);
+                        shared.connected.store(true, Ordering::Release);
+                        session = Some(s);
+                        // A replayed chain already holds the selected plugin; do not add it again.
+                        selected = if t.saved.is_empty() { 0 } else { shared.selection.load(Ordering::Acquire) };
+                        last_settings = Instant::now();
+                    }
+                    Err(e) => {
+                        disconnect(&shared, Some(e.to_string()));
+                        next_retry = Instant::now() + RETRY_INTERVAL;
+                    }
+                }
             }
         }
         if let Some(s) = session.as_mut() {
@@ -399,6 +471,19 @@ fn run(
                     shared.info.lock().unwrap_or_else(|p| p.into_inner()).cpu = Some(cpu);
                 }
                 last_cpu = Instant::now();
+            }
+            if !s.loaded().is_empty() && last_settings.elapsed() > SETTINGS_INTERVAL {
+                last_settings = Instant::now();
+                match s.refresh_settings() {
+                    Ok(()) => snapshot(&shared, s),
+                    Err(e) if is_connection_lost(&e) => {
+                        remember_chain(&mut target, s);
+                        disconnect(&shared, Some(e.to_string()));
+                        session = None;
+                        next_retry = Instant::now() + RETRY_INTERVAL;
+                    }
+                    Err(_) => {}
+                }
             }
         }
         let Some(mut packet) = requests.pop() else {
@@ -427,8 +512,10 @@ fn run(
                             .store(s.latency_samples().max(0) as usize, Ordering::Release);
                     }
                     Err(e) => {
+                        remember_chain(&mut target, s);
                         disconnect(&shared, Some(e.to_string()));
                         session = None;
+                        next_retry = Instant::now() + RETRY_INTERVAL;
                     }
                 }
             }

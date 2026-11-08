@@ -138,10 +138,8 @@ fn scan_fresh() -> Vec<CatalogPlugin> {
     for plugin in crate::native::scan() {
         push_unique(&mut found, plugin);
     }
+    // Every registered AudioUnit. Enumeration reads component metadata only (no instances).
     for kind in [b"aufx", b"aumf", b"aumu"] {
-        if found.len() >= 32 {
-            break;
-        }
         collect_type(fourcc_bytes(kind), kind == b"aumu", &mut found);
     }
     found
@@ -706,7 +704,7 @@ fn collect_type(kind: u32, instrument: bool, found: &mut Vec<CatalogPlugin>) {
         componentFlagsMask: 0,
     };
     let mut current: AudioComponent = ptr::null_mut();
-    while found.len() < 32 {
+    loop {
         current = unsafe { AudioComponentFindNext(current, &description) };
         if current.is_null() {
             break;
