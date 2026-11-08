@@ -722,6 +722,62 @@ pub unsafe extern "C" fn ag_insert_edit_plugin(p: *mut c_void, loaded_idx: u32) 
     n.live_ctrl.send(ag_plugin::live::LiveCommand::Edit(loaded_idx as i32))
 }
 
+/// Edit with the server window's top-left at (x, y), top-left-origin screen coordinates.
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_edit_plugin_at(p: *mut c_void, loaded_idx: u32, x: i32, y: i32) -> bool {
+    let Some(n) = native(p) else { return false };
+    n.live_ctrl.set_editor_open(true);
+    n.live_ctrl.send(ag_plugin::live::LiveCommand::EditAt(loaded_idx as i32, x, y))
+}
+
+/// Hands the oldest waiting editor frame (PNG, a delta over the previous one) to `sink`.
+/// The bytes are valid only during the call. Returns false when none waits.
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_next_screen(
+    p: *mut c_void,
+    sink: Option<unsafe extern "C" fn(ctx: *mut c_void, png: *const u8, len: u32, width: i32, height: i32)>,
+    ctx: *mut c_void,
+) -> bool {
+    let Some(n) = native(p) else { return false };
+    let Some(sink) = sink else { return false };
+    let Some(frame) = n.live_ctrl.pop_screen() else { return false };
+    sink(ctx, frame.pixels.as_ptr(), frame.pixels.len() as u32, frame.width, frame.height);
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_editor_open(p: *mut c_void) -> bool {
+    native(p).map(|n| n.live_ctrl.editor_open()).unwrap_or(false)
+}
+
+/// Server on this machine: its editor windows are on this screen (AudioGridder's local
+/// mode), so the client shows no streamed copy.
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_server_is_local(p: *mut c_void) -> bool {
+    let Some(n) = native(p) else { return true };
+    let endpoint = n.live_ctrl.with_info(|info| info.endpoint.clone());
+    let (host, _) = ag_plugin::parse_server(&endpoint);
+    let host = host.trim_matches(|c| c == '[' || c == ']').to_ascii_lowercase();
+    host.is_empty() || host == "localhost" || host == "::1" || host.starts_with("127.")
+}
+
+#[allow(clippy::too_many_arguments)]
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_send_mouse(p: *mut c_void, kind: u8, x: f32, y: f32, shift: bool, ctrl: bool, alt: bool, dx: f32, dy: f32) -> bool {
+    let Some(n) = native(p) else { return false };
+    n.live_ctrl.send(ag_plugin::live::LiveCommand::Mouse { kind, x, y, shift, ctrl, alt, dx, dy })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_send_key(p: *mut c_void, codes: *const u16, count: u32) -> bool {
+    let Some(n) = native(p) else { return false };
+    if codes.is_null() || count == 0 {
+        return false;
+    }
+    let codes = std::slice::from_raw_parts(codes, count as usize).to_vec();
+    n.live_ctrl.send(ag_plugin::live::LiveCommand::Key(codes))
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn ag_insert_hide_plugin(p: *mut c_void) -> bool {
     let Some(n) = native(p) else { return false };

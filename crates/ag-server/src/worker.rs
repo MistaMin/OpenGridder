@@ -20,7 +20,7 @@
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -763,10 +763,19 @@ fn run_session(accepted: AcceptedClient) -> std::io::Result<()> {
     let mut command = sockets.remove(0);
     let command_in = Arc::new(Mutex::new(sockets.remove(0)));
     let audio = sockets.remove(0);
-    let mut screen = sockets.remove(0);
+    let screen = Arc::new(Mutex::new(sockets.remove(0)));
     let audio_shutdown = audio.try_clone()?;
 
     let chain = Arc::new(Mutex::new(PluginChain::new(req.channels_out)));
+    let screen_stop = Arc::new(AtomicBool::new(false));
+    let screen_thread = {
+        let live = chain.lock().expect("chain").live_editor();
+        let stop = Arc::clone(&screen_stop);
+        let socket = Arc::clone(&screen);
+        let inbound = Arc::clone(&command_in);
+        thread::spawn(move || stream_editor(stop, live, socket, inbound))
+    };
+    let _screen = StopClip { stop: screen_stop, thread: Some(screen_thread) };
     let clip_stop = Arc::new(AtomicBool::new(false));
     let clip_thread = {
         let stop = Arc::clone(&clip_stop);
@@ -831,7 +840,7 @@ fn run_session(accepted: AcceptedClient) -> std::io::Result<()> {
         let screen_frame = chain.lock().expect("chain").take_screen();
         let pushes = chain.lock().expect("chain").take_outbound();
         if let Some((width, height, png)) = screen_frame {
-            if !write_screen_until_disconnect(&mut screen, width, height, &png)? {
+            if !write_screen_until_disconnect(&mut screen.lock().expect("screen"), width, height, &png)? {
                 break;
             }
         }
@@ -938,6 +947,44 @@ fn write_screen(socket: &mut TcpStream, width: i32, height: i32, pixels: &[u8]) 
     body.extend_from_slice(&(pixels.len() as u64).to_le_bytes());
     body.extend_from_slice(pixels);
     write_cmd(socket, SCREEN_CAPTURE, &body)
+}
+
+/// `ScreenWorker::runNative` with the `ProcessorWindow` capture timer (50 ms): capture
+/// the open editor window, send the changed pixels as PNG on the screen socket. When the
+/// window is closed on the server's screen, push HidePlugin like `Worker::sendHideEditor`.
+fn stream_editor(stop: Arc<AtomicBool>, live: Arc<AtomicU64>, socket: Arc<Mutex<TcpStream>>, inbound: Arc<Mutex<TcpStream>>) {
+    let mut diff = crate::screen::ScreenDiff::new();
+    let mut current = 0u64;
+    let mut pixels = Vec::new();
+    while !stop.load(Ordering::Relaxed) {
+        thread::sleep(Duration::from_millis(50));
+        let id = live.load(Ordering::Acquire);
+        if id != current {
+            diff.clear_baseline();
+            current = id;
+        }
+        if id == 0 {
+            continue;
+        }
+        if !crate::ui::is_open(id) {
+            // Closed on the server: the chain cleans up on its next command; tell the client now.
+            if live.compare_exchange(id, 0, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                if let Ok(mut socket) = inbound.lock() {
+                    let _ = write_cmd(&mut socket, command::HIDE_PLUGIN, &command::number(0));
+                }
+            }
+            continue;
+        }
+        let Some((width, height)) = crate::ui::capture(id, &mut pixels) else { continue };
+        let used = width.max(0) as usize * height.max(0) as usize * 4;
+        let Some(png) = diff.capture(width, height, &pixels[..used.min(pixels.len())]) else { continue };
+        let Ok(mut socket) = socket.lock() else { break };
+        match write_screen(&mut socket, width, height, &png) {
+            Ok(()) => {}
+            Err(err) if client_disconnected(&err) => break,
+            Err(_) => diff.clear_baseline(), // slow reader: the next frame is a full image
+        }
+    }
 }
 
 struct StopClip {

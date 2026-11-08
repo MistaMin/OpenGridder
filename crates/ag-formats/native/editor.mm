@@ -6,7 +6,9 @@
 #include "opengridder.h"
 #include "OpenGridderEditorView.h"
 #include <vector>
+#include <map>
 #include <cmath>
+#import <ImageIO/ImageIO.h>
 
 @interface AGOpenBridgeView : NSView {
     void* _processor;
@@ -227,22 +229,79 @@ bool og_native_set_plugin_bypassed(NativePlugin* p, uint32_t loaded_idx, bool by
 }
 
 bool og_native_edit_plugin(NativePlugin* p, uint32_t loaded_idx, int32_t x, int32_t y) {
-    (void)x; (void)y;
-    return ag_insert_edit_plugin((void*)p, loaded_idx);
+    // (x, y) is a Cocoa screen point (bottom-left origin) for the server window's top-left;
+    // the protocol uses top-left-origin coordinates (ProcessorWindow::move).
+    const CGFloat primary = NSMaxY([NSScreen screens].firstObject.frame);
+    return ag_insert_edit_plugin_at((void*)p, loaded_idx, x, (int32_t)lround(primary - y));
 }
 
 bool og_native_hide_plugin(NativePlugin* p) {
     return ag_insert_hide_plugin((void*)p);
 }
 
+// The remote editor picture: the server sends PNG frames where unchanged pixels are
+// transparent (AudioGridder's diff detection), so each frame is drawn over the previous
+// picture in order. One canvas per insert.
+struct AgScreenCanvas {
+    std::vector<uint8_t> rgba;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint64_t frame_id = 0;
+};
+
+static std::map<NativePlugin*, AgScreenCanvas>& screen_canvases() {
+    static std::map<NativePlugin*, AgScreenCanvas> map;
+    return map;
+}
+
+static void apply_screen_frame(void* ctx, const uint8_t* png, uint32_t len, int32_t width, int32_t height) {
+    auto* canvas = static_cast<AgScreenCanvas*>(ctx);
+    if (!png || len == 0 || width <= 0 || height <= 0) return;
+    CFDataRef data = CFDataCreate(NULL, png, len);
+    CGImageSourceRef source = CGImageSourceCreateWithData(data, NULL);
+    CFRelease(data);
+    if (!source) return;
+    CGImageRef image = CGImageSourceCreateImageAtIndex(source, 0, NULL);
+    CFRelease(source);
+    if (!image) return;
+    if (canvas->width != (uint32_t)width || canvas->height != (uint32_t)height) {
+        canvas->width = (uint32_t)width;
+        canvas->height = (uint32_t)height;
+        canvas->rgba.assign((size_t)width * height * 4, 0);
+    }
+    CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef ctx2 = CGBitmapContextCreate(canvas->rgba.data(), width, height, 8, (size_t)width * 4, space,
+                                              kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(space);
+    if (ctx2) {
+        CGContextDrawImage(ctx2, CGRectMake(0, 0, width, height), image);  // source-over: transparent keeps
+        CGContextRelease(ctx2);
+        canvas->frame_id++;
+    }
+    CGImageRelease(image);
+}
+
 bool og_native_get_screen_info(NativePlugin* p, uint32_t* width, uint32_t* height, double* scale, uint64_t* frame_id) {
-    (void)p; (void)width; (void)height; (void)scale; (void)frame_id;
-    return false;
+    if (!p) return false;
+    AgScreenCanvas& canvas = screen_canvases()[p];
+    while (ag_insert_next_screen((void*)p, apply_screen_frame, &canvas)) {
+    }
+    if (canvas.width == 0 || canvas.height == 0) return false;
+    if (width) *width = canvas.width;
+    if (height) *height = canvas.height;
+    if (scale) *scale = 1.0;
+    if (frame_id) *frame_id = canvas.frame_id;
+    return true;
 }
 
 bool og_native_copy_screen_frame(NativePlugin* p, uint8_t* dest, uint32_t dest_cap, uint64_t* frame_id) {
-    (void)p; (void)dest; (void)dest_cap; (void)frame_id;
-    return false;
+    auto it = screen_canvases().find(p);
+    if (it == screen_canvases().end() || !dest) return false;
+    const AgScreenCanvas& canvas = it->second;
+    if (canvas.rgba.empty() || dest_cap < canvas.rgba.size()) return false;
+    memcpy(dest, canvas.rgba.data(), canvas.rgba.size());
+    if (frame_id) *frame_id = canvas.frame_id;
+    return true;
 }
 
 int32_t og_native_pop_screen_message(NativePlugin* p, uint8_t* dest, uint32_t dest_cap, uint32_t* out_len) {
@@ -251,21 +310,20 @@ int32_t og_native_pop_screen_message(NativePlugin* p, uint8_t* dest, uint32_t de
 }
 
 void og_native_send_mouse(NativePlugin* p, uint8_t ev_type, float x, float y, bool shift, bool ctrl, bool alt, float delta_x, float delta_y, bool is_smooth) {
-    (void)p; (void)ev_type; (void)x; (void)y; (void)shift; (void)ctrl; (void)alt; (void)delta_x; (void)delta_y; (void)is_smooth;
+    (void)is_smooth;
+    ag_insert_send_mouse((void*)p, ev_type, x, y, shift, ctrl, alt, delta_x, delta_y);
 }
 
 void og_native_send_key(NativePlugin* p, const uint16_t* keys, uint32_t count) {
-    (void)p; (void)keys; (void)count;
+    ag_insert_send_key((void*)p, keys, count);
 }
 
 bool og_native_is_editor_open(NativePlugin* p) {
-    (void)p;
-    return false;
+    return ag_insert_editor_open((void*)p);
 }
 
 bool og_native_is_server_local_mode(NativePlugin* p) {
-    (void)p;
-    return true;
+    return ag_insert_server_is_local((void*)p);
 }
 
 void og_native_set_offline(NativePlugin* p, bool offline) {

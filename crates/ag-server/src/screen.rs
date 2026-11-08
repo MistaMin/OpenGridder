@@ -86,6 +86,15 @@ pub fn gray_level(normalized: f32) -> u8 {
 }
 
 fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+    // Compressed with ImageIO in the server; the tests read the stored-block encoding below.
+    #[cfg(not(test))]
+    if let Some(png) = crate::ui::encode_png(width, height, rgba) {
+        return png;
+    }
+    encode_png_stored(width, height, rgba)
+}
+
+fn encode_png_stored(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
     let mut filtered = Vec::with_capacity((width as usize * 4 + 1) * height as usize);
     let stride = width as usize * 4;
     for row in 0..height as usize {

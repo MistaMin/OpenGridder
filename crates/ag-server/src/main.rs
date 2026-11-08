@@ -162,8 +162,14 @@ fn main() {
     if let Err(err) = _responder.start() {
         eprintln!("ag-server: mDNS responder warning: {err}");
     }
-    if let Err(err) = serve_clients(listener) {
-        eprintln!("ag-server: {err}");
-        std::process::exit(1);
-    }
+    // Clients are served on a background thread; the main thread runs the AppKit loop
+    // that shows and drives the plugins' editor windows.
+    std::thread::spawn(move || {
+        if let Err(err) = serve_clients(listener) {
+            eprintln!("ag-server: {err}");
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    });
+    ag_server::ui::run();
 }

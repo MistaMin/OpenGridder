@@ -12,6 +12,7 @@ mod chain;
 mod channels;
 mod clipboard;
 mod screen;
+pub mod ui;
 mod cpu;
 pub mod host;
 mod native;

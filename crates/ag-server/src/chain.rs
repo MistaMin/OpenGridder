@@ -4,6 +4,8 @@
 //! gain stays the utility slot. Anything else is `host::instantiate`.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use ag_protocol::command::{
     self, ADD_PLUGIN, ADD_PLUGIN_RESULT, BYPASS_PLUGIN, CLIPBOARD, CPU_LOAD, DEL_PLUGIN, EDIT_PLUGIN,
@@ -71,6 +73,10 @@ pub struct PluginChain {
     editor_size: Option<(i32, i32)>,
     /// Previous editor image and the capture counter from `ScreenWorker`.
     screen: ScreenDiff,
+    /// The open editor's window (`crate::ui`), 0 when none. The session's screen thread
+    /// reads the shared copy to capture and stream it without taking the chain lock.
+    editor_window: u64,
+    live_editor: Arc<AtomicU64>,
     outbound: Vec<(i32, Vec<u8>)>,
     /// Last playhead the audio thread applied. AudioGridder does not put this
     /// in the plugin settings chunk. GetPluginSettings appends it so a client
@@ -97,6 +103,8 @@ impl PluginChain {
             editor_frame: None,
             editor_size: None,
             screen: ScreenDiff::new(),
+            editor_window: 0,
+            live_editor: Arc::new(AtomicU64::new(0)),
             outbound: Vec::new(),
             last_playhead: PositionInfo::default(),
         }
@@ -251,6 +259,32 @@ impl PluginChain {
         self.editor.is_some()
     }
 
+    /// Editor window id shared with the session's screen thread (0 = none).
+    pub fn live_editor(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.live_editor)
+    }
+
+    /// Close the real editor window, if one is open. Runs before its plugin can be dropped.
+    fn close_window(&mut self) {
+        if self.editor_window != 0 {
+            let id = std::mem::take(&mut self.editor_window);
+            self.live_editor.store(0, Ordering::Release);
+            crate::ui::close(id);
+        }
+    }
+
+    /// The window was closed on the server's screen: forget it and tell the client
+    /// (`Worker::sendHideEditor`).
+    fn check_window_closed(&mut self) {
+        if self.editor_window != 0 && !crate::ui::is_open(self.editor_window) {
+            self.close_window();
+            if let Some(index) = self.editor.take() {
+                self.editor_size = None;
+                self.push_hide(index);
+            }
+        }
+    }
+
     /// `Defaults::SCAREA_FULLSCREEN`. Any other nonzero value adds to the
     /// capture margin. Zero leaves the margin alone.
     const CAPTURE_FULLSCREEN: i32 = 0xFFFF;
@@ -328,6 +362,7 @@ impl PluginChain {
     /// Replies go back on the command socket the client writes to, matching
     /// `Worker::handleMessage`.
     pub fn handle(&mut self, message_type: i32, body: &[u8]) -> Vec<(i32, Vec<u8>)> {
+        self.check_window_closed();
         if let Some(index) = self.awaiting_settings.take() {
             if message_type == PLUGIN_SETTINGS {
                 if let Some(text) = command::read_length_prefixed(body).and_then(|b| std::str::from_utf8(b).ok()) {
@@ -408,17 +443,31 @@ impl PluginChain {
                 vec![(CPU_LOAD, command::float_bits(crate::cpu::usage()).to_vec())]
             }
             GET_SCREEN_BOUNDS => {
+                if let Some((w, h)) = crate::ui::size(self.editor_window) {
+                    return vec![(SCREEN_BOUNDS, command::screen_bounds(0, 0, w, h).to_vec())];
+                }
                 let (x, y, w, h) = self.capture_bounds();
                 vec![(SCREEN_BOUNDS, command::screen_bounds(x, y, w, h).to_vec())]
             }
             EDIT_PLUGIN => {
+                self.close_window();
                 self.editor_frame = None;
                 self.editor_size = None;
                 self.screen.clear_baseline();
-                if let Some((index, _, _, _)) = command::read_edit_plugin(body) {
+                if let Some((index, _, x, y)) = command::read_edit_plugin(body) {
                     self.editor = usize_index(index).filter(|i| *i < self.slots.len());
                     if let Some(index) = self.editor {
                         if let Processor::Plugin(plugin) = &mut self.slots[index].processor {
+                            // The plugin's real editor, captured and streamed by the screen
+                            // thread (AudioGridder's ProcessorWindow).
+                            let title = plugin.name();
+                            let window = plugin.open_editor(&title, x, y);
+                            if window != 0 {
+                                self.editor_window = window;
+                                self.live_editor.store(window, Ordering::Release);
+                                self.editor_size = crate::ui::size(window);
+                                return Vec::new();
+                            }
                             plugin.show_editor();
                             self.editor_frame = plugin.editor_frame();
                             self.editor_size = self.editor_frame.as_ref().map(|frame| (frame.width, frame.height));
@@ -430,6 +479,7 @@ impl PluginChain {
             HIDE_PLUGIN => {
                 // The client's HidePlugin clears the local editor. AudioGridder
                 // does not echo it. The command-in push is only the server close.
+                self.close_window();
                 if let Some(index) = self.editor {
                     if let Some(slot) = self.slots.get_mut(index) {
                         if let Processor::Plugin(plugin) = &mut slot.processor {
@@ -444,6 +494,12 @@ impl PluginChain {
                 Vec::new()
             }
             MOUSE => {
+                if self.editor_window != 0 {
+                    if let Some((kind, x, y, shift, ctrl, alt, delta_x, delta_y)) = read_mouse(body) {
+                        crate::ui::mouse(self.editor_window, kind, x, y, shift, ctrl, alt, delta_x, delta_y);
+                    }
+                    return Vec::new();
+                }
                 if let Some(index) = self.editor {
                     if let Some((kind, x, y, shift, ctrl, alt, delta_x, delta_y)) = read_mouse(body) {
                         // Top-left 8x8 is the generic editor's close box, the
@@ -476,6 +532,10 @@ impl PluginChain {
                 Vec::new()
             }
             KEY => {
+                if self.editor_window != 0 {
+                    crate::ui::keys(self.editor_window, &read_keys(body));
+                    return Vec::new();
+                }
                 if let Some(index) = self.editor {
                     let codes = read_keys(body);
                     let before = self.slots.get(index).map(|slot| slot.param(0)).unwrap_or(0.0);
@@ -608,6 +668,9 @@ impl PluginChain {
     }
 
     fn close_editor(&mut self, index: usize) {
+        if self.editor == Some(index) {
+            self.close_window();
+        }
         if let Some(slot) = self.slots.get_mut(index) {
             if let Processor::Plugin(plugin) = &mut slot.processor {
                 plugin.hide_editor();
@@ -657,6 +720,9 @@ impl PluginChain {
     fn delete_plugin(&mut self, body: &[u8]) -> Vec<(i32, Vec<u8>)> {
         if let Some(index) = command::read_number(body).and_then(usize_index) {
             if index < self.slots.len() {
+                if self.editor == Some(index) {
+                    self.close_window();
+                }
                 self.slots.remove(index);
                 if self.editor == Some(index) {
                     self.editor = None;
@@ -1067,6 +1133,13 @@ impl Slot {
             return;
         }
         run_processor(&mut self.processor, audio, midi, frames);
+    }
+}
+
+impl Drop for PluginChain {
+    /// The session ended: close the editor window before the plugins go away.
+    fn drop(&mut self) {
+        self.close_window();
     }
 }
 

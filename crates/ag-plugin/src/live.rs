@@ -10,6 +10,7 @@ use crate::{
 use ag_protocol::{HandshakeRequest, PositionInfo};
 use openplugin::prelude::Plugin;
 use std::{
+    collections::VecDeque,
     net::{Shutdown, TcpStream},
     sync::{
         atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering},
@@ -70,7 +71,15 @@ struct Shared {
     selection: AtomicI32,
     info: Mutex<LiveInfo>,
     sockets: Mutex<Vec<TcpStream>>,
+    /// Editor frames from the screen socket, oldest first. They are PNG deltas over the
+    /// previous frame (AudioGridder's diff detection), so they are applied in order.
+    screen: Mutex<VecDeque<ScreenFrame>>,
+    /// A remote editor is open: set on edit, cleared on hide, a server-side close, or disconnect.
+    editor_open: AtomicBool,
 }
+/// Frames kept for the UI. When it falls behind, the oldest go; a full frame follows
+/// within a second (every 20th capture), so the picture recovers.
+const SCREEN_QUEUE: usize = 64;
 pub enum LiveCommand {
     Connect {
         endpoint: String,
@@ -89,7 +98,20 @@ pub enum LiveCommand {
     Move(i32, bool),
     Parameter(i32, i32, f32),
     Edit(i32),
+    /// Edit with the window's top-left in top-left-origin screen coordinates.
+    EditAt(i32, i32, i32),
     Hide,
+    Mouse {
+        kind: u8,
+        x: f32,
+        y: f32,
+        shift: bool,
+        ctrl: bool,
+        alt: bool,
+        dx: f32,
+        dy: f32,
+    },
+    Key(Vec<u16>),
     Oversampling(i32, i32),
     Preset(i32, i32),
 }
@@ -141,6 +163,17 @@ impl LiveController {
     pub fn connected(&self) -> bool {
         self.0.shared.connected.load(Ordering::Acquire)
     }
+    /// The oldest editor frame not yet shown.
+    pub fn pop_screen(&self) -> Option<ScreenFrame> {
+        self.0.shared.screen.lock().unwrap_or_else(|p| p.into_inner()).pop_front()
+    }
+    pub fn editor_open(&self) -> bool {
+        self.0.shared.editor_open.load(Ordering::Acquire)
+    }
+    /// Mark the editor open (or closed) now, before the queued command reaches the worker.
+    pub fn set_editor_open(&self, open: bool) {
+        self.0.shared.editor_open.store(open, Ordering::Release);
+    }
 }
 pub struct LiveAudio {
     shared: Arc<Shared>,
@@ -163,6 +196,8 @@ impl LiveAudio {
             selection: AtomicI32::new(0),
             info: Mutex::new(LiveInfo::default()),
             sockets: Mutex::new(Vec::new()),
+            screen: Mutex::new(VecDeque::new()),
+            editor_open: AtomicBool::new(false),
         });
         let worker_shared = shared.clone();
         let handle = thread::Builder::new()
@@ -316,16 +351,51 @@ fn snapshot(shared: &Shared, session: &RemoteSession) {
     info.error = None;
     info.slots = session.loaded().to_vec();
 }
+/// Drain command-in pushes and screen frames on their own threads (blocking reads), so a
+/// busy UI or worker never leaves the server's writes stuck. Both end when the sockets
+/// are shut down at disconnect.
+fn spawn_readers(shared: &Arc<Shared>, mut inbound: TcpStream, mut screen: TcpStream) {
+    let screen_shared = Arc::clone(shared);
+    let _ = thread::Builder::new().name("ag-screen".into()).spawn(move || loop {
+        match crate::session::read_pending(&mut screen) {
+            Ok(Some((ag_protocol::command::SCREEN_CAPTURE, body))) => {
+                if let Some(frame) = crate::session::screen_frame(&body) {
+                    let mut queue = screen_shared.screen.lock().unwrap_or_else(|p| p.into_inner());
+                    if queue.len() >= SCREEN_QUEUE {
+                        queue.pop_front();
+                    }
+                    queue.push_back(frame);
+                }
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    });
+    let inbound_shared = Arc::clone(shared);
+    let _ = thread::Builder::new().name("ag-command-in".into()).spawn(move || loop {
+        match crate::session::read_pending(&mut inbound) {
+            // The editor was closed on the server (`Worker::sendHideEditor`).
+            Ok(Some((ag_protocol::command::HIDE_PLUGIN, _))) => {
+                inbound_shared.editor_open.store(false, Ordering::Release);
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    });
+}
+
 fn disconnect(shared: &Shared, error: Option<String>) {
     shared.connected.store(false, Ordering::Release);
     shared.ready.store(false, Ordering::Release);
     shared.latency.store(0, Ordering::Release);
     shared.epoch.fetch_add(1, Ordering::AcqRel);
-    shared
-        .sockets
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .clear();
+    // Shut the sockets down (not just drop these clones) so the reader threads' clones
+    // stop blocking and the server sees the session end.
+    for socket in shared.sockets.lock().unwrap_or_else(|p| p.into_inner()).drain(..) {
+        let _ = socket.shutdown(Shutdown::Both);
+    }
+    shared.screen.lock().unwrap_or_else(|p| p.into_inner()).clear();
+    shared.editor_open.store(false, Ordering::Release);
     let mut info = shared.info.lock().unwrap_or_else(|p| p.into_inner());
     info.connected = false;
     info.error = error;
@@ -403,8 +473,24 @@ fn run(
                 LiveCommand::Move(i, true) => s.move_up(i),
                 LiveCommand::Move(i, false) => s.move_down(i),
                 LiveCommand::Parameter(i, p, v) => s.set_parameter(i, p, v),
-                LiveCommand::Edit(i) => s.edit_plugin(i),
-                LiveCommand::Hide => s.hide_plugin(),
+                LiveCommand::Edit(i) => {
+                    shared.screen.lock().unwrap_or_else(|p| p.into_inner()).clear();
+                    shared.editor_open.store(true, Ordering::Release);
+                    s.edit_plugin(i)
+                }
+                LiveCommand::EditAt(i, x, y) => {
+                    shared.screen.lock().unwrap_or_else(|p| p.into_inner()).clear();
+                    shared.editor_open.store(true, Ordering::Release);
+                    s.edit_plugin_at(i, x, y)
+                }
+                LiveCommand::Hide => {
+                    shared.editor_open.store(false, Ordering::Release);
+                    s.hide_plugin()
+                }
+                LiveCommand::Mouse { kind, x, y, shift, ctrl, alt, dx, dy } => {
+                    s.send_mouse_event(kind, x, y, shift, ctrl, alt, dx, dy)
+                }
+                LiveCommand::Key(codes) => s.send_key(&codes),
                 LiveCommand::Oversampling(i, n) => s.set_oversampling(i, n),
                 LiveCommand::Preset(i, p) => s.set_preset(i, p, 0),
                 _ => Ok(()),
@@ -433,6 +519,9 @@ fn run(
                     Ok(s) => {
                         *shared.sockets.lock().unwrap_or_else(|p| p.into_inner()) =
                             s.shutdown_handles().unwrap_or_default();
+                        if let Ok((inbound, screen)) = s.reader_sockets() {
+                            spawn_readers(&shared, inbound, screen);
+                        }
                         shared
                             .info
                             .lock()

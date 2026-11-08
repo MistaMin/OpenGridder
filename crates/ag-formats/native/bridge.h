@@ -36,6 +36,12 @@ uint32_t ag_insert_num_plugin_params(void*, uint32_t);
 bool ag_insert_get_plugin_param_info(void*, uint32_t, uint32_t, char*, uint32_t, float*, float*);
 bool ag_insert_set_plugin_param(void*, uint32_t, uint32_t, float);
 bool ag_insert_connect(void*, const char*);
+bool ag_insert_edit_plugin_at(void*, uint32_t, int32_t, int32_t);
+bool ag_insert_next_screen(void*, void (*)(void*, const uint8_t*, uint32_t, int32_t, int32_t), void*);
+bool ag_insert_editor_open(void*);
+bool ag_insert_server_is_local(void*);
+bool ag_insert_send_mouse(void*, uint8_t, float, float, bool, bool, bool, float, float);
+bool ag_insert_send_key(void*, const uint16_t*, uint32_t);
 }
 
 extern "C" void ag_insert_midi(void*,uint32_t,uint8_t,uint8_t,uint8_t);

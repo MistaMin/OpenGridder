@@ -99,6 +99,12 @@ impl RemoteSession {
     pub fn shutdown_handles(&self) -> std::io::Result<Vec<TcpStream>> {
         [&self.command, &self.audio, &self.inbound, &self.screen].into_iter().map(TcpStream::try_clone).collect()
     }
+
+    /// Clones of command-in and screen for reader threads that block on them, so pushes
+    /// and editor frames are drained as they arrive (an unread socket stalls the server).
+    pub fn reader_sockets(&self) -> std::io::Result<(TcpStream, TcpStream)> {
+        Ok((self.inbound.try_clone()?, self.screen.try_clone()?))
+    }
     /// Handshake on `127.0.0.1:port`, then open the four worker sockets from the answer.
     pub fn connect(port: u16, request: HandshakeRequest) -> std::io::Result<Self> {
         Self::connect_host("127.0.0.1", port, request)
@@ -450,6 +456,12 @@ impl RemoteSession {
         self.write_cmd(EDIT_PLUGIN, &command::edit_plugin(index, 0, 0, 0))
     }
 
+    /// Open the editor with its window's top-left at (x, y) in top-left-origin screen
+    /// coordinates (`ProcessorWindow::move`); 0, 0 lets the server place it.
+    pub fn edit_plugin_at(&mut self, index: i32, x: i32, y: i32) -> std::io::Result<()> {
+        self.write_cmd(EDIT_PLUGIN, &command::edit_plugin(index, 0, x, y))
+    }
+
     pub fn hide_plugin(&mut self) -> std::io::Result<()> {
         self.write_cmd(command::HIDE_PLUGIN, &[])
     }
@@ -482,6 +494,22 @@ impl RemoteSession {
         body[0] = kind;
         body[4..8].copy_from_slice(&x.to_le_bytes());
         body[8..12].copy_from_slice(&y.to_le_bytes());
+        self.write_cmd(MOUSE, &body)
+    }
+
+    /// `Mouse` with modifiers and wheel deltas (`mouseevent_t`): type, x, y, shift, ctrl,
+    /// alt, then deltaX at byte 16 and deltaY at byte 20.
+    #[allow(clippy::too_many_arguments)]
+    pub fn send_mouse_event(&mut self, kind: u8, x: f32, y: f32, shift: bool, ctrl: bool, alt: bool, dx: f32, dy: f32) -> std::io::Result<()> {
+        let mut body = [0u8; 28];
+        body[0] = kind;
+        body[4..8].copy_from_slice(&x.to_le_bytes());
+        body[8..12].copy_from_slice(&y.to_le_bytes());
+        body[12] = shift as u8;
+        body[13] = ctrl as u8;
+        body[14] = alt as u8;
+        body[16..20].copy_from_slice(&dx.to_le_bytes());
+        body[20..24].copy_from_slice(&dy.to_le_bytes());
         self.write_cmd(MOUSE, &body)
     }
 
@@ -637,6 +665,16 @@ fn read_message(socket: &mut TcpStream) -> std::io::Result<(i32, Vec<u8>)> {
         Some(message) => Ok(message),
         None => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "command")),
     }
+}
+
+/// One message from a blocking reader socket; `None` when its read timeout passed.
+pub fn read_pending(socket: &mut TcpStream) -> std::io::Result<Option<(i32, Vec<u8>)>> {
+    try_read_message(socket)
+}
+
+/// A `ScreenCapture` body: width, height, padded size, scale, then the PNG.
+pub fn screen_frame(body: &[u8]) -> Option<ScreenFrame> {
+    parse_screen(body)
 }
 
 fn try_read_message(socket: &mut TcpStream) -> std::io::Result<Option<(i32, Vec<u8>)>> {

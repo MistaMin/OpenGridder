@@ -40,6 +40,11 @@ pub trait Hosted: Send {
     fn process_f32(&mut self, audio: &mut [Vec<f32>], midi: &[[u8; 3]], frames: usize);
     fn process_f64(&mut self, audio: &mut [Vec<f64>], midi: &[[u8; 3]], frames: usize);
     fn show_editor(&mut self);
+    /// Show the plugin's real editor in a window on the server (see `crate::ui`).
+    /// Returns the editor id, 0 when there is none; the caller closes it with `ui::close`.
+    fn open_editor(&mut self, _title: &str, _x: i32, _y: i32) -> u64 {
+        0
+    }
     fn hide_editor(&mut self);
     fn editor_frame(&mut self) -> Option<EditorFrame>;
     fn mouse(&mut self, kind: u8, x: f32, y: f32, shift: bool, ctrl: bool, alt: bool, delta_x: f32, delta_y: f32);
@@ -152,7 +157,13 @@ fn scan_fresh() -> Vec<CatalogPlugin> {
     found
 }
 
+/// Plugins are created on the main thread (AudioGridder does the same): JUCE-based
+/// plugins bind their message handling and editor timers to the creating thread.
 pub fn instantiate(id: &str, sample_rate: f32, max_block: usize, channels: usize) -> Option<Box<dyn Hosted>> {
+    crate::ui::on_main(|| instantiate_here(id, sample_rate, max_block, channels))
+}
+
+fn instantiate_here(id: &str, sample_rate: f32, max_block: usize, channels: usize) -> Option<Box<dyn Hosted>> {
     if id.starts_with("lv2:") || id.starts_with("vst3:") || id.starts_with("clap:") {
         return crate::native::instantiate(id, sample_rate, max_block, channels);
     }
@@ -289,16 +300,22 @@ unsafe impl Send for AuPlugin {}
 impl Drop for AuPlugin {
     fn drop(&mut self) {
         if !self.unit.is_null() {
-            unsafe {
-                AudioUnitUninitialize(self.unit);
-                AudioComponentInstanceDispose(self.unit);
-            }
+            // Disposed on the main thread, where it was created.
+            let unit = self.unit as usize;
+            crate::ui::on_main(move || unsafe {
+                AudioUnitUninitialize(unit as AudioUnit);
+                AudioComponentInstanceDispose(unit as AudioUnit);
+            });
             self.unit = ptr::null_mut();
         }
     }
 }
 
 impl Hosted for AuPlugin {
+    fn open_editor(&mut self, title: &str, x: i32, y: i32) -> u64 {
+        crate::ui::open_au(self.unit as *mut c_void, title, x, y)
+    }
+
     fn name(&self) -> String {
         self.name.clone()
     }

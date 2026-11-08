@@ -115,13 +115,19 @@ unsafe impl Send for NativePlugin {}
 impl Drop for NativePlugin {
     fn drop(&mut self) {
         if !self.raw.is_null() {
-            unsafe { ag_native_close(self.raw) };
+            // Destroyed on the main thread, where it was created.
+            let raw = self.raw as usize;
+            crate::ui::on_main(move || unsafe { ag_native_close(raw as *mut AgNative) });
             self.raw = std::ptr::null_mut();
         }
     }
 }
 
 impl Hosted for NativePlugin {
+    fn open_editor(&mut self, title: &str, x: i32, y: i32) -> u64 {
+        crate::ui::open_native(self.raw as *mut std::ffi::c_void, title, x, y)
+    }
+
     fn name(&self) -> String {
         // The plugin's own name; this used to return the first parameter's name ("Mix", "Input").
         self.name.clone()

@@ -29,6 +29,11 @@
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "pluginterfaces/vst/ivsthostapplication.h"
+#include "pluginterfaces/gui/iplugview.h"
+#include <clap/ext/gui.h>
+
+// ui_mac.mm: the editor window follows a plugin-initiated resize.
+extern "C" void ag_ui_view_resized(void* nsview, int width, int height);
 
 namespace {
 
@@ -530,6 +535,48 @@ Steinberg::tresult PLUGIN_API HostApp::queryInterface(const Steinberg::TUID iid,
     return Steinberg::kNoInterface;
 }
 
+// IPlugFrame for one open VST3 editor: plugin-initiated resizes resize the window.
+class PlugFrame : public Steinberg::IPlugFrame {
+public:
+    explicit PlugFrame(void* parent) : parent_(parent) { FUNKNOWN_CTOR }
+    virtual ~PlugFrame() { FUNKNOWN_DTOR }
+    DECLARE_FUNKNOWN_METHODS
+
+    Steinberg::tresult PLUGIN_API resizeView(Steinberg::IPlugView* view, Steinberg::ViewRect* rect) override {
+        if (view == nullptr || rect == nullptr) {
+            return Steinberg::kInvalidArgument;
+        }
+        ag_ui_view_resized(parent_, rect->getWidth(), rect->getHeight());
+        view->onSize(rect);
+        return Steinberg::kResultOk;
+    }
+
+private:
+    void* parent_;
+};
+
+Steinberg::uint32 PLUGIN_API PlugFrame::addRef() {
+    return static_cast<Steinberg::uint32>(__atomic_add_fetch(&__funknownRefCount, 1, __ATOMIC_ACQ_REL));
+}
+
+Steinberg::uint32 PLUGIN_API PlugFrame::release() {
+    const int next = __atomic_sub_fetch(&__funknownRefCount, 1, __ATOMIC_ACQ_REL);
+    if (next == 0) {
+        delete this;
+        return 0;
+    }
+    return static_cast<Steinberg::uint32>(next);
+}
+
+Steinberg::tresult PLUGIN_API PlugFrame::queryInterface(const Steinberg::TUID iid, void** obj) {
+    QUERY_INTERFACE(iid, obj, Steinberg::FUnknown::iid, Steinberg::IPlugFrame)
+    QUERY_INTERFACE(iid, obj, Steinberg::IPlugFrame::iid, Steinberg::IPlugFrame)
+    if (obj != nullptr) {
+        *obj = nullptr;
+    }
+    return Steinberg::kNoInterface;
+}
+
 struct Vst3Param {
     Steinberg::Vst::ParamID id = 0;
     std::string name;
@@ -547,6 +594,8 @@ struct Vst3Plugin {
     Steinberg::Vst::IConnectionPoint* component_point = nullptr;
     Steinberg::Vst::IConnectionPoint* controller_point = nullptr;
     bool separate_controller = false;
+    Steinberg::IPlugView* view = nullptr;   // open editor, main thread only
+    PlugFrame* frame = nullptr;
     int max_block = 256;
     int channels = 2;
     int latency = 0;
@@ -554,7 +603,21 @@ struct Vst3Plugin {
     std::vector<std::vector<float>> scratch_in;
     std::vector<std::vector<float>> scratch_out;
 
+    void close_editor() {
+        if (view != nullptr) {
+            view->setFrame(nullptr);
+            view->removed();
+            view->release();
+            view = nullptr;
+        }
+        if (frame != nullptr) {
+            frame->release();
+            frame = nullptr;
+        }
+    }
+
     ~Vst3Plugin() {
+        close_editor();
         if (processor != nullptr) {
             processor->setProcessing(0);
         }
@@ -936,10 +999,22 @@ struct ClapPlugin {
     const clap_plugin_factory* factory = nullptr;
     const clap_plugin* plugin = nullptr;
     const clap_plugin_params* params = nullptr;
+    const clap_plugin_gui* gui = nullptr;
+    clap_host* host = nullptr;          // per instance, so host callbacks know the plugin
+    void* editor_parent = nullptr;      // NSView of the open editor, main thread only
     int latency = 0;
     std::vector<ClapParam> param_list;
 
+    void close_editor() {
+        if (gui != nullptr && editor_parent != nullptr) {
+            gui->hide(plugin);
+            gui->destroy(plugin);
+        }
+        editor_parent = nullptr;
+    }
+
     ~ClapPlugin() {
+        close_editor();
         if (plugin != nullptr) {
             plugin->deactivate(plugin);
             plugin->destroy(plugin);
@@ -949,6 +1024,8 @@ struct ClapPlugin {
             entry->deinit();
             entry = nullptr;
         }
+        delete host;
+        host = nullptr;
         if (library != nullptr) {
             dlclose(library);
             library = nullptr;
@@ -959,7 +1036,30 @@ struct ClapPlugin {
 static void clap_host_cb_request_restart(const clap_host*) {}
 static void clap_host_cb_request_process(const clap_host*) {}
 static void clap_host_cb_request_callback(const clap_host*) {}
-static const void* clap_host_cb_get_extension(const clap_host*, const char*) { return nullptr; }
+static void clap_gui_resize_hints_changed(const clap_host*) {}
+static bool clap_gui_request_resize(const clap_host* host, uint32_t width, uint32_t height) {
+    auto* self = host != nullptr ? static_cast<ClapPlugin*>(host->host_data) : nullptr;
+    if (self == nullptr || self->editor_parent == nullptr) {
+        return false;
+    }
+    ag_ui_view_resized(self->editor_parent, static_cast<int>(width), static_cast<int>(height));
+    if (self->gui != nullptr) {
+        self->gui->set_size(self->plugin, width, height);
+    }
+    return true;
+}
+static bool clap_gui_request_show(const clap_host*) { return true; }
+static bool clap_gui_request_hide(const clap_host*) { return true; }
+static void clap_gui_closed(const clap_host*, bool) {}
+static const clap_host_gui g_ag_clap_host_gui = {
+    clap_gui_resize_hints_changed, clap_gui_request_resize, clap_gui_request_show, clap_gui_request_hide, clap_gui_closed,
+};
+static const void* clap_host_cb_get_extension(const clap_host*, const char* id) {
+    if (id != nullptr && std::strcmp(id, CLAP_EXT_GUI) == 0) {
+        return &g_ag_clap_host_gui;
+    }
+    return nullptr;
+}
 
 static clap_host g_ag_clap_host = {
     CLAP_VERSION,
@@ -1099,15 +1199,16 @@ ClapPlugin* open_clap(const char* id, float sample_rate, int max_block, int chan
         return nullptr;
     }
 
+    auto* host = new clap_host(g_ag_clap_host);
     const clap_plugin* plugin = nullptr;
     if (!plugin_id.empty()) {
-        plugin = factory->create_plugin(factory, &g_ag_clap_host, plugin_id.c_str());
+        plugin = factory->create_plugin(factory, host, plugin_id.c_str());
     } else {
         const uint32_t count = factory->get_plugin_count(factory);
         if (count > 0) {
             const clap_plugin_descriptor* desc = factory->get_plugin_descriptor(factory, 0);
             if (desc != nullptr) {
-                plugin = factory->create_plugin(factory, &g_ag_clap_host, desc->id);
+                plugin = factory->create_plugin(factory, host, desc->id);
             }
         }
     }
@@ -1115,16 +1216,20 @@ ClapPlugin* open_clap(const char* id, float sample_rate, int max_block, int chan
         if (plugin != nullptr) {
             plugin->destroy(plugin);
         }
+        delete host;
         dlclose(lib);
         return nullptr;
     }
 
     auto* self = new ClapPlugin();
+    self->host = host;
+    host->host_data = self;
     self->library = lib;
     self->entry = entry;
     self->factory = factory;
     self->plugin = plugin;
     self->params = static_cast<const clap_plugin_params*>(plugin->get_extension(plugin, CLAP_EXT_PARAMS));
+    self->gui = static_cast<const clap_plugin_gui*>(plugin->get_extension(plugin, CLAP_EXT_GUI));
     if (self->params != nullptr) {
         uint32_t count = self->params->count(plugin);
         for (uint32_t i = 0; i < count; ++i) {
@@ -1428,6 +1533,86 @@ void ag_native_process(AgNative* raw, float** audio, int channels, int frames) {
         process_vst3(instance->vst3, audio, channels, frames);
     } else if (instance->kind == Kind::Clap) {
         process_clap(instance->clap, audio, channels, frames);
+    }
+}
+
+
+// Attach the plugin's own editor to nsview (main thread). Returns 1 with the editor size,
+// 0 when the plugin has no editor (LV2 UIs are not hosted).
+int ag_native_editor_open(AgNative* raw, void* nsview, int* width, int* height) {
+    auto* instance = reinterpret_cast<Instance*>(raw);
+    if (instance == nullptr || nsview == nullptr) {
+        return 0;
+    }
+    if (instance->kind == Kind::Vst3 && instance->vst3 != nullptr && instance->vst3->controller != nullptr) {
+        Vst3Plugin* self = instance->vst3;
+        self->close_editor();
+        Steinberg::IPlugView* view = self->controller->createView(Steinberg::Vst::ViewType::kEditor);
+        if (view == nullptr) {
+            return 0;
+        }
+        if (view->isPlatformTypeSupported(Steinberg::kPlatformTypeNSView) != Steinberg::kResultTrue) {
+            view->release();
+            return 0;
+        }
+        self->view = view;
+        self->frame = new PlugFrame(nsview);
+        view->setFrame(self->frame);
+        Steinberg::ViewRect rect;
+        if (view->getSize(&rect) == Steinberg::kResultOk && rect.getWidth() > 0 && rect.getHeight() > 0) {
+            ag_ui_view_resized(nsview, rect.getWidth(), rect.getHeight());
+        }
+        if (view->attached(nsview, Steinberg::kPlatformTypeNSView) != Steinberg::kResultOk) {
+            self->close_editor();
+            return 0;
+        }
+        if (view->getSize(&rect) == Steinberg::kResultOk) {
+            *width = rect.getWidth();
+            *height = rect.getHeight();
+        }
+        return 1;
+    }
+    if (instance->kind == Kind::Clap && instance->clap != nullptr && instance->clap->gui != nullptr) {
+        ClapPlugin* self = instance->clap;
+        const clap_plugin_gui* gui = self->gui;
+        self->close_editor();
+        if (!gui->is_api_supported(self->plugin, CLAP_WINDOW_API_COCOA, false) ||
+            !gui->create(self->plugin, CLAP_WINDOW_API_COCOA, false)) {
+            return 0;
+        }
+        self->editor_parent = nsview;
+        uint32_t w = 0, h = 0;
+        if (gui->get_size(self->plugin, &w, &h) && w > 0 && h > 0) {
+            ag_ui_view_resized(nsview, static_cast<int>(w), static_cast<int>(h));
+        }
+        clap_window window{};
+        window.api = CLAP_WINDOW_API_COCOA;
+        window.cocoa = nsview;
+        if (!gui->set_parent(self->plugin, &window)) {
+            gui->destroy(self->plugin);
+            self->editor_parent = nullptr;
+            return 0;
+        }
+        gui->show(self->plugin);
+        if (gui->get_size(self->plugin, &w, &h)) {
+            *width = static_cast<int>(w);
+            *height = static_cast<int>(h);
+        }
+        return 1;
+    }
+    return 0;
+}
+
+void ag_native_editor_close(AgNative* raw) {
+    auto* instance = reinterpret_cast<Instance*>(raw);
+    if (instance == nullptr) {
+        return;
+    }
+    if (instance->vst3 != nullptr) {
+        instance->vst3->close_editor();
+    }
+    if (instance->clap != nullptr) {
+        instance->clap->close_editor();
     }
 }
 

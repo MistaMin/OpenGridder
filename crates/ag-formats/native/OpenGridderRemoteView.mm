@@ -73,6 +73,11 @@
 
 - (void)checkNewFrame {
     if (!_rust) return;
+    // Closed on the server (or the session ended): close this copy too.
+    if (!og_native_is_editor_open(_rust)) {
+        if (self.window.isVisible) [self.window orderOut:nil];
+        return;
+    }
 
     uint32_t w = 0, h = 0;
     double s = 1.0;
@@ -213,8 +218,30 @@
 
 - (void)keyDown:(NSEvent *)event {
     if (!_rust) return;
-    unsigned short kc = event.keyCode;
-    og_native_send_key(_rust, &kc, 1);
+    // AudioGridder's Key message: modifier key codes, then the key. Command+C/V/X/A
+    // travel as the copy/paste/cut/select-all codes so the server maps them itself.
+    uint16_t codes[4];
+    uint32_t count = 0;
+    const NSEventModifierFlags flags = event.modifierFlags;
+    const unsigned short kc = event.keyCode;
+    if (flags & NSEventModifierFlagCommand) {
+        switch (kc) {
+            case 0x08: codes[count++] = 0xF0; break;  // C
+            case 0x09: codes[count++] = 0xF1; break;  // V
+            case 0x07: codes[count++] = 0xF2; break;  // X
+            case 0x00: codes[count++] = 0xF3; break;  // A
+            default: break;
+        }
+        if (count > 0) {
+            og_native_send_key(_rust, codes, count);
+            return;
+        }
+    }
+    if (flags & NSEventModifierFlagShift) codes[count++] = 0x38;
+    if (flags & NSEventModifierFlagControl) codes[count++] = 0x3B;
+    if (flags & NSEventModifierFlagOption) codes[count++] = 0x3A;
+    codes[count++] = kc;
+    og_native_send_key(_rust, codes, count);
 }
 
 @end
@@ -255,6 +282,7 @@ static OpenGridderRemoteWindowController *s_instance = nil;
                                                         defer:NO];
         win.delegate = self;
         win.level = NSFloatingWindowLevel;
+        win.acceptsMouseMovedEvents = YES;
         win.releasedWhenClosed = NO;
         self.window = win;
 #if !__has_feature(objc_arc)

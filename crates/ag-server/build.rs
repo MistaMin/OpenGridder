@@ -65,11 +65,25 @@ fn main() {
     if !compiled.success() {
         panic!("c++ failed to compile {}", source.display());
     }
+    // Editor windows, capture and input (Objective-C++, ARC).
+    let ui_source = manifest.join("native/ui_mac.mm");
+    let ui_object = out.join("ag_ui_mac.o");
+    let ui_compiled = Command::new("c++")
+        .args(["-std=c++17", "-fobjc-arc", "-O2", "-fPIC", "-mmacosx-version-min=11.0", "-c"])
+        .arg(&ui_source)
+        .arg("-o")
+        .arg(&ui_object)
+        .status()
+        .expect("invoke c++ for ui_mac.mm");
+    if !ui_compiled.success() {
+        panic!("c++ failed to compile {}", ui_source.display());
+    }
     let archive = out.join("libagnative.a");
     let archived = Command::new("ar")
         .arg("rcs")
         .arg(&archive)
         .arg(&object)
+        .arg(&ui_object)
         .status()
         .expect("invoke ar");
     if !archived.success() {
@@ -80,5 +94,9 @@ fn main() {
     println!("cargo:rustc-link-search=native=/opt/homebrew/lib");
     println!("cargo:rustc-link-lib=dylib=lilv-0");
     println!("cargo:rustc-link-lib=c++");
+    for framework in ["Cocoa", "AudioToolbox", "AudioUnit", "CoreAudioKit", "Carbon", "CoreGraphics", "ImageIO"] {
+        println!("cargo:rustc-link-lib=framework={framework}");
+    }
     println!("cargo:rerun-if-changed={}", source.display());
+    println!("cargo:rerun-if-changed={}", ui_source.display());
 }
