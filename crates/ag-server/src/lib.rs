@@ -36,6 +36,20 @@ use ag_protocol::{
 };
 use openplugin::prelude::*;
 
+/// Release version (the VERSION file), stamped at build time.
+pub const VERSION: &str = env!("OG_VERSION");
+/// Commit count of the build's HEAD.
+pub const BUILD_NUMBER: &str = env!("OG_BUILD_NUMBER");
+/// Short commit hash, "+dirty" when built with uncommitted changes.
+pub const GIT_COMMIT: &str = env!("OG_GIT_COMMIT");
+/// Local time the build ran.
+pub const BUILD_DATE: &str = env!("OG_BUILD_DATE");
+
+/// "0.1.1-alpha build 16 (a44b7bb) 2026-11-08 15:42 CET"
+pub fn build_label() -> String {
+    format!("{VERSION} build {BUILD_NUMBER} ({GIT_COMMIT}) {BUILD_DATE}")
+}
+
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 
 static GAIN_PARAMS: [ParamInfo; 1] = [ParamInfo::new("gain", "Gain", -24.0, 24.0, 0.0, Unit::Db)];
@@ -46,7 +60,7 @@ static GAIN_INFO: PluginInfo = PluginInfo {
     vendor: "OpenGrid",
     url: "https://opengrid.studio",
     email: "contact@mistamin.com",
-    version: "0.1.1-alpha",
+    version: VERSION,
     category: Category::Utility,
     params: &GAIN_PARAMS,
     is_instrument: false,

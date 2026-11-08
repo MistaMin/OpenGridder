@@ -4,6 +4,8 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 og_root="$(cd "$script_dir/.." && pwd)"
+source "$script_dir/build-info.sh"
+echo "Build: v$OG_VERSION build $OG_BUILD_NUMBER ($OG_GIT_COMMIT) $OG_BUILD_DATE"
 
 echo "=== 1. Building Server Binaries ==="
 cd "$og_root"
@@ -31,7 +33,12 @@ chmod 755 "$og_app_dest/Contents/MacOS/OpenGridderServer"
 cp "$og_server_bin" "$og_app_dest/Contents/MacOS/OpenGridderServer-bin"
 chmod 755 "$og_app_dest/Contents/MacOS/OpenGridderServer-bin"
 
-cp "$og_root/app/server/Info.plist.in" "$og_app_dest/Contents/Info.plist"
+sed -e "s|@OG_VERSION@|$OG_VERSION|g" \
+    -e "s|@OG_BUILD_NUMBER@|$OG_BUILD_NUMBER|g" \
+    -e "s|@OG_GIT_COMMIT@|$OG_GIT_COMMIT|g" \
+    -e "s|@OG_BUILD_DATE@|$OG_BUILD_DATE|g" \
+    "$og_root/app/server/Info.plist.in" > "$og_app_dest/Contents/Info.plist"
+plutil -lint "$og_app_dest/Contents/Info.plist" >/dev/null
 printf 'APPL????' > "$og_app_dest/Contents/PkgInfo"
 
 if [ -f "$og_root/app/resources/OpenGridderServer.icns" ]; then

@@ -5,6 +5,22 @@
 #import <signal.h>
 #import <unistd.h>
 
+#pragma mark - Build Identity
+
+// "v0.1.1-alpha • Build 16 (a44b7bb) • 2026-11-08 15:42 CET", from the Info.plist the build
+// scripts stamp (scripts/build-info.sh). Lets the user confirm which build is running.
+static NSString *OGBuildLabel(void) {
+    NSDictionary *info = [[NSBundle mainBundle] infoDictionary];
+    NSString *version = info[@"CFBundleShortVersionString"] ?: @"?";
+    NSString *build = info[@"CFBundleVersion"] ?: @"?";
+    NSString *commit = info[@"OGGitCommit"];
+    NSString *date = info[@"OGBuildDate"];
+    NSMutableString *label = [NSMutableString stringWithFormat:@"v%@ • Build %@", version, build];
+    if (commit.length) [label appendFormat:@" (%@)", commit];
+    if (date.length) [label appendFormat:@" • %@", date];
+    return label;
+}
+
 #pragma mark - GoodLookin Hardware Drawing Helper
 
 static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
@@ -142,7 +158,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         self.versionLabel.backgroundColor = [NSColor clearColor];
         self.versionLabel.font = [NSFont systemFontOfSize:12 weight:NSFontWeightRegular];
         self.versionLabel.textColor = [NSColor colorWithCalibratedRed:0.60 green:0.65 blue:0.70 alpha:0.8];
-        self.versionLabel.stringValue = @"v1.0 BETA • macOS Universal (Apple Silicon & Intel)";
+        self.versionLabel.stringValue = OGBuildLabel();
         [plate addSubview:self.versionLabel];
 
         // Progress bar
@@ -289,7 +305,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         versionLabel.backgroundColor = [NSColor clearColor];
         versionLabel.font = [NSFont systemFontOfSize:11 weight:NSFontWeightRegular];
         versionLabel.textColor = [NSColor colorWithCalibratedRed:0.60 green:0.65 blue:0.70 alpha:0.8];
-        versionLabel.stringValue = @"v1.0 BETA • macOS Universal (Apple Silicon & Intel)";
+        versionLabel.stringValue = OGBuildLabel();
         [plate addSubview:versionLabel];
 
         NSTextField *tagline = [[NSTextField alloc] initWithFrame:NSMakeRect(185, 486, 490, 18)];
@@ -355,7 +371,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
     NSString *rawText = 
 @"================================================================================\n"
 @"                 OPENGRIDDER — ZERO-OVERHEAD PRECISION AUDIO GRID              \n"
-@"                         Version 1.0 BETA • Multi-Format                         \n"
+@"@BUILD_LINE@\n"
 @"================================================================================\n\n"
 @"[ ARCHITECTURE & OVERVIEW ]\n"
 @"OpenGridder is an ultra-high-performance, zero-overhead, pure-native audio streaming\n"
@@ -393,6 +409,11 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
 @"                   (c) 2026 Marcos Deida • studio.opengrid                     \n"
 @"================================================================================\n";
 
+    // Centre the build line in the 80-column banner.
+    NSString *buildLine = OGBuildLabel();
+    NSInteger pad = MAX((NSInteger)0, (80 - (NSInteger)buildLine.length) / 2);
+    buildLine = [[@"" stringByPaddingToLength:pad withString:@" " startingAtIndex:0] stringByAppendingString:buildLine];
+    rawText = [rawText stringByReplacingOccurrencesOfString:@"@BUILD_LINE@" withString:buildLine];
     self.textView.string = rawText;
 }
 

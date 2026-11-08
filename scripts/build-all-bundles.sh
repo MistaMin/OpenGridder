@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 og_root="$(cd "$script_dir/.." && pwd)"
+source "$script_dir/build-info.sh"
 
 echo "=== 1. Building ag-formats dylib & server ==="
 cd "$og_root"

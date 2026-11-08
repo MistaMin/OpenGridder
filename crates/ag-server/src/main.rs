@@ -13,9 +13,13 @@ use ag_server::{sandbox_chain_child, sandbox_plugin_child, serve_chain, serve_cl
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--version" || arg == "-v") {
+        println!("OpenGridder Server {}", ag_server::build_label());
+        return;
+    }
     if args.iter().any(|arg| arg == "--menu" || arg == "-m" || arg == "menu" || arg == "--status") {
         let id = args.windows(2).find(|pair| pair[0] == "--id").and_then(|pair| pair[1].parse::<u16>().ok()).unwrap_or(0);
-        let menu = ag_server::menu::ServerMenu::new("AudioGridder Server", id, "0.1.1-alpha");
+        let menu = ag_server::menu::ServerMenu::new("AudioGridder Server", id, ag_server::build_label());
         print!("{}", menu.render_cli());
         return;
     }
@@ -52,7 +56,7 @@ fn main() {
             println!("master {port}");
             let _ = std::io::stdout().flush();
         }
-        eprintln!("AudioGridder server 0.1.1-alpha chain sandbox on port {port}.");
+        eprintln!("AudioGridder server {} chain sandbox on port {port}.", ag_server::build_label());
         if let Err(err) = serve_chain(listener) {
             eprintln!("ag-server: {err}");
             std::process::exit(1);
@@ -78,7 +82,7 @@ fn main() {
             println!("master {port}");
             let _ = std::io::stdout().flush();
         }
-        eprintln!("AudioGridder server 0.1.1-alpha plugin sandbox on port {port}.");
+        eprintln!("AudioGridder server {} plugin sandbox on port {port}.", ag_server::build_label());
         if let Err(err) = serve_plugin(listener) {
             eprintln!("ag-server: {err}");
             std::process::exit(1);
@@ -98,7 +102,8 @@ fn main() {
         std::process::exit(1);
     });
     eprintln!(
-        "AudioGridder server 0.1.1-alpha on port {port}. Hosts builtin gain plus scanned AudioUnit, LV2, and VST3 plug-ins."
+        "AudioGridder server {} on port {port}. Hosts builtin gain plus scanned AudioUnit, LV2, and VST3 plug-ins.",
+        ag_server::build_label()
     );
     let rescan = args.iter().any(|arg| arg == "--rescan");
     if rescan {
@@ -149,7 +154,7 @@ fn main() {
         uuid: format!("{:08x}-0000-4000-8000-{:012x}", std::process::id(), port),
         local_mode: false,
         load: 0.0,
-        version: "0.1.1-alpha".to_string(),
+        version: ag_server::VERSION.to_string(),
         port,
         hostname: host_name,
     };
