@@ -599,7 +599,13 @@ impl RemoteSession {
     /// The audio socket on its own, for a dedicated audio thread: audio keeps flowing while
     /// this session waits on a slow command (AudioGridder's separate AudioStreamer).
     pub fn audio_link(&self) -> std::io::Result<AudioLink> {
-        Ok(AudioLink { audio: self.audio.try_clone()?, pos_wire_size: self.pos_wire_size, latency_samples: self.latency_samples })
+        Ok(AudioLink {
+            audio: self.audio.try_clone()?,
+            pos_wire_size: self.pos_wire_size,
+            latency_samples: self.latency_samples,
+            inbox: Vec::new(),
+            late_since: None,
+        })
     }
 
     /// MIDI events the server returned on the last [`Self::exchange_midi`] call.
@@ -670,23 +676,145 @@ fn read_message(socket: &mut TcpStream) -> std::io::Result<(i32, Vec<u8>)> {
     }
 }
 
-/// One audio round trip on the audio socket.
+/// The audio socket for the audio thread. One block is in flight at a time.
+///
+/// A late block is not a lost connection: when the server misses the deadline (a heavy chain
+/// on a busy machine), that block stays dry, the reply is still read when it arrives (bytes
+/// that came in are kept, so the stream stays in step) and only then is the next block sent.
+/// A server that stays silent for `LATE_LIMIT` is gone.
 pub struct AudioLink {
     audio: TcpStream,
     pos_wire_size: usize,
     latency_samples: i32,
+    inbox: Vec<u8>,
+    late_since: Option<std::time::Instant>,
 }
 
+/// How long a late reply is waited for before the connection counts as lost.
+const LATE_LIMIT: Duration = Duration::from_secs(5);
+
 impl AudioLink {
-    pub fn exchange(&mut self, channels: &[Vec<f32>], midi: &[crate::QueuedMidi], position: PositionInfo) -> std::io::Result<Vec<Vec<f32>>> {
-        let (audio, latency, _midi) = exchange_audio(&mut self.audio, self.pos_wire_size, channels, midi, position)?;
-        self.latency_samples = latency;
-        Ok(audio)
+    /// `Ok(Some(audio))`: the processed block. `Ok(None)`: the server is late, play this block
+    /// dry. `Err`: the connection is gone.
+    pub fn exchange(
+        &mut self,
+        channels: &[Vec<f32>],
+        midi: &[crate::QueuedMidi],
+        position: PositionInfo,
+    ) -> std::io::Result<Option<Vec<Vec<f32>>>> {
+        if let Some(since) = self.late_since {
+            match self.receive()? {
+                Some(_) => self.late_since = None, // the late block: too late to use
+                None if since.elapsed() > LATE_LIMIT => {
+                    return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "the server stopped answering audio"));
+                }
+                None => return Ok(None),
+            }
+        }
+        let request = audio_request(self.pos_wire_size, channels, midi, position)?;
+        self.audio.write_all(&request)?;
+        match self.receive()? {
+            Some((audio, latency)) => {
+                self.latency_samples = latency;
+                Ok(Some(audio))
+            }
+            None => {
+                self.late_since = Some(std::time::Instant::now());
+                Ok(None)
+            }
+        }
+    }
+
+    /// Read until one whole reply is in, or `AUDIO_TIMEOUT` passes (`None`, bytes kept).
+    fn receive(&mut self) -> std::io::Result<Option<(Vec<Vec<f32>>, i32)>> {
+        let deadline = std::time::Instant::now() + AUDIO_TIMEOUT;
+        let mut chunk = [0u8; 65536];
+        loop {
+            if let Some((audio, latency, used)) = parse_audio_reply(&self.inbox)? {
+                self.inbox.drain(..used);
+                return Ok(Some((audio, latency)));
+            }
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return Ok(None);
+            }
+            self.audio.set_read_timeout(Some((deadline - now).max(Duration::from_millis(1))))?;
+            match self.audio.read(&mut chunk) {
+                Ok(0) => return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "audio connection closed")),
+                Ok(n) => self.inbox.extend_from_slice(&chunk[..n]),
+                Err(err) if is_wait(&err) => return Ok(None),
+                Err(err) => return Err(err),
+            }
+        }
     }
 
     pub fn latency_samples(&self) -> i32 {
         self.latency_samples
     }
+}
+
+/// One whole audio reply at the start of `bytes`: audio, latency and the bytes it used.
+/// `None` while it is still incomplete.
+fn parse_audio_reply(bytes: &[u8]) -> std::io::Result<Option<(Vec<Vec<f32>>, i32, usize)>> {
+    if bytes.len() < AudioResponseHeader::WIRE_SIZE {
+        return Ok(None);
+    }
+    let header = AudioResponseHeader::from_bytes(bytes).ok_or_else(|| invalid("audio response"))?;
+    if !(0..=64).contains(&header.channels) || !(0..=65_536).contains(&header.samples) || header.midi_events < 0 {
+        return Err(invalid("audio response"));
+    }
+    let audio_end = AudioResponseHeader::WIRE_SIZE + header.channels as usize * header.samples as usize * 4;
+    let mut at = audio_end;
+    for _ in 0..header.midi_events {
+        if bytes.len() < at + 8 {
+            return Ok(None);
+        }
+        let size = i32::from_le_bytes(bytes[at + 4..at + 8].try_into().unwrap());
+        if !(0..=65_536).contains(&size) {
+            return Err(invalid("midi size"));
+        }
+        at += 8 + size as usize;
+    }
+    if bytes.len() < at {
+        return Ok(None);
+    }
+    let (_header, audio) = read_audio_response(&bytes[..audio_end]).ok_or_else(|| invalid("audio response"))?;
+    Ok(Some((audio, header.latency_samples, at)))
+}
+
+/// The audio request bytes: header, samples, MIDI, playhead.
+fn audio_request(pos_wire_size: usize, channels: &[Vec<f32>], midi: &[crate::QueuedMidi], position: PositionInfo) -> std::io::Result<Vec<u8>> {
+    let samples = channels.first().map(|channel| channel.len()).unwrap_or(0);
+    let count = channels.len() as i32;
+    if samples == 0 || !(1..=2).contains(&count) || channels.iter().any(|channel| channel.len() != samples) {
+        return Err(invalid("audio shape"));
+    }
+    let header = AudioRequestHeader {
+        channels: count,
+        samples: samples as i32,
+        channels_requested: count,
+        samples_requested: samples as i32,
+        midi_events: midi.len() as i32,
+        is_double: false,
+        trace_id: [0; 16],
+    };
+    let mut bytes = Vec::with_capacity(AudioRequestHeader::WIRE_SIZE + channels.len() * samples * 4 + midi.len() * 11 + PositionInfo::WIRE_SIZE);
+    bytes.extend_from_slice(&header.to_bytes());
+    for channel in channels {
+        for sample in channel {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+    }
+    for event in midi {
+        bytes.extend_from_slice(&event.sample_offset.to_le_bytes());
+        bytes.extend_from_slice(&3i32.to_le_bytes());
+        bytes.extend_from_slice(&event.data);
+    }
+    bytes.extend_from_slice(&position.to_bytes());
+    if pos_wire_size > PositionInfo::WIRE_SIZE {
+        bytes.resize(bytes.len() + (pos_wire_size - PositionInfo::WIRE_SIZE), 0);
+    }
+    Ok(bytes)
 }
 
 /// Send one block with its MIDI and playhead, read the processed block back.

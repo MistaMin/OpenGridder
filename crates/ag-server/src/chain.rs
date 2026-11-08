@@ -259,6 +259,10 @@ impl PluginChain {
         std::mem::take(&mut self.outbound)
     }
 
+    pub fn sample_rate(&self) -> f32 {
+        self.sample_rate
+    }
+
     pub fn editor_is_open(&self) -> bool {
         self.editor.is_some()
     }

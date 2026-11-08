@@ -884,14 +884,24 @@ enum Samples {
 }
 
 fn audio_loop(mut socket: TcpStream, chain: Arc<Mutex<PluginChain>>) {
+    // Test hook: AG_TEST_SLOW_AUDIO=<ms>,<every> stalls every <every>th block by <ms>,
+    // like an overloaded server, to check that clients ride it out.
+    let slow: Option<(u64, u64)> = std::env::var("AG_TEST_SLOW_AUDIO").ok().and_then(|v| {
+        let (ms, every) = v.split_once(',')?;
+        Some((ms.trim().parse().ok()?, every.trim().parse::<u64>().ok()?.max(1)))
+    });
+    let mut blocks = 0u64;
     loop {
         let (mut samples, midi, position) = match read_audio(&mut socket) {
             Ok(message) => message,
             Err(err) if is_wait(err.kind()) => continue,
             Err(_) => break,
         };
+        let waited = std::time::Instant::now();
         let step = {
             let mut chain = chain.lock().expect("chain");
+            let lock_wait = waited.elapsed();
+            let processing = std::time::Instant::now();
             let buffer_channels = match &samples {
                 Samples::F32(audio) => audio.len(),
                 Samples::F64(audio) => audio.len(),
@@ -911,6 +921,22 @@ fn audio_loop(mut socket: TcpStream, chain: Arc<Mutex<PluginChain>>) {
                     }
                 }
                 let returned = if chain.plugin_replaced_midi() { Vec::new() } else { midi };
+                // A block late enough to matter: the client gives up on a block after 500 ms.
+                // Says whether the chain itself was slow or the audio waited for the lock.
+                let spent = processing.elapsed();
+                let frames = match &samples {
+                    Samples::F32(audio) => audio.first().map(|c| c.len()).unwrap_or(0),
+                    Samples::F64(audio) => audio.first().map(|c| c.len()).unwrap_or(0),
+                };
+                let budget = Duration::from_secs_f64(frames as f64 / f64::from(chain.sample_rate().max(1.0)));
+                if spent > budget || lock_wait > Duration::from_millis(50) {
+                    eprintln!(
+                        "ag-server: slow audio block: processing {:.1} ms (block is {:.1} ms), waited {:.1} ms for the chain",
+                        spent.as_secs_f64() * 1000.0,
+                        budget.as_secs_f64() * 1000.0,
+                        lock_wait.as_secs_f64() * 1000.0
+                    );
+                }
                 Some((chain.latency(), returned))
             }
         };
@@ -918,6 +944,12 @@ fn audio_loop(mut socket: TcpStream, chain: Arc<Mutex<PluginChain>>) {
             let _ = socket.shutdown(Shutdown::Both);
             break;
         };
+        blocks += 1;
+        if let Some((ms, every)) = slow {
+            if blocks % every == 0 {
+                thread::sleep(Duration::from_millis(ms));
+            }
+        }
         let bytes = match &samples {
             Samples::F32(audio) => match write_audio_response(audio, latency) {
                 Some(mut bytes) => {
@@ -969,6 +1001,15 @@ fn write_screen(socket: &mut TcpStream, width: i32, height: i32, pixels: &[u8]) 
 /// The client drops the session after 500 ms without audio. Only this thread changes
 /// the slots, so the slot looked up before stays valid.
 fn handle_unlocked(chain: &Arc<Mutex<PluginChain>>, message_type: i32, body: &[u8]) -> Vec<(i32, Vec<u8>)> {
+    let started = std::time::Instant::now();
+    let replies = handle_unlocked_inner(chain, message_type, body);
+    if started.elapsed() > Duration::from_millis(50) && !matches!(message_type, command::EDIT_PLUGIN | command::ADD_PLUGIN) {
+        eprintln!("ag-server: command {message_type} held the chain for {:.0} ms", started.elapsed().as_secs_f64() * 1000.0);
+    }
+    replies
+}
+
+fn handle_unlocked_inner(chain: &Arc<Mutex<PluginChain>>, message_type: i32, body: &[u8]) -> Vec<(i32, Vec<u8>)> {
     match message_type {
         command::EDIT_PLUGIN => {
             let pending = chain.lock().expect("chain").begin_edit(body);

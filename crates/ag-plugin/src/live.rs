@@ -664,13 +664,15 @@ fn audio_thread(shared: Arc<Shared>, mut requests: Consumer<Box<Packet>>, mut re
             if let Some((generation, audio)) = link.as_mut() {
                 let input: Vec<Vec<f32>> = packet.audio[..packet.channels].iter().map(|ch| ch[..packet.frames].to_vec()).collect();
                 match audio.exchange(&input, &packet.midi[..packet.midi_count], packet.position.clone()) {
-                    Ok(output) => {
+                    Ok(Some(output)) => {
                         for (ch, src) in output.iter().take(packet.channels).enumerate() {
                             packet.audio[ch][..packet.frames].copy_from_slice(&src[..packet.frames]);
                         }
                         packet.valid = true;
                         shared.latency.store(audio.latency_samples().max(0) as usize, Ordering::Release);
                     }
+                    // The server is late (overloaded): this block stays dry, the link stays.
+                    Ok(None) => {}
                     Err(_) => {
                         shared.audio_lost.store(*generation, Ordering::Release);
                         *link = None;
