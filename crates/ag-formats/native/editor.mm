@@ -260,6 +260,12 @@ bool og_native_set_plugin_bypassed(NativePlugin* p, uint32_t loaded_idx, bool by
 }
 
 bool og_native_edit_plugin(NativePlugin* p, uint32_t loaded_idx, int32_t x, int32_t y) {
+    // A position on this Mac's screen only means something to a server on this Mac (local
+    // mode: its window opens next to ours). A remote server places the window itself,
+    // fully on its own screen, as AudioGridder does.
+    if (!ag_insert_server_is_local((void*)p)) {
+        return ag_insert_edit_plugin_at((void*)p, loaded_idx, 0, 0);
+    }
     // (x, y) is a Cocoa screen point (bottom-left origin) for the server window's top-left;
     // the protocol uses top-left-origin coordinates (ProcessorWindow::move).
     const CGFloat primary = NSMaxY([NSScreen screens].firstObject.frame);

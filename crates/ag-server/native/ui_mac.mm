@@ -227,13 +227,27 @@ static uint64_t show_editor(NSView* view, void* native, const char* title, int x
     CGFloat primary = NSMaxY([NSScreen screens].firstObject.frame);
     NSPoint topLeft = (x > 0 || y > 0) ? NSMakePoint(x, primary - y) : NSMakePoint(NSMinX(visible) + 40, NSMaxY(visible) - 40);
     [window setFrameTopLeftPoint:topLeft];
-    // Keep the whole window on a screen: AudioGridder can only capture a fully visible window.
+    // Keep the whole window on one screen: only on-screen pixels can be captured, so a part
+    // past an edge streams as a blank area. Clamp every edge to the visible area of the screen
+    // it is on (or the main screen); a window larger than the screen keeps its top-left visible.
     NSRect frame = window.frame;
-    NSScreen* screen = window.screen ?: [NSScreen mainScreen];
+    NSScreen* screen = window.screen;
+    if (!screen) {
+        for (NSScreen* candidate in [NSScreen screens]) {
+            if (NSIntersectsRect(candidate.frame, frame)) { screen = candidate; break; }
+        }
+    }
+    if (!screen) screen = [NSScreen mainScreen];
     NSRect area = screen.visibleFrame;
-    if (NSMaxX(frame) > NSMaxX(area)) frame.origin.x = MAX(NSMinX(area), NSMaxX(area) - frame.size.width);
-    if (NSMinY(frame) < NSMinY(area)) frame.origin.y = MIN(NSMaxY(area) - frame.size.height, NSMinY(area));
+    if (NSMaxX(frame) > NSMaxX(area)) frame.origin.x = NSMaxX(area) - frame.size.width;
+    if (NSMinX(frame) < NSMinX(area)) frame.origin.x = NSMinX(area);
+    if (NSMinY(frame) < NSMinY(area)) frame.origin.y = NSMinY(area);
+    if (NSMaxY(frame) > NSMaxY(area)) frame.origin.y = NSMaxY(area) - frame.size.height;
     [window setFrame:frame display:NO];
+    if (frame.size.width > area.size.width || frame.size.height > area.size.height) {
+        NSLog(@"OpenGridder: %@ (%.0fx%.0f) is larger than the screen (%.0fx%.0f); the part beyond it cannot be captured",
+              window.title, frame.size.width, frame.size.height, area.size.width, area.size.height);
+    }
 
     AGEditor* editor = [[AGEditor alloc] init];
     editor.editorId = g_next_id.fetch_add(1);
