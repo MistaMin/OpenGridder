@@ -38,6 +38,10 @@ fn server_id_offsets_the_listen_port() {
     let bin = env!("CARGO_BIN_EXE_ag-server");
     let id: u16 = 3;
     let port = SERVER_PORT + id;
+    let already_bound = std::net::TcpStream::connect_timeout(
+        &format!("127.0.0.1:{SERVER_PORT}").parse().unwrap(),
+        Duration::from_millis(50),
+    ).is_ok();
     let child = Command::new(bin)
         .args(["--id", "3"])
         .stdout(Stdio::null())
@@ -56,11 +60,13 @@ fn server_id_offsets_the_listen_port() {
     assert_eq!(response.version, 13);
     assert_eq!(response.flags, 0);
     assert_ne!(response.port, i32::from(port), "worker port collided with the master");
-    let default_port = std::net::TcpStream::connect_timeout(
-        &format!("127.0.0.1:{SERVER_PORT}").parse().unwrap(),
-        Duration::from_millis(200),
-    );
-    assert!(default_port.is_err(), "id 3 also bound {SERVER_PORT}");
+    if !already_bound {
+        let default_port = std::net::TcpStream::connect_timeout(
+            &format!("127.0.0.1:{SERVER_PORT}").parse().unwrap(),
+            Duration::from_millis(200),
+        );
+        assert!(default_port.is_err(), "id 3 also bound {SERVER_PORT}");
+    }
     drop(stream);
     drop(kill);
 }

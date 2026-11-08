@@ -19,7 +19,7 @@ use ag_protocol::command::{
     SCREEN_CAPTURE, SET_MONO_CHANNELS, SET_PLUGIN_OVERSAMPLING, UNBYPASS_PLUGIN,
 };
 use ag_protocol::{
-    read_audio_response, write_audio_request, AudioRequestHeader, AudioResponseHeader, HandshakeRequest, HandshakeResponse, PositionInfo,
+    read_audio_response, AudioRequestHeader, AudioResponseHeader, HandshakeRequest, HandshakeResponse, PositionInfo,
     PROTOCOL_VERSION,
 };
 use openplugin::prelude::Plugin;
@@ -91,6 +91,7 @@ pub struct RemoteSession {
     catalog: Vec<String>,
     catalog_items: Vec<CatalogItem>,
     applied_selection: i32,
+    pos_wire_size: usize,
 }
 
 impl RemoteSession {
@@ -150,6 +151,7 @@ impl RemoteSession {
             catalog: Vec::new(),
             catalog_items: Vec::new(),
             applied_selection: 0,
+            pos_wire_size: if port == 55057 { 104 } else { PositionInfo::WIRE_SIZE },
         };
         let (message_type, body) = session.read_cmd()?;
         if message_type != PLUGIN_LIST {
@@ -172,6 +174,11 @@ impl RemoteSession {
     /// Plugin ids from the connect-time list, in catalog order.
     pub fn catalog_ids(&self) -> &[String] {
         &self.catalog
+    }
+
+    /// Set legacy JUCE wire format (104-byte PositionInfo instead of 48-byte)
+    pub fn set_legacy_wire(&mut self, legacy: bool) {
+        self.pos_wire_size = if legacy { 104 } else { PositionInfo::WIRE_SIZE };
     }
 
     /// When selection changes to n > 0, load catalog plugin n-1. Selection 0 does not unload.
@@ -536,6 +543,9 @@ impl RemoteSession {
             bytes.extend_from_slice(&event.data);
         }
         bytes.extend_from_slice(&position.to_bytes());
+        if self.pos_wire_size > PositionInfo::WIRE_SIZE {
+            bytes.resize(bytes.len() + (self.pos_wire_size - PositionInfo::WIRE_SIZE), 0);
+        }
         self.audio.write_all(&bytes)?;
         let mut response = vec![0u8; AudioResponseHeader::WIRE_SIZE + channels.len() * samples * 4];
         self.audio.read_exact(&mut response)?;
@@ -557,15 +567,8 @@ impl RemoteSession {
         channels: &[Vec<f32>],
         position: PositionInfo,
     ) -> std::io::Result<(Vec<Vec<f32>>, i32)> {
-        let bytes = write_audio_request(channels, &position).ok_or_else(|| invalid("audio shape"))?;
-        self.audio.write_all(&bytes)?;
-        let samples = channels.first().map(|channel| channel.len()).unwrap_or(0);
-        let mut response = vec![0u8; AudioResponseHeader::WIRE_SIZE + channels.len() * samples * 4];
-        self.audio.read_exact(&mut response)?;
-        let header = AudioResponseHeader::from_bytes(&response).ok_or_else(|| invalid("audio response"))?;
-        let (_header, audio) = read_audio_response(&response).ok_or_else(|| invalid("audio response"))?;
-        self.latency_samples = header.latency_samples;
-        Ok((audio, header.latency_samples))
+        let (audio, _) = self.exchange_midi_at(channels, &[], position)?;
+        Ok((audio, self.latency_samples))
     }
 
     fn remember_parameter(&mut self, body: &[u8]) {

@@ -732,6 +732,7 @@ fn processed_midi_returns_on_the_audio_response() {
     assert!(events.is_empty());
 
     write_cmd(&mut session.command, BYPASS_PLUGIN, &command::number(1));
+    let _ = get_param(&mut session, 0, 0);
     let (header, _audio, events) = exchange_f32_midi(&mut session, &block, &[(7, &note)]);
     eprintln!("bypassed plugin midi events {} first {:?}", header.midi_events, events.first());
     assert_eq!(header.midi_events, 1, "bypass ate the MIDI buffer");
