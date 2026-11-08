@@ -314,6 +314,15 @@ static OpenGridderRemoteWindowController *s_instance = nil;
     }
 }
 
+- (void)forgetPlugin:(NativePlugin *)rust {
+    if (!rust || _currentRust != rust) return;
+    _currentRust = NULL;
+    if ([self.window.contentView isKindOfClass:[OpenGridderRemoteView class]]) {
+        ((OpenGridderRemoteView *)self.window.contentView).rust = NULL;
+    }
+    [self.window orderOut:nil];
+}
+
 - (void)windowWillClose:(NSNotification *)notification {
     if (_currentRust) {
         og_native_hide_plugin(_currentRust);

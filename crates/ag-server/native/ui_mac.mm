@@ -17,6 +17,8 @@
 #import <CoreAudioKit/CoreAudioKit.h>
 #import <Carbon/Carbon.h>
 #import <ImageIO/ImageIO.h>
+#import <ApplicationServices/ApplicationServices.h>
+#include <vector>
 #import <objc/runtime.h>
 #include <dns_sd.h>
 #include <arpa/inet.h>
@@ -418,11 +420,30 @@ int ag_ui_capture(uint64_t editor_id, uint8_t* buffer, size_t capacity, int* wid
         info = it->second;
     }
     if (CGRectIsEmpty(info.rect)) return 0;
+    // The editor plus this process's own windows on top of it: a plugin's drop-down menus,
+    // pop-ups and tooltips are separate windows (AudioGridder captures the screen area, so they
+    // show). Front to back, editor last. Only own windows: no other app's window, no permission.
+    NSMutableArray* windows = [NSMutableArray array];
+    NSArray* above = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenAboveWindow, info.window));
+    const pid_t self_pid = getpid();
+    for (NSDictionary* entry in above) {
+        if ([entry[(__bridge NSString*)kCGWindowOwnerPID] intValue] != self_pid) continue;
+        CGRect bounds = CGRectZero;
+        if (!CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)entry[(__bridge NSString*)kCGWindowBounds], &bounds) ||
+            !CGRectIntersectsRect(bounds, info.rect)) {
+            continue;
+        }
+        [windows addObject:entry[(__bridge NSString*)kCGWindowNumber]];
+    }
+    std::vector<const void*> ids;
+    for (NSNumber* number in windows) ids.push_back((const void*)(uintptr_t)number.unsignedIntValue);
+    ids.push_back((const void*)(uintptr_t)info.window);
+    CFArrayRef list = CFArrayCreate(NULL, ids.data(), (CFIndex)ids.size(), NULL);
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    CGImageRef image = CGWindowListCreateImage(info.rect, kCGWindowListOptionIncludingWindow, info.window,
-                                               kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution);
+    CGImageRef image = CGWindowListCreateImageFromArray(info.rect, list, kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution);
 #pragma clang diagnostic pop
+    CFRelease(list);
     if (!image) return 0;
     const size_t w = CGImageGetWidth(image), h = CGImageGetHeight(image);
     *width = (int)w;
@@ -535,9 +556,77 @@ static NSEventModifierFlags modifier_flags(bool shift, bool ctrl, bool alt, bool
     return flags;
 }
 
+// AudioGridder's input path (KeyAndMouse::mouseEvent): real system mouse events at screen
+// coordinates. Menus and pop-ups that follow the real pointer (JUCE popup menus, NSMenu
+// tracking) only work this way. Needs Accessibility permission for the server; without it,
+// events are posted to the editor window only (and macOS is asked once for permission).
+static bool system_input_allowed(void) {
+    if (AXIsProcessTrusted()) return true;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSLog(@"OpenGridder: allow OpenGridder Server in System Settings > Privacy & Security > Accessibility "
+              @"so plug-in menus work from remote DAWs");
+        NSDictionary* options = @{(__bridge NSString*)kAXTrustedCheckOptionPrompt: @YES};
+        AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
+    });
+    return false;
+}
+
+static bool post_system_mouse(AGEditor* editor, uint8_t type, float x, float y, NSEventModifierFlags flags, float dx, float dy) {
+    NSWindow* window = editor.window;
+    if (!window || editor.closed || !system_input_allowed()) return false;
+    const NSRect content = [window contentRectForFrameRect:window.frame];
+    const CGFloat primary = NSMaxY([NSScreen screens].firstObject.frame);
+    const CGPoint at = CGPointMake(NSMinX(content) + x, primary - NSMaxY(content) + y);
+    static NSTimeInterval last_down = 0;
+    static CGPoint last_point;
+    static int64_t clicks = 1;
+    if (type == 10) {
+        CGEventRef wheel = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitPixel, 2, (int32_t)lroundf(dy), (int32_t)lroundf(dx));
+        if (!wheel) return false;
+        CGEventSetLocation(wheel, at);
+        CGEventSetFlags(wheel, (CGEventFlags)flags);
+        CGEventPost(kCGSessionEventTap, wheel);
+        CFRelease(wheel);
+        return true;
+    }
+    CGEventType event_type = kCGEventMouseMoved;
+    CGMouseButton button = kCGMouseButtonLeft;
+    bool down = false;
+    switch (type) {
+        case 1: event_type = kCGEventLeftMouseDown; down = true; break;
+        case 2: event_type = kCGEventLeftMouseUp; break;
+        case 3: event_type = kCGEventLeftMouseDragged; break;
+        case 4: event_type = kCGEventRightMouseDown; button = kCGMouseButtonRight; down = true; break;
+        case 5: event_type = kCGEventRightMouseUp; button = kCGMouseButtonRight; break;
+        case 6: event_type = kCGEventRightMouseDragged; button = kCGMouseButtonRight; break;
+        case 7: event_type = kCGEventOtherMouseDown; button = kCGMouseButtonCenter; down = true; break;
+        case 8: event_type = kCGEventOtherMouseUp; button = kCGMouseButtonCenter; break;
+        case 9: event_type = kCGEventOtherMouseDragged; button = kCGMouseButtonCenter; break;
+        default: break;
+    }
+    if (down) {
+        // The click must land on this window: bring the server and the window to the front.
+        if (!NSApp.isActive) [NSApp activateIgnoringOtherApps:YES];
+        [window orderFrontRegardless];
+        const NSTimeInterval now = [NSProcessInfo processInfo].systemUptime;
+        clicks = (now - last_down < 0.4 && hypot(at.x - last_point.x, at.y - last_point.y) < 5) ? clicks + 1 : 1;
+        last_down = now;
+        last_point = at;
+    }
+    CGEventRef event = CGEventCreateMouseEvent(NULL, event_type, at, button);
+    if (!event) return false;
+    if (event_type != kCGEventMouseMoved) CGEventSetIntegerValueField(event, kCGMouseEventClickState, clicks);
+    CGEventSetFlags(event, (CGEventFlags)flags | CGEventGetFlags(event));
+    CGEventPost(kCGSessionEventTap, event);
+    CFRelease(event);
+    return true;
+}
+
 // Mouse types as AudioGridder sends them: 0 move, 1-3 left down/up/drag, 4-6 right,
 // 7-9 other, 10 wheel. (x, y) is relative to the top-left of the captured image.
 static void deliver_mouse(AGEditor* editor, uint8_t type, float x, float y, NSEventModifierFlags flags, float dx, float dy) {
+    if (post_system_mouse(editor, type, x, y, flags, dx, dy)) return;
     static NSTimeInterval last_down = 0;
     static NSPoint last_point;
     static NSInteger clicks = 1, event_number = 0;

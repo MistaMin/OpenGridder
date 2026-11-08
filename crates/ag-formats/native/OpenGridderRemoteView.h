@@ -53,5 +53,8 @@
 + (instancetype)sharedController;
 - (void)showForPlugin:(NativePlugin *)rust slotIndex:(uint32_t)slot title:(NSString *)title;
 - (void)hide;
+// The insert is going away: drop every reference to it and close its window (the shared
+// window kept a raw pointer and called into freed memory on close: REAPER crashed on quit).
+- (void)forgetPlugin:(NativePlugin *)rust;
 
 @end

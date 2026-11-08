@@ -5,6 +5,9 @@
 #include "editor.h"
 #include "opengridder.h"
 #include "OpenGridderEditorView.h"
+#import "OpenGridderRemoteView.h"
+
+static void forget_screen_canvas(NativePlugin* p);
 #include <vector>
 #include <map>
 #include <cmath>
@@ -75,6 +78,9 @@
         _editor = nil;
     }
     if (_processor) {
+        // Nothing may keep this insert after its editor is gone.
+        [[OpenGridderRemoteWindowController sharedController] forgetPlugin:(NativePlugin*)_processor];
+        forget_screen_canvas((NativePlugin*)_processor);
         ag_insert_release(_processor);
         _processor = nullptr;
     }
@@ -289,6 +295,10 @@ struct AgScreenCanvas {
 static std::map<NativePlugin*, AgScreenCanvas>& screen_canvases() {
     static std::map<NativePlugin*, AgScreenCanvas> map;
     return map;
+}
+
+static void forget_screen_canvas(NativePlugin* p) {
+    screen_canvases().erase(p);
 }
 
 static void apply_screen_frame(void* ctx, const uint8_t* png, uint32_t len, int32_t width, int32_t height,
