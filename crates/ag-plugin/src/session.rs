@@ -24,10 +24,10 @@ use ag_protocol::{
 };
 use openplugin::prelude::Plugin;
 
-/// A new socket starts here. Command, command-in, and screen then wait 10 s.
+/// A new socket starts here. Command, command-in, and screen wait up to 45 s for heavy plug-in cold loads (e.g. Acustica Audio / Kontakt).
 /// Audio waits 500 ms so a stalled block cannot hold the host.
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(45);
 const AUDIO_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Id of the alpha host's builtin gain. The server rejects every other id.
