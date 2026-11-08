@@ -168,3 +168,165 @@ fn adler32(data: &[u8]) -> u32 {
     }
     (b << 16) | a
 }
+
+/// Part of the editor picture to update: where it goes in the full image, and its bytes.
+pub struct RectUpdate {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub image: Vec<u8>,
+}
+
+/// The old OpenGridder server's stream encoder (og-screen `ScreenEncoder`): after the first
+/// picture only the rectangle that changed is sent. Large changes (a window-wide animation)
+/// go out as JPEG while the picture moves, and that area is sent again losslessly once it
+/// stops, so a still editor is always exact. Small changes (a turning knob) are PNG.
+pub struct RectEncoder {
+    last: Vec<u8>,
+    width: i32,
+    height: i32,
+    /// Area sent as JPEG that still has to be sent losslessly once the picture settles.
+    refine: Option<(i32, i32, i32, i32)>,
+    crop: Vec<u8>,
+}
+
+/// Changes covering at least this many pixels are sent as JPEG while moving.
+const LOSSY_MIN_PIXELS: i64 = 60_000;
+const JPEG_QUALITY: f64 = 0.82;
+
+impl RectEncoder {
+    pub fn new() -> Self {
+        Self { last: Vec::new(), width: 0, height: 0, refine: None, crop: Vec::new() }
+    }
+
+    /// The next picture is sent whole (new editor, or the client fell behind).
+    pub fn reset(&mut self) {
+        self.last.clear();
+        self.width = 0;
+        self.height = 0;
+        self.refine = None;
+    }
+
+    /// Returns the update to send for this capture, or `None` when nothing changed.
+    pub fn encode(&mut self, width: i32, height: i32, rgba: &[u8]) -> Option<RectUpdate> {
+        let expected = width.max(0) as usize * height.max(0) as usize * 4;
+        if width <= 0 || height <= 0 || rgba.len() < expected {
+            return None;
+        }
+        let rgba = &rgba[..expected];
+        if self.last.len() != expected || self.width != width || self.height != height {
+            self.last.clear();
+            self.last.extend_from_slice(rgba);
+            self.width = width;
+            self.height = height;
+            self.refine = None;
+            return self.update(0, 0, width, height, false);
+        }
+        let Some(changed) = changed_rect(&self.last, rgba, width, height) else {
+            // Settled: send the area that went out lossy, exactly.
+            let (x, y, w, h) = self.refine.take()?;
+            return self.update(x, y, w, h, false);
+        };
+        self.last.copy_from_slice(rgba);
+        let (x, y, w, h) = changed;
+        let lossy = i64::from(w) * i64::from(h) >= LOSSY_MIN_PIXELS;
+        if lossy {
+            self.refine = Some(match self.refine {
+                Some(previous) => union(previous, changed),
+                None => changed,
+            });
+        }
+        self.update(x, y, w, h, lossy)
+    }
+
+    fn update(&mut self, x: i32, y: i32, w: i32, h: i32, lossy: bool) -> Option<RectUpdate> {
+        let stride = self.width as usize * 4;
+        self.crop.clear();
+        for row in y..y + h {
+            let start = row as usize * stride + x as usize * 4;
+            self.crop.extend_from_slice(&self.last[start..start + w as usize * 4]);
+        }
+        let image = encode_rect(w as u32, h as u32, &self.crop, lossy)?;
+        Some(RectUpdate { x, y, width: w, height: h, image })
+    }
+}
+
+#[cfg(not(test))]
+fn encode_rect(width: u32, height: u32, rgba: &[u8], lossy: bool) -> Option<Vec<u8>> {
+    if lossy {
+        crate::ui::encode_jpeg(width, height, rgba, JPEG_QUALITY)
+    } else {
+        crate::ui::encode_png(width, height, rgba)
+    }
+}
+
+#[cfg(test)]
+fn encode_rect(width: u32, height: u32, rgba: &[u8], _lossy: bool) -> Option<Vec<u8>> {
+    Some(encode_png_stored(width, height, rgba))
+}
+
+/// Bounding box (x, y, w, h) of the pixels that differ, or `None` when identical.
+fn changed_rect(old: &[u8], new: &[u8], width: i32, height: i32) -> Option<(i32, i32, i32, i32)> {
+    let stride = width as usize * 4;
+    let (mut top, mut bottom) = (None, 0usize);
+    let (mut left, mut right) = (width as usize, 0usize);
+    for row in 0..height as usize {
+        let a = &old[row * stride..(row + 1) * stride];
+        let b = &new[row * stride..(row + 1) * stride];
+        if a == b {
+            continue;
+        }
+        top.get_or_insert(row);
+        bottom = row;
+        let first = (0..width as usize).find(|&px| a[px * 4..px * 4 + 4] != b[px * 4..px * 4 + 4]).unwrap_or(0);
+        let last = (0..width as usize).rev().find(|&px| a[px * 4..px * 4 + 4] != b[px * 4..px * 4 + 4]).unwrap_or(0);
+        left = left.min(first);
+        right = right.max(last);
+    }
+    let top = top?;
+    Some((left as i32, top as i32, (right - left + 1) as i32, (bottom - top + 1) as i32))
+}
+
+fn union(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
+    let x0 = a.0.min(b.0);
+    let y0 = a.1.min(b.1);
+    let x1 = (a.0 + a.2).max(b.0 + b.2);
+    let y1 = (a.1 + a.3).max(b.1 + b.3);
+    (x0, y0, x1 - x0, y1 - y0)
+}
+
+#[cfg(test)]
+mod rect_tests {
+    use super::*;
+
+    #[test]
+    fn first_picture_is_whole_then_only_the_changed_rectangle() {
+        let (w, h) = (40, 30);
+        let mut img = vec![10u8; (w * h * 4) as usize];
+        let mut enc = RectEncoder::new();
+        let first = enc.encode(w, h, &img).expect("first picture");
+        assert_eq!((first.x, first.y, first.width, first.height), (0, 0, w, h));
+        assert!(enc.encode(w, h, &img).is_none(), "an unchanged picture is not sent");
+        for (px, py) in [(5, 7), (12, 9)] {
+            let at = ((py * w + px) * 4) as usize;
+            img[at] = 200;
+        }
+        let update = enc.encode(w, h, &img).expect("a change");
+        assert_eq!((update.x, update.y, update.width, update.height), (5, 7, 8, 3));
+    }
+
+    #[test]
+    fn a_large_change_is_sent_again_once_settled() {
+        let (w, h) = (400, 200); // 80 000 pixels, above the lossy threshold
+        let mut img = vec![0u8; (w * h * 4) as usize];
+        let mut enc = RectEncoder::new();
+        enc.encode(w, h, &img).unwrap();
+        img.iter_mut().for_each(|b| *b = 90);
+        let moving = enc.encode(w, h, &img).expect("the change");
+        assert_eq!((moving.width, moving.height), (w, h));
+        let settled = enc.encode(w, h, &img).expect("lossless repeat when still");
+        assert_eq!((settled.x, settled.y, settled.width, settled.height), (0, 0, w, h));
+        assert!(enc.encode(w, h, &img).is_none(), "then nothing");
+    }
+}

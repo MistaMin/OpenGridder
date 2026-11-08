@@ -21,6 +21,15 @@ pub struct CatalogPlugin {
     pub category: String,
 }
 
+/// A plugin instance whose editor `crate::ui::open_target` can show (raw handles).
+#[derive(Clone, Copy, Debug)]
+pub enum EditorTarget {
+    /// An AudioUnit instance.
+    Au(usize),
+    /// A VST3 or CLAP instance from native/host.cpp.
+    Native(usize),
+}
+
 pub struct EditorFrame {
     pub width: i32,
     pub height: i32,
@@ -40,10 +49,10 @@ pub trait Hosted: Send {
     fn process_f32(&mut self, audio: &mut [Vec<f32>], midi: &[[u8; 3]], frames: usize);
     fn process_f64(&mut self, audio: &mut [Vec<f64>], midi: &[[u8; 3]], frames: usize);
     fn show_editor(&mut self);
-    /// Show the plugin's real editor in a window on the server (see `crate::ui`).
-    /// Returns the editor id, 0 when there is none; the caller closes it with `ui::close`.
-    fn open_editor(&mut self, _title: &str, _x: i32, _y: i32) -> u64 {
-        0
+    /// What `crate::ui` needs to show this plugin's real editor, `None` without one.
+    /// The window is opened without the chain lock, so audio keeps running meanwhile.
+    fn editor_target(&self) -> Option<EditorTarget> {
+        None
     }
     fn hide_editor(&mut self);
     fn editor_frame(&mut self) -> Option<EditorFrame>;
@@ -312,8 +321,8 @@ impl Drop for AuPlugin {
 }
 
 impl Hosted for AuPlugin {
-    fn open_editor(&mut self, title: &str, x: i32, y: i32) -> u64 {
-        crate::ui::open_au(self.unit as *mut c_void, title, x, y)
+    fn editor_target(&self) -> Option<EditorTarget> {
+        Some(EditorTarget::Au(self.unit as usize))
     }
 
     fn name(&self) -> String {

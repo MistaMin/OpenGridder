@@ -17,7 +17,7 @@
         _frameData = [[NSMutableData alloc] init];
         _cgImage = NULL;
 
-        _renderTimer = [NSTimer timerWithTimeInterval:1.0 / 30.0
+        _renderTimer = [NSTimer timerWithTimeInterval:1.0 / 60.0
                                                target:self
                                              selector:@selector(checkNewFrame)
                                              userInfo:nil
@@ -33,7 +33,7 @@
         [_renderTimer invalidate];
         _renderTimer = nil;
     } else if (_renderTimer == nil) {
-        _renderTimer = [NSTimer timerWithTimeInterval:1.0 / 30.0
+        _renderTimer = [NSTimer timerWithTimeInterval:1.0 / 60.0
                                                target:self
                                              selector:@selector(checkNewFrame)
                                              userInfo:nil

@@ -77,6 +77,9 @@ pub struct PluginChain {
     /// reads the shared copy to capture and stream it without taking the chain lock.
     editor_window: u64,
     live_editor: Arc<AtomicU64>,
+    /// Instances created outside the chain lock for the next ADD_PLUGIN (`preload`).
+    /// An empty list means creating them failed.
+    preloaded: Option<Vec<Box<dyn host::Hosted>>>,
     outbound: Vec<(i32, Vec<u8>)>,
     /// Last playhead the audio thread applied. AudioGridder does not put this
     /// in the plugin settings chunk. GetPluginSettings appends it so a client
@@ -105,6 +108,7 @@ impl PluginChain {
             screen: ScreenDiff::new(),
             editor_window: 0,
             live_editor: Arc::new(AtomicU64::new(0)),
+            preloaded: None,
             outbound: Vec::new(),
             last_playhead: PositionInfo::default(),
         }
@@ -262,6 +266,78 @@ impl PluginChain {
     /// Editor window id shared with the session's screen thread (0 = none).
     pub fn live_editor(&self) -> Arc<AtomicU64> {
         Arc::clone(&self.live_editor)
+    }
+
+    /// ADD_PLUGIN for a hosted plugin: what to instantiate. Read under the chain lock; the
+    /// caller instantiates without it (`instantiate_for`) and hands the result to `preload`,
+    /// so a slow plugin load does not stall audio past the client's timeout.
+    pub fn load_request(&self, body: &[u8]) -> Option<LoadRequest> {
+        let json = command::read_json_payload(body)?;
+        let id = json.get("id").and_then(|v| v.as_str())?.to_string();
+        if id.is_empty() || id == BUILTIN_GAIN_ID || id == "gain" {
+            return None;
+        }
+        let layout = layout_name(json.get("layout").and_then(|v| v.as_str()).unwrap_or(""));
+        let count = if layout == "Multi-Mono" { self.channels.max(1) } else { 1 };
+        let bus_channels = if layout == "Mono" || layout == "Multi-Mono" { 1 } else { self.channels };
+        Some(LoadRequest { id, sample_rate: self.sample_rate, max_block: self.max_block, bus_channels, count })
+    }
+
+    pub fn instantiate_for(request: &LoadRequest) -> Vec<Box<dyn host::Hosted>> {
+        let mut instances = Vec::with_capacity(request.count);
+        for _ in 0..request.count {
+            match host::instantiate(&request.id, request.sample_rate, request.max_block, request.bus_channels) {
+                Some(plugin) => instances.push(plugin),
+                None => return Vec::new(),
+            }
+        }
+        instances
+    }
+
+    pub fn preload(&mut self, instances: Vec<Box<dyn host::Hosted>>) {
+        self.preloaded = Some(instances);
+    }
+
+    /// EDIT_PLUGIN, first half (under the lock): close the open editor, select the slot,
+    /// and return what to open. A plugin without its own editor gets the generic one here
+    /// and `None` is returned.
+    pub fn begin_edit(&mut self, body: &[u8]) -> Option<(usize, host::EditorTarget, String, i32, i32)> {
+        self.check_window_closed();
+        self.close_window();
+        self.editor_frame = None;
+        self.editor_size = None;
+        self.screen.clear_baseline();
+        let (index, _, x, y) = command::read_edit_plugin(body)?;
+        self.editor = usize_index(index).filter(|i| *i < self.slots.len());
+        let index = self.editor?;
+        let Processor::Plugin(plugin) = &mut self.slots[index].processor else { return None };
+        if let Some(target) = plugin.editor_target() {
+            return Some((index, target, plugin.name(), x, y));
+        }
+        plugin.show_editor();
+        self.editor_frame = plugin.editor_frame();
+        self.editor_size = self.editor_frame.as_ref().map(|frame| (frame.width, frame.height));
+        None
+    }
+
+    /// EDIT_PLUGIN, second half (under the lock): the window `crate::ui::open_target` made,
+    /// 0 when it could not; then the generic editor stands in.
+    pub fn finish_edit(&mut self, index: usize, window: u64) {
+        if self.editor != Some(index) {
+            crate::ui::close(window);
+            return;
+        }
+        if window != 0 {
+            self.editor_window = window;
+            self.live_editor.store(window, Ordering::Release);
+            self.editor_size = crate::ui::size(window);
+            return;
+        }
+        if let Some(Processor::Plugin(plugin)) = self.slots.get_mut(index).map(|slot| &mut slot.processor) {
+            plugin.show_editor();
+            self.editor_frame = plugin.editor_frame();
+            self.editor_size = self.editor_frame.as_ref().map(|frame| (frame.width, frame.height));
+        }
     }
 
     /// Close the real editor window, if one is open. Runs before its plugin can be dropped.
@@ -450,29 +526,11 @@ impl PluginChain {
                 vec![(SCREEN_BOUNDS, command::screen_bounds(x, y, w, h).to_vec())]
             }
             EDIT_PLUGIN => {
-                self.close_window();
-                self.editor_frame = None;
-                self.editor_size = None;
-                self.screen.clear_baseline();
-                if let Some((index, _, x, y)) = command::read_edit_plugin(body) {
-                    self.editor = usize_index(index).filter(|i| *i < self.slots.len());
-                    if let Some(index) = self.editor {
-                        if let Processor::Plugin(plugin) = &mut self.slots[index].processor {
-                            // The plugin's real editor, captured and streamed by the screen
-                            // thread (AudioGridder's ProcessorWindow).
-                            let title = plugin.name();
-                            let window = plugin.open_editor(&title, x, y);
-                            if window != 0 {
-                                self.editor_window = window;
-                                self.live_editor.store(window, Ordering::Release);
-                                self.editor_size = crate::ui::size(window);
-                                return Vec::new();
-                            }
-                            plugin.show_editor();
-                            self.editor_frame = plugin.editor_frame();
-                            self.editor_size = self.editor_frame.as_ref().map(|frame| (frame.width, frame.height));
-                        }
-                    }
+                // The session calls begin_edit / open_target / finish_edit itself so the
+                // window opens without the chain lock; this inline path serves tests.
+                if let Some((index, target, title, x, y)) = self.begin_edit(body) {
+                    let window = crate::ui::open_target(target, &title, x, y);
+                    self.finish_edit(index, window);
                 }
                 Vec::new()
             }
@@ -622,12 +680,20 @@ impl PluginChain {
         }
         let bus_channels = if layout == "Mono" || layout == "Multi-Mono" { 1 } else { self.channels };
         let mut instances = Vec::with_capacity(count);
-        for _ in 0..count {
-            let Some(plugin) = host::instantiate(id, self.sample_rate, self.max_block, bus_channels) else {
-                let fail = serde_json::json!({"success": false, "err": format!("no plugin named {id}")});
-                return vec![(ADD_PLUGIN_RESULT, command::json_payload(&fail))];
-            };
-            instances.push(Processor::Plugin(plugin));
+        if let Some(preloaded) = self.preloaded.take() {
+            instances.extend(preloaded.into_iter().map(Processor::Plugin));
+        } else {
+            for _ in 0..count {
+                let Some(plugin) = host::instantiate(id, self.sample_rate, self.max_block, bus_channels) else {
+                    let fail = serde_json::json!({"success": false, "err": format!("no plugin named {id}")});
+                    return vec![(ADD_PLUGIN_RESULT, command::json_payload(&fail))];
+                };
+                instances.push(Processor::Plugin(plugin));
+            }
+        }
+        if instances.len() != count {
+            let fail = serde_json::json!({"success": false, "err": format!("no plugin named {id}")});
+            return vec![(ADD_PLUGIN_RESULT, command::json_payload(&fail))];
         }
         let Processor::Plugin(first) = &instances[0] else {
             let fail = serde_json::json!({"success": false, "err": format!("no plugin named {id}")});
@@ -1134,6 +1200,15 @@ impl Slot {
         }
         run_processor(&mut self.processor, audio, midi, frames);
     }
+}
+
+/// A hosted plugin to create for ADD_PLUGIN (see `PluginChain::load_request`).
+pub struct LoadRequest {
+    pub id: String,
+    pub sample_rate: f32,
+    pub max_block: usize,
+    pub bus_channels: usize,
+    pub count: usize,
 }
 
 impl Drop for PluginChain {

@@ -124,8 +124,8 @@ impl Drop for NativePlugin {
 }
 
 impl Hosted for NativePlugin {
-    fn open_editor(&mut self, title: &str, x: i32, y: i32) -> u64 {
-        crate::ui::open_native(self.raw as *mut std::ffi::c_void, title, x, y)
+    fn editor_target(&self) -> Option<crate::host::EditorTarget> {
+        Some(crate::host::EditorTarget::Native(self.raw as usize))
     }
 
     fn name(&self) -> String {

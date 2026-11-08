@@ -730,18 +730,23 @@ pub unsafe extern "C" fn ag_insert_edit_plugin_at(p: *mut c_void, loaded_idx: u3
     n.live_ctrl.send(ag_plugin::live::LiveCommand::EditAt(loaded_idx as i32, x, y))
 }
 
-/// Hands the oldest waiting editor frame (PNG, a delta over the previous one) to `sink`.
+/// Hands the oldest waiting editor update to `sink`: an image (PNG or JPEG) for the
+/// rectangle x, y, rect_w, rect_h of a width x height picture.
 /// The bytes are valid only during the call. Returns false when none waits.
 #[no_mangle]
 pub unsafe extern "C" fn ag_insert_next_screen(
     p: *mut c_void,
-    sink: Option<unsafe extern "C" fn(ctx: *mut c_void, png: *const u8, len: u32, width: i32, height: i32)>,
+    sink: Option<
+        unsafe extern "C" fn(ctx: *mut c_void, image: *const u8, len: u32, width: i32, height: i32, x: i32, y: i32, rect_w: i32, rect_h: i32),
+    >,
     ctx: *mut c_void,
 ) -> bool {
     let Some(n) = native(p) else { return false };
     let Some(sink) = sink else { return false };
     let Some(frame) = n.live_ctrl.pop_screen() else { return false };
-    sink(ctx, frame.pixels.as_ptr(), frame.pixels.len() as u32, frame.width, frame.height);
+    // rect_w == 0: a whole-picture PNG drawn over the previous picture (AudioGridder diff).
+    let (x, y, w, h) = frame.rect.unwrap_or((0, 0, 0, 0));
+    sink(ctx, frame.pixels.as_ptr(), frame.pixels.len() as u32, frame.width, frame.height, x, y, w, h);
     true
 }
 

@@ -824,7 +824,7 @@ fn run_session(accepted: AcceptedClient) -> std::io::Result<()> {
             break;
         }
         quit = message_type == QUIT;
-        let replies = chain.lock().expect("chain").handle(message_type, &body);
+        let replies = handle_unlocked(&chain, message_type, &body);
         let mut disconnected = false;
         for (reply_type, reply_body) in replies {
             if !write_until_disconnect(&mut command, reply_type, &reply_body)? {
@@ -949,21 +949,54 @@ fn write_screen(socket: &mut TcpStream, width: i32, height: i32, pixels: &[u8]) 
     write_cmd(socket, SCREEN_CAPTURE, &body)
 }
 
-/// `ScreenWorker::runNative` with the `ProcessorWindow` capture timer (50 ms): capture
-/// the open editor window, send the changed pixels as PNG on the screen socket. When the
-/// window is closed on the server's screen, push HidePlugin like `Worker::sendHideEditor`.
+/// Commands whose slow part runs on the main thread (creating a plugin, opening its
+/// editor) do that part without the chain lock, so the audio thread keeps answering.
+/// The client drops the session after 500 ms without audio. Only this thread changes
+/// the slots, so the slot looked up before stays valid.
+fn handle_unlocked(chain: &Arc<Mutex<PluginChain>>, message_type: i32, body: &[u8]) -> Vec<(i32, Vec<u8>)> {
+    match message_type {
+        command::EDIT_PLUGIN => {
+            let pending = chain.lock().expect("chain").begin_edit(body);
+            if let Some((index, target, title, x, y)) = pending {
+                let window = crate::ui::open_target(target, &title, x, y);
+                chain.lock().expect("chain").finish_edit(index, window);
+            }
+            Vec::new()
+        }
+        command::ADD_PLUGIN => {
+            let request = chain.lock().expect("chain").load_request(body);
+            let instances = request.as_ref().map(PluginChain::instantiate_for);
+            let mut chain = chain.lock().expect("chain");
+            if let Some(instances) = instances {
+                chain.preload(instances);
+            }
+            chain.handle(message_type, body)
+        }
+        _ => chain.lock().expect("chain").handle(message_type, body),
+    }
+}
+
+/// Editor stream, the old OpenGridder server's way (og-server `ScreenWorker`): capture the
+/// open editor window up to 60 times a second and send only the rectangle that changed
+/// (`RectEncoder`). When the window is closed on the server's screen, push HidePlugin like
+/// `Worker::sendHideEditor`.
 fn stream_editor(stop: Arc<AtomicBool>, live: Arc<AtomicU64>, socket: Arc<Mutex<TcpStream>>, inbound: Arc<Mutex<TcpStream>>) {
-    let mut diff = crate::screen::ScreenDiff::new();
+    const FRAME: Duration = Duration::from_micros(16_667);
+    let mut encoder = crate::screen::RectEncoder::new();
     let mut current = 0u64;
     let mut pixels = Vec::new();
+    // AG_STREAM_STATS=1 logs capture and encode times every 120 loops.
+    let stats = std::env::var_os("AG_STREAM_STATS").is_some();
+    let (mut loops, mut sent, mut capture_total, mut encode_total) = (0u32, 0u32, Duration::ZERO, Duration::ZERO);
     while !stop.load(Ordering::Relaxed) {
-        thread::sleep(Duration::from_millis(50));
+        let started = std::time::Instant::now();
         let id = live.load(Ordering::Acquire);
         if id != current {
-            diff.clear_baseline();
+            encoder.reset();
             current = id;
         }
         if id == 0 {
+            thread::sleep(Duration::from_millis(30));
             continue;
         }
         if !crate::ui::is_open(id) {
@@ -975,16 +1008,55 @@ fn stream_editor(stop: Arc<AtomicBool>, live: Arc<AtomicU64>, socket: Arc<Mutex<
             }
             continue;
         }
-        let Some((width, height)) = crate::ui::capture(id, &mut pixels) else { continue };
-        let used = width.max(0) as usize * height.max(0) as usize * 4;
-        let Some(png) = diff.capture(width, height, &pixels[..used.min(pixels.len())]) else { continue };
-        let Ok(mut socket) = socket.lock() else { break };
-        match write_screen(&mut socket, width, height, &png) {
-            Ok(()) => {}
-            Err(err) if client_disconnected(&err) => break,
-            Err(_) => diff.clear_baseline(), // slow reader: the next frame is a full image
+        let captured = crate::ui::capture(id, &mut pixels);
+        let capture_time = started.elapsed();
+        if let Some((width, height)) = captured {
+            let update = encoder.encode(width, height, &pixels);
+            if stats {
+                loops += 1;
+                capture_total += capture_time;
+                encode_total += started.elapsed() - capture_time;
+                sent += update.is_some() as u32;
+                if loops == 120 {
+                    eprintln!(
+                        "editor stream: {}x{} capture {:.1} ms, diff+encode {:.1} ms, {} of 120 loops sent",
+                        width, height, capture_total.as_secs_f64() * 1000.0 / 120.0, encode_total.as_secs_f64() * 1000.0 / 120.0, sent
+                    );
+                    (loops, sent, capture_total, encode_total) = (0, 0, Duration::ZERO, Duration::ZERO);
+                }
+            }
+            if let Some(update) = update {
+                let Ok(mut socket) = socket.lock() else { break };
+                match write_screen_rect(&mut socket, width, height, &update) {
+                    Ok(()) => {}
+                    Err(err) if client_disconnected(&err) => break,
+                    Err(_) => encoder.reset(), // slow reader: send the whole picture next
+                }
+            }
+        }
+        if let Some(rest) = FRAME.checked_sub(started.elapsed()) {
+            thread::sleep(rest);
         }
     }
+}
+
+/// `ScreenCapture` for part of the picture: the header carries the full editor size, the
+/// image is the changed rectangle, and an "OGRC" trailer (x, y, w, h as little-endian u32)
+/// says where it goes. A client that ignores the trailer reads a normal picture message.
+fn write_screen_rect(socket: &mut TcpStream, width: i32, height: i32, update: &crate::screen::RectUpdate) -> std::io::Result<()> {
+    let mut body = Vec::with_capacity(52 + update.image.len());
+    body.extend_from_slice(&width.to_le_bytes());
+    body.extend_from_slice(&height.to_le_bytes());
+    body.extend_from_slice(&width.to_le_bytes());
+    body.extend_from_slice(&height.to_le_bytes());
+    body.extend_from_slice(&1.0f64.to_le_bytes());
+    body.extend_from_slice(&(update.image.len() as u64).to_le_bytes());
+    body.extend_from_slice(&update.image);
+    body.extend_from_slice(b"OGRC");
+    for value in [update.x, update.y, update.width, update.height] {
+        body.extend_from_slice(&(value as u32).to_le_bytes());
+    }
+    write_cmd(socket, SCREEN_CAPTURE, &body)
 }
 
 struct StopClip {

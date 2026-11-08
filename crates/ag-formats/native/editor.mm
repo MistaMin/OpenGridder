@@ -239,9 +239,9 @@ bool og_native_hide_plugin(NativePlugin* p) {
     return ag_insert_hide_plugin((void*)p);
 }
 
-// The remote editor picture: the server sends PNG frames where unchanged pixels are
-// transparent (AudioGridder's diff detection), so each frame is drawn over the previous
-// picture in order. One canvas per insert.
+// The remote editor picture, kept per insert. The server sends either the changed
+// rectangle (PNG, or JPEG while a large area moves) with its position, or a whole PNG whose
+// unchanged pixels are transparent (AudioGridder's diff detection); both are applied in order.
 struct AgScreenCanvas {
     std::vector<uint8_t> rgba;
     uint32_t width = 0;
@@ -254,7 +254,8 @@ static std::map<NativePlugin*, AgScreenCanvas>& screen_canvases() {
     return map;
 }
 
-static void apply_screen_frame(void* ctx, const uint8_t* png, uint32_t len, int32_t width, int32_t height) {
+static void apply_screen_frame(void* ctx, const uint8_t* png, uint32_t len, int32_t width, int32_t height,
+                               int32_t rx, int32_t ry, int32_t rw, int32_t rh) {
     auto* canvas = static_cast<AgScreenCanvas*>(ctx);
     if (!png || len == 0 || width <= 0 || height <= 0) return;
     CFDataRef data = CFDataCreate(NULL, png, len);
@@ -274,7 +275,13 @@ static void apply_screen_frame(void* ctx, const uint8_t* png, uint32_t len, int3
                                               kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
     CGColorSpaceRelease(space);
     if (ctx2) {
-        CGContextDrawImage(ctx2, CGRectMake(0, 0, width, height), image);  // source-over: transparent keeps
+        if (rw > 0 && rh > 0) {
+            // An opaque image of one rectangle (y from the top; CG's origin is bottom-left).
+            CGContextSetBlendMode(ctx2, kCGBlendModeCopy);
+            CGContextDrawImage(ctx2, CGRectMake(rx, height - ry - rh, rw, rh), image);
+        } else {
+            CGContextDrawImage(ctx2, CGRectMake(0, 0, width, height), image);  // source-over: transparent keeps
+        }
         CGContextRelease(ctx2);
         canvas->frame_id++;
     }

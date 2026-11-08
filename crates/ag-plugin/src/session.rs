@@ -37,6 +37,9 @@ pub struct ScreenFrame {
     pub width: i32,
     pub height: i32,
     pub pixels: Vec<u8>,
+    /// Where `pixels` (an opaque PNG or JPEG of that rectangle) goes in the full picture.
+    /// `None`: a whole-picture PNG whose transparent pixels keep the previous picture.
+    pub rect: Option<(i32, i32, i32, i32)>,
 }
 
 /// One hosted parameter from the worker's Parameters message.
@@ -706,7 +709,13 @@ fn parse_screen(body: &[u8]) -> Option<ScreenFrame> {
     if width <= 0 || height <= 0 || size == 0 || body.len() < 32 + size {
         return None;
     }
-    Some(ScreenFrame { width, height, pixels: body[32..32 + size].to_vec() })
+    // OpenGridder's "OGRC" trailer: x, y, w, h of the rectangle this image updates.
+    let trailer = &body[32 + size..];
+    let rect = (trailer.len() >= 20 && &trailer[..4] == b"OGRC").then(|| {
+        let word = |at: usize| u32::from_le_bytes(trailer[at..at + 4].try_into().unwrap()) as i32;
+        (word(4), word(8), word(12), word(16))
+    });
+    Some(ScreenFrame { width, height, pixels: body[32..32 + size].to_vec(), rect })
 }
 
 fn is_wait(err: &std::io::Error) -> bool {

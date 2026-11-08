@@ -400,9 +400,19 @@ int ag_ui_capture(uint64_t editor_id, uint8_t* buffer, size_t capacity, int* wid
     return 1;
 }
 
-// Compressed PNG of an RGBA buffer (the diff images keep their transparent pixels).
+// PNG (lossless, keeps alpha) or JPEG (quality 0..1, opaque) of an RGBA buffer.
 // Returns a malloc'd buffer the caller frees with ag_ui_free.
+static uint8_t* encode_image(const uint8_t* rgba, int width, int height, CFStringRef type, double quality, size_t* out_len);
+
 uint8_t* ag_ui_encode_png(const uint8_t* rgba, int width, int height, size_t* out_len) {
+    return encode_image(rgba, width, height, CFSTR("public.png"), -1.0, out_len);
+}
+
+uint8_t* ag_ui_encode_jpeg(const uint8_t* rgba, int width, int height, double quality, size_t* out_len) {
+    return encode_image(rgba, width, height, CFSTR("public.jpeg"), quality, out_len);
+}
+
+static uint8_t* encode_image(const uint8_t* rgba, int width, int height, CFStringRef type, double quality, size_t* out_len) {
     *out_len = 0;
     if (!rgba || width <= 0 || height <= 0) return NULL;
     CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
@@ -414,10 +424,11 @@ uint8_t* ag_ui_encode_png(const uint8_t* rgba, int width, int height, size_t* ou
     CGColorSpaceRelease(space);
     if (!image) return NULL;
     CFMutableDataRef data = CFDataCreateMutable(NULL, 0);
-    CGImageDestinationRef dest = CGImageDestinationCreateWithData(data, CFSTR("public.png"), 1, NULL);
+    CGImageDestinationRef dest = CGImageDestinationCreateWithData(data, type, 1, NULL);
     uint8_t* out = NULL;
     if (dest) {
-        CGImageDestinationAddImage(dest, image, NULL);
+        NSDictionary* props = quality >= 0 ? @{(__bridge NSString*)kCGImageDestinationLossyCompressionQuality: @(quality)} : nil;
+        CGImageDestinationAddImage(dest, image, (__bridge CFDictionaryRef)props);
         if (CGImageDestinationFinalize(dest)) {
             const CFIndex len = CFDataGetLength(data);
             out = (uint8_t*)malloc((size_t)len);

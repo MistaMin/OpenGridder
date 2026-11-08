@@ -20,6 +20,7 @@ unsafe extern "C" {
     fn ag_ui_mouse(id: u64, kind: u8, x: f32, y: f32, shift: bool, ctrl: bool, alt: bool, dx: f32, dy: f32);
     fn ag_ui_key(id: u64, code: u16, shift: bool, ctrl: bool, alt: bool, cmd: bool);
     fn ag_ui_encode_png(rgba: *const u8, width: i32, height: i32, out_len: *mut usize) -> *mut u8;
+    fn ag_ui_encode_jpeg(rgba: *const u8, width: i32, height: i32, quality: f64, out_len: *mut usize) -> *mut u8;
     fn ag_ui_free(p: *mut c_void);
 }
 
@@ -56,6 +57,14 @@ pub fn on_main<R, F: FnOnce() -> R>(work: F) -> R {
 
 fn title_cstr(title: &str) -> CString {
     CString::new(title.replace('\0', "")).unwrap_or_default()
+}
+
+/// Show the editor of `target`. Returns the editor id, 0 when no window can be shown.
+pub fn open_target(target: crate::host::EditorTarget, title: &str, x: i32, y: i32) -> u64 {
+    match target {
+        crate::host::EditorTarget::Au(unit) => open_au(unit as *mut c_void, title, x, y),
+        crate::host::EditorTarget::Native(raw) => open_native(raw as *mut c_void, title, x, y),
+    }
 }
 
 /// Show an AudioUnit's editor (its Cocoa view, AUv3 view controller, or Apple's generic
@@ -135,11 +144,25 @@ pub fn keys(id: u64, codes: &[u16]) {
 
 /// Compressed PNG via ImageIO.
 pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
-    if rgba.len() < width as usize * height as usize * 4 {
+    encode(width, height, rgba, None)
+}
+
+/// JPEG via ImageIO, quality 0..=1. Opaque: alpha is dropped.
+pub fn encode_jpeg(width: u32, height: u32, rgba: &[u8], quality: f64) -> Option<Vec<u8>> {
+    encode(width, height, rgba, Some(quality))
+}
+
+fn encode(width: u32, height: u32, rgba: &[u8], jpeg_quality: Option<f64>) -> Option<Vec<u8>> {
+    if width == 0 || height == 0 || rgba.len() < width as usize * height as usize * 4 {
         return None;
     }
     let mut len = 0usize;
-    let raw = unsafe { ag_ui_encode_png(rgba.as_ptr(), width as i32, height as i32, &mut len) };
+    let raw = unsafe {
+        match jpeg_quality {
+            Some(quality) => ag_ui_encode_jpeg(rgba.as_ptr(), width as i32, height as i32, quality, &mut len),
+            None => ag_ui_encode_png(rgba.as_ptr(), width as i32, height as i32, &mut len),
+        }
+    };
     if raw.is_null() {
         return None;
     }
