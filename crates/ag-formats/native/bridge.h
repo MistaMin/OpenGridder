@@ -7,6 +7,8 @@ bool ag_insert_prepare(void*, double, uint32_t, uint32_t);
 void ag_insert_reset(void*);
 uint32_t ag_insert_param_count();
 bool ag_insert_param_info(uint32_t,char*,double*,double*,double*,int32_t*);
+bool ag_insert_param_id(uint32_t,char*,uint32_t);
+bool ag_insert_param_text(uint32_t,double,char*,uint32_t);
 double ag_insert_get(void*,uint32_t);
 bool ag_insert_set(void*,uint32_t,double);
 uint32_t ag_insert_latency(void*);

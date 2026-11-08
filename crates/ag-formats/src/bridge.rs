@@ -209,6 +209,29 @@ pub unsafe extern "C" fn ag_insert_param_info(
     }
     true
 }
+unsafe fn write_param_cstr(dest: *mut c_char, capacity: u32, text: &str) -> bool {
+    if dest.is_null() || capacity == 0 {
+        return false;
+    }
+    let dest = std::slice::from_raw_parts_mut(dest as *mut u8, capacity as usize);
+    let bytes = text.as_bytes();
+    let len = bytes.len().min(dest.len() - 1);
+    dest[..len].copy_from_slice(&bytes[..len]);
+    dest[len] = 0;
+    true
+}
+/// Stable string identifier of parameter `i` (the `ParamInfo::id`, e.g. "input_gain").
+/// Hosts that key parameters by string (AAX) use it so automation survives reordering.
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_param_id(i: u32, out: *mut c_char, capacity: u32) -> bool {
+    params().get(i as usize).is_some_and(|p| write_param_cstr(out, capacity, p.id))
+}
+/// Display text for parameter `i` at plain (unnormalized) value `plain`, with units
+/// and choice labels exactly as the other formats show them ("-3.0 dB", "Tube").
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_param_text(i: u32, plain: f64, out: *mut c_char, capacity: u32) -> bool {
+    params().get(i as usize).is_some_and(|p| write_param_cstr(out, capacity, &p.format(plain as f32)))
+}
 #[no_mangle]
 pub unsafe extern "C" fn ag_insert_get(p: *mut c_void, i: u32) -> f64 {
     let Some(n) = native(p) else {

@@ -1,0 +1,7 @@
+test.describe_validation                      PASS E_COMPLETED_PASS
+test.parameters                               PASS E_COMPLETED_PASS
+    WARNING: Number of steps is high for a discrete parameter
+test.parameter_traversal.random.fast          PASS E_COMPLETED_PASS
+test.page_table.load                          PASS E_COMPLETED_PASS
+test.page_table.automation_list               PASS E_COMPLETED_PASS
+test.load_unload                              PASS E_COMPLETED_PASS

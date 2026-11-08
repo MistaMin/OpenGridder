@@ -1,0 +1,297 @@
+<?xml version='1.0' encoding='US-ASCII' standalone='yes'?>
+<!-- OpenGridder AAX control-surface page tables. Parameter IDs are the AAX ids from aax_parameters.cpp
+     (Rust ParamInfo ids; MasterBypassID is the Master Bypass). latency_profile is not automatable and is left out. -->
+<PageTables vers='6.4.0.89'>
+	<PageTableLayouts>
+		<Plugin manID='OpGd' prodID='AGrd' plugID='OpGa'>
+			<Desc>OpenGridder 2 -&gt; 2 OpenGrid</Desc>
+			<Layout>StandardLayout</Layout>
+		</Plugin>
+		<Plugin manID='OpGd' prodID='AGrd' plugID='OpGm'>
+			<Desc>OpenGridder 1 -&gt; 1 OpenGrid</Desc>
+			<Layout>StandardLayout</Layout>
+		</Plugin>
+		<PTLayout name='StandardLayout'>
+			<PageTable type='Av18' pgsz='24'>
+				<Page num='1'>
+					<Cell row='1' col='1' knobID="MasterBypassID" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='2' knobID="input_gain" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='3' knobID="drive" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='4' knobID="mix" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='5' knobID="output_gain" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='6' knobID="drive_character" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='7' knobID="drive_quality" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='8' knobID="selection" inOutButtonID="" selectButtonID=""/>
+				</Page>
+				<Page num='2'>
+					<Cell row='1' col='1' knobID="slot_0" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='2' knobID="slot_1" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='3' knobID="slot_2" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='4' knobID="slot_3" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='5' knobID="slot_4" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='6' knobID="slot_5" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='7' knobID="slot_6" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='8' knobID="slot_7" inOutButtonID="" selectButtonID=""/>
+				</Page>
+				<Page num='3'>
+					<Cell row='1' col='1' knobID="slot_8" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='2' knobID="slot_9" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='3' knobID="slot_10" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='4' knobID="slot_11" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='5' knobID="slot_12" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='6' knobID="slot_13" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='7' knobID="slot_14" inOutButtonID="" selectButtonID=""/>
+					<Cell row='1' col='8' knobID="slot_15" inOutButtonID="" selectButtonID=""/>
+				</Page>
+				<FirstPg cat='0'>0</FirstPg>
+				<FirstPg cat='1'>0</FirstPg>
+				<FirstPg cat='2'>0</FirstPg>
+				<FirstPg cat='4'>0</FirstPg>
+				<FirstPg cat='8'>0</FirstPg>
+				<FirstPg cat='16'>0</FirstPg>
+				<FirstPg cat='32'>0</FirstPg>
+				<FirstPg cat='64'>0</FirstPg>
+				<FirstPg cat='128'>0</FirstPg>
+				<FirstPg cat='256'>0</FirstPg>
+				<FirstPg cat='512'>0</FirstPg>
+				<FirstPg cat='1024'>0</FirstPg>
+				<FirstPg cat='2048'>0</FirstPg>
+			</PageTable>
+			<PageTable type='Av81' pgsz='24'>
+				<Page num='1'>
+					<Cell row='1' col='1' knobID="MasterBypassID" inOutButtonID="" selectButtonID=""/>
+					<Cell row='2' col='1' knobID="input_gain" inOutButtonID="" selectButtonID=""/>
+					<Cell row='3' col='1' knobID="drive" inOutButtonID="" selectButtonID=""/>
+					<Cell row='4' col='1' knobID="mix" inOutButtonID="" selectButtonID=""/>
+					<Cell row='5' col='1' knobID="output_gain" inOutButtonID="" selectButtonID=""/>
+					<Cell row='6' col='1' knobID="drive_character" inOutButtonID="" selectButtonID=""/>
+					<Cell row='7' col='1' knobID="drive_quality" inOutButtonID="" selectButtonID=""/>
+					<Cell row='8' col='1' knobID="selection" inOutButtonID="" selectButtonID=""/>
+				</Page>
+				<Page num='2'>
+					<Cell row='1' col='1' knobID="slot_0" inOutButtonID="" selectButtonID=""/>
+					<Cell row='2' col='1' knobID="slot_1" inOutButtonID="" selectButtonID=""/>
+					<Cell row='3' col='1' knobID="slot_2" inOutButtonID="" selectButtonID=""/>
+					<Cell row='4' col='1' knobID="slot_3" inOutButtonID="" selectButtonID=""/>
+					<Cell row='5' col='1' knobID="slot_4" inOutButtonID="" selectButtonID=""/>
+					<Cell row='6' col='1' knobID="slot_5" inOutButtonID="" selectButtonID=""/>
+					<Cell row='7' col='1' knobID="slot_6" inOutButtonID="" selectButtonID=""/>
+					<Cell row='8' col='1' knobID="slot_7" inOutButtonID="" selectButtonID=""/>
+				</Page>
+				<Page num='3'>
+					<Cell row='1' col='1' knobID="slot_8" inOutButtonID="" selectButtonID=""/>
+					<Cell row='2' col='1' knobID="slot_9" inOutButtonID="" selectButtonID=""/>
+					<Cell row='3' col='1' knobID="slot_10" inOutButtonID="" selectButtonID=""/>
+					<Cell row='4' col='1' knobID="slot_11" inOutButtonID="" selectButtonID=""/>
+					<Cell row='5' col='1' knobID="slot_12" inOutButtonID="" selectButtonID=""/>
+					<Cell row='6' col='1' knobID="slot_13" inOutButtonID="" selectButtonID=""/>
+					<Cell row='7' col='1' knobID="slot_14" inOutButtonID="" selectButtonID=""/>
+					<Cell row='8' col='1' knobID="slot_15" inOutButtonID="" selectButtonID=""/>
+				</Page>
+				<FirstPg cat='0'>0</FirstPg>
+				<FirstPg cat='1'>0</FirstPg>
+				<FirstPg cat='2'>0</FirstPg>
+				<FirstPg cat='4'>0</FirstPg>
+				<FirstPg cat='8'>0</FirstPg>
+				<FirstPg cat='16'>0</FirstPg>
+				<FirstPg cat='32'>0</FirstPg>
+				<FirstPg cat='64'>0</FirstPg>
+				<FirstPg cat='128'>0</FirstPg>
+				<FirstPg cat='256'>0</FirstPg>
+				<FirstPg cat='512'>0</FirstPg>
+				<FirstPg cat='1024'>0</FirstPg>
+				<FirstPg cat='2048'>0</FirstPg>
+			</PageTable>
+			<PageTable type='PgTL' pgsz='1'>
+				<Page num='1'>
+					<ID>MasterBypassID</ID>
+				</Page>
+				<Page num='2'>
+					<ID>input_gain</ID>
+				</Page>
+				<Page num='3'>
+					<ID>drive</ID>
+				</Page>
+				<Page num='4'>
+					<ID>mix</ID>
+				</Page>
+				<Page num='5'>
+					<ID>output_gain</ID>
+				</Page>
+				<Page num='6'>
+					<ID>drive_character</ID>
+				</Page>
+				<Page num='7'>
+					<ID>drive_quality</ID>
+				</Page>
+				<Page num='8'>
+					<ID>selection</ID>
+				</Page>
+				<Page num='9'>
+					<ID>slot_0</ID>
+				</Page>
+				<Page num='10'>
+					<ID>slot_1</ID>
+				</Page>
+				<Page num='11'>
+					<ID>slot_2</ID>
+				</Page>
+				<Page num='12'>
+					<ID>slot_3</ID>
+				</Page>
+				<Page num='13'>
+					<ID>slot_4</ID>
+				</Page>
+				<Page num='14'>
+					<ID>slot_5</ID>
+				</Page>
+				<Page num='15'>
+					<ID>slot_6</ID>
+				</Page>
+				<Page num='16'>
+					<ID>slot_7</ID>
+				</Page>
+				<Page num='17'>
+					<ID>slot_8</ID>
+				</Page>
+				<Page num='18'>
+					<ID>slot_9</ID>
+				</Page>
+				<Page num='19'>
+					<ID>slot_10</ID>
+				</Page>
+				<Page num='20'>
+					<ID>slot_11</ID>
+				</Page>
+				<Page num='21'>
+					<ID>slot_12</ID>
+				</Page>
+				<Page num='22'>
+					<ID>slot_13</ID>
+				</Page>
+				<Page num='23'>
+					<ID>slot_14</ID>
+				</Page>
+				<Page num='24'>
+					<ID>slot_15</ID>
+				</Page>
+			</PageTable>
+		</PTLayout>
+	</PageTableLayouts>
+	<ControlNamesVariations>
+		<Ctrl ID='MasterBypassID'>
+			<name typ='PgTL' sz='3'>Byp</name>
+			<name typ='PgTL' sz='5'>Bypas</name>
+		</Ctrl>
+		<Ctrl ID='input_gain'>
+			<name typ='PgTL' sz='3'>In</name>
+			<name typ='PgTL' sz='5'>Input</name>
+		</Ctrl>
+		<Ctrl ID='drive'>
+			<name typ='PgTL' sz='3'>Drv</name>
+			<name typ='PgTL' sz='5'>Drive</name>
+		</Ctrl>
+		<Ctrl ID='mix'>
+			<name typ='PgTL' sz='3'>Mix</name>
+			<name typ='PgTL' sz='5'>Mix</name>
+		</Ctrl>
+		<Ctrl ID='output_gain'>
+			<name typ='PgTL' sz='3'>Out</name>
+			<name typ='PgTL' sz='5'>Outpt</name>
+		</Ctrl>
+		<Ctrl ID='drive_character'>
+			<name typ='PgTL' sz='3'>Chr</name>
+			<name typ='PgTL' sz='5'>Char</name>
+		</Ctrl>
+		<Ctrl ID='drive_quality'>
+			<name typ='PgTL' sz='3'>Qty</name>
+			<name typ='PgTL' sz='5'>Qual</name>
+		</Ctrl>
+		<Ctrl ID='selection'>
+			<name typ='PgTL' sz='3'>Plg</name>
+			<name typ='PgTL' sz='5'>Plgin</name>
+		</Ctrl>
+		<Ctrl ID='slot_0'>
+			<name typ='PgTL' sz='3'>S0</name>
+			<name typ='PgTL' sz='5'>Slt0</name>
+		</Ctrl>
+		<Ctrl ID='slot_1'>
+			<name typ='PgTL' sz='3'>S1</name>
+			<name typ='PgTL' sz='5'>Slt1</name>
+		</Ctrl>
+		<Ctrl ID='slot_2'>
+			<name typ='PgTL' sz='3'>S2</name>
+			<name typ='PgTL' sz='5'>Slt2</name>
+		</Ctrl>
+		<Ctrl ID='slot_3'>
+			<name typ='PgTL' sz='3'>S3</name>
+			<name typ='PgTL' sz='5'>Slt3</name>
+		</Ctrl>
+		<Ctrl ID='slot_4'>
+			<name typ='PgTL' sz='3'>S4</name>
+			<name typ='PgTL' sz='5'>Slt4</name>
+		</Ctrl>
+		<Ctrl ID='slot_5'>
+			<name typ='PgTL' sz='3'>S5</name>
+			<name typ='PgTL' sz='5'>Slt5</name>
+		</Ctrl>
+		<Ctrl ID='slot_6'>
+			<name typ='PgTL' sz='3'>S6</name>
+			<name typ='PgTL' sz='5'>Slt6</name>
+		</Ctrl>
+		<Ctrl ID='slot_7'>
+			<name typ='PgTL' sz='3'>S7</name>
+			<name typ='PgTL' sz='5'>Slt7</name>
+		</Ctrl>
+		<Ctrl ID='slot_8'>
+			<name typ='PgTL' sz='3'>S8</name>
+			<name typ='PgTL' sz='5'>Slt8</name>
+		</Ctrl>
+		<Ctrl ID='slot_9'>
+			<name typ='PgTL' sz='3'>S9</name>
+			<name typ='PgTL' sz='5'>Slt9</name>
+		</Ctrl>
+		<Ctrl ID='slot_10'>
+			<name typ='PgTL' sz='3'>S10</name>
+			<name typ='PgTL' sz='5'>Slt10</name>
+		</Ctrl>
+		<Ctrl ID='slot_11'>
+			<name typ='PgTL' sz='3'>S11</name>
+			<name typ='PgTL' sz='5'>Slt11</name>
+		</Ctrl>
+		<Ctrl ID='slot_12'>
+			<name typ='PgTL' sz='3'>S12</name>
+			<name typ='PgTL' sz='5'>Slt12</name>
+		</Ctrl>
+		<Ctrl ID='slot_13'>
+			<name typ='PgTL' sz='3'>S13</name>
+			<name typ='PgTL' sz='5'>Slt13</name>
+		</Ctrl>
+		<Ctrl ID='slot_14'>
+			<name typ='PgTL' sz='3'>S14</name>
+			<name typ='PgTL' sz='5'>Slt14</name>
+		</Ctrl>
+		<Ctrl ID='slot_15'>
+			<name typ='PgTL' sz='3'>S15</name>
+			<name typ='PgTL' sz='5'>Slt15</name>
+		</Ctrl>
+	</ControlNamesVariations>
+	<Editor vers='1.3.7.1'>
+		<PluginList>
+			<RTAS>
+				<PluginID manID='OpGd' prodID='AGrd' plugID='OpGa'>
+					<MenuStr>AAX Native: OpenGridder, 2 in X 2 out</MenuStr>
+				</PluginID>
+				<PluginID manID='OpGd' prodID='AGrd' plugID='OpGm'>
+					<MenuStr>AAX Native: OpenGridder, 1 in X 1 out</MenuStr>
+				</PluginID>
+			</RTAS>
+		</PluginList>
+		<DiscCtrls>
+			<CtrlID>MasterBypassID</CtrlID>
+			<CtrlID>drive_character</CtrlID>
+			<CtrlID>drive_quality</CtrlID>
+			<CtrlID>selection</CtrlID>
+		</DiscCtrls>
+	</Editor>
+</PageTables>

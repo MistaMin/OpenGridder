@@ -5,7 +5,6 @@
 //! The audio callbacks below only call `Plugin::process`, which does not touch
 //! the network.
 
-mod aax;
 mod bridge;
 mod au;
 mod clap;
