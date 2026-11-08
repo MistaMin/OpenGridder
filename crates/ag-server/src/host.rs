@@ -128,6 +128,13 @@ pub fn scan() -> Vec<CatalogPlugin> {
     found
 }
 
+/// Catalog name for `id` if this process has already scanned. Never starts a scan
+/// (chain children have no catalog and must not rescan to name a plugin).
+pub fn cached_name(id: &str) -> Option<String> {
+    let cache = CATALOG.lock().ok()?;
+    cache.as_ref()?.iter().find(|plugin| plugin.id == id).map(|plugin| plugin.name.clone()).filter(|name| !name.is_empty())
+}
+
 fn scan_fresh() -> Vec<CatalogPlugin> {
     let mut found = Vec::new();
     for (kind, subtype, maker, instrument, fallback) in PREFERRED {

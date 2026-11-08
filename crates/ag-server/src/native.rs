@@ -76,7 +76,21 @@ pub fn instantiate(id: &str, sample_rate: f32, max_block: usize, channels: usize
         }
         params.push(NativeParam { name: text(&name), minimum, maximum, default_norm: current });
     }
-    Some(Box::new(NativePlugin { raw, params, editor: false, sample_rate, max_block }))
+    let name = crate::host::cached_name(id).unwrap_or_else(|| name_from_id(id));
+    Some(Box::new(NativePlugin { raw, name, params, editor: false, sample_rate, max_block }))
+}
+
+/// Display name from a native id when no catalog is loaded: the bundle's file stem for
+/// "vst3:/path/X.vst3" and "clap:/path/X.clap#com.vendor.x", the last URI segment for LV2.
+fn name_from_id(id: &str) -> String {
+    let body = id.split_once(':').map(|(_, rest)| rest).unwrap_or(id);
+    let path = body.split('#').next().unwrap_or(body);
+    let stem = if id.starts_with("lv2:") {
+        path.trim_end_matches('/').rsplit(['/', '#']).next().unwrap_or(path)
+    } else {
+        std::path::Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or(path)
+    };
+    if stem.is_empty() { id.to_string() } else { stem.to_string() }
 }
 
 struct NativeParam {
@@ -88,6 +102,7 @@ struct NativeParam {
 
 struct NativePlugin {
     raw: *mut AgNative,
+    name: String,
     params: Vec<NativeParam>,
     editor: bool,
     #[allow(dead_code)]
@@ -108,7 +123,8 @@ impl Drop for NativePlugin {
 
 impl Hosted for NativePlugin {
     fn name(&self) -> String {
-        self.params.first().map(|param| param.name.clone()).unwrap_or_else(|| "Native".to_string())
+        // The plugin's own name; this used to return the first parameter's name ("Mix", "Input").
+        self.name.clone()
     }
 
     fn has_editor(&self) -> bool {
@@ -249,4 +265,16 @@ impl Hosted for NativePlugin {
 fn text(bytes: &[u8]) -> String {
     let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
     String::from_utf8_lossy(&bytes[..end]).into_owned()
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::name_from_id;
+
+    #[test]
+    fn native_names_come_from_the_bundle_not_a_parameter() {
+        assert_eq!(name_from_id("clap:/Library/Audio/Plug-Ins/CLAP/DualSone.clap#studio.opengrid.dualsone"), "DualSone");
+        assert_eq!(name_from_id("vst3:/Library/Audio/Plug-Ins/VST3/Blue Channel.vst3"), "Blue Channel");
+        assert_eq!(name_from_id("lv2:http://lsp-plug.in/plugins/lv2/comp_delay_x2_stereo"), "comp_delay_x2_stereo");
+    }
 }
