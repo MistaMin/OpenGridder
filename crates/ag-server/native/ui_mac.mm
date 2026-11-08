@@ -97,6 +97,42 @@ static void publish_capture(AGEditor* editor) {
     captures()[editor.editorId] = info;
 }
 
+// Keep the whole window on one screen: only on-screen pixels can be captured, so a part past
+// an edge streams as a blank area. Every edge is clamped to the visible area of the screen the
+// window is on (or the main screen); a window larger than the screen keeps its top-left visible.
+static void keep_on_screen(NSWindow* window) {
+    NSRect frame = window.frame;
+    NSScreen* screen = window.screen;
+    if (!screen) {
+        for (NSScreen* candidate in [NSScreen screens]) {
+            if (NSIntersectsRect(candidate.frame, frame)) { screen = candidate; break; }
+        }
+    }
+    if (!screen) screen = [NSScreen mainScreen];
+    const NSRect area = screen.visibleFrame;
+    if (NSMaxX(frame) > NSMaxX(area)) frame.origin.x = NSMaxX(area) - frame.size.width;
+    if (NSMinX(frame) < NSMinX(area)) frame.origin.x = NSMinX(area);
+    if (NSMinY(frame) < NSMinY(area)) frame.origin.y = NSMinY(area);
+    if (NSMaxY(frame) > NSMaxY(area)) frame.origin.y = NSMaxY(area) - frame.size.height;
+    if (!NSEqualRects(frame, window.frame)) [window setFrame:frame display:YES];
+    if (frame.size.width > area.size.width || frame.size.height > area.size.height) {
+        NSLog(@"OpenGridder: %@ (%.0fx%.0f) is larger than the screen (%.0fx%.0f); the part beyond it cannot be captured",
+              window.title, frame.size.width, frame.size.height, area.size.width, area.size.height);
+    }
+}
+
+// The plugin's editor changed size: resize the window around it with its top-left corner
+// where it was (setContentSize grows downward from the bottom-left on macOS), then keep it on
+// screen. Editors that size themselves after opening (VST3 resizeView, an AU view's frame)
+// would otherwise grow past the screen edge.
+static void resize_window(NSWindow* window, NSSize content) {
+    const NSRect old = window.frame;
+    NSRect frame = [window frameRectForContentRect:NSMakeRect(0, 0, content.width, content.height)];
+    frame.origin = NSMakePoint(NSMinX(old), NSMaxY(old) - frame.size.height);
+    [window setFrame:frame display:YES];
+    keep_on_screen(window);
+}
+
 @implementation AGEditor
 
 - (void)teardown {
@@ -125,7 +161,7 @@ static void publish_capture(AGEditor* editor) {
     // AU views resize themselves; the window follows.
     NSSize size = self.pluginView.frame.size;
     if (size.width >= 1 && size.height >= 1 && !NSEqualSizes(size, [self.window contentRectForFrameRect:self.window.frame].size)) {
-        [self.window setContentSize:size];
+        resize_window(self.window, size);
         publish_capture(self);
     }
 }
@@ -227,27 +263,7 @@ static uint64_t show_editor(NSView* view, void* native, const char* title, int x
     CGFloat primary = NSMaxY([NSScreen screens].firstObject.frame);
     NSPoint topLeft = (x > 0 || y > 0) ? NSMakePoint(x, primary - y) : NSMakePoint(NSMinX(visible) + 40, NSMaxY(visible) - 40);
     [window setFrameTopLeftPoint:topLeft];
-    // Keep the whole window on one screen: only on-screen pixels can be captured, so a part
-    // past an edge streams as a blank area. Clamp every edge to the visible area of the screen
-    // it is on (or the main screen); a window larger than the screen keeps its top-left visible.
-    NSRect frame = window.frame;
-    NSScreen* screen = window.screen;
-    if (!screen) {
-        for (NSScreen* candidate in [NSScreen screens]) {
-            if (NSIntersectsRect(candidate.frame, frame)) { screen = candidate; break; }
-        }
-    }
-    if (!screen) screen = [NSScreen mainScreen];
-    NSRect area = screen.visibleFrame;
-    if (NSMaxX(frame) > NSMaxX(area)) frame.origin.x = NSMaxX(area) - frame.size.width;
-    if (NSMinX(frame) < NSMinX(area)) frame.origin.x = NSMinX(area);
-    if (NSMinY(frame) < NSMinY(area)) frame.origin.y = NSMinY(area);
-    if (NSMaxY(frame) > NSMaxY(area)) frame.origin.y = NSMaxY(area) - frame.size.height;
-    [window setFrame:frame display:NO];
-    if (frame.size.width > area.size.width || frame.size.height > area.size.height) {
-        NSLog(@"OpenGridder: %@ (%.0fx%.0f) is larger than the screen (%.0fx%.0f); the part beyond it cannot be captured",
-              window.title, frame.size.width, frame.size.height, area.size.width, area.size.height);
-    }
+    keep_on_screen(window);
 
     AGEditor* editor = [[AGEditor alloc] init];
     editor.editorId = g_next_id.fetch_add(1);
@@ -346,7 +362,7 @@ void ag_ui_view_resized(void* nsview, int width, int height) {
         for (AGEditor* editor in editors().allValues) {
             if ((__bridge void*)editor.pluginView == nsview && !editor.closed) {
                 [editor.pluginView setFrameSize:NSMakeSize(width, height)];
-                [editor.window setContentSize:NSMakeSize(width, height)];
+                resize_window(editor.window, NSMakeSize(width, height));
                 publish_capture(editor);
                 return;
             }
