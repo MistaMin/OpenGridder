@@ -35,7 +35,7 @@ impl Default for HandshakeRequest {
             double_precision: false,
             client_id: 0,
             flags: 0,
-            active_channels: 0,
+            active_channels: u64::MAX,
         }
     }
 }
