@@ -971,7 +971,7 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
         NSString *srvStr = [NSString stringWithFormat:@"Server: %s ▾", srvBuf];
         char errBuf[256] = {0};
         const bool hasError = self.rust && og_native_last_error(self.rust, errBuf, sizeof(errBuf));
-        const bool notConnected = hasError && std::strcmp(errBuf, "Not connected") == 0;
+        const bool notConnected = self.rust && !og_native_is_connected(self.rust);
         NSDictionary *hostAttrs = @{
             NSFontAttributeName: MonoFont(10, NSFontWeightMedium),
             NSForegroundColorAttributeName: notConnected ? [NSColor colorWithCalibratedRed:0.95 green:0.35 blue:0.30 alpha:1.0]

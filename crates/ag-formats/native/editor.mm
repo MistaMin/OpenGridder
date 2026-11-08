@@ -425,6 +425,10 @@ void og_native_get_active_server(NativePlugin* p, char* buf, uint32_t cap) {
     ag_insert_endpoint((void*)p, buf, cap);
 }
 
+bool og_native_is_connected(NativePlugin* p) {
+    return ag_insert_connected((void*)p);
+}
+
 bool og_native_last_error(NativePlugin* p, char* buf, uint32_t cap) {
     return ag_insert_error((void*)p, buf, cap);
 }

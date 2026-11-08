@@ -115,7 +115,11 @@ impl RemoteSession {
 
     /// Handshake on `host:port`, then open the four worker sockets on that same host.
     pub fn connect_host(host: &str, port: u16, request: HandshakeRequest) -> std::io::Result<Self> {
-        let mut handshake = connect_with_timeout(host, port)?;
+        // Resolve once. The server opens the worker port on the address the handshake
+        // arrived on, so the worker sockets must use that same address: a .local name
+        // resolves to several (IPv6, link-local, every interface) and a fresh lookup
+        // could pick one the worker is not listening on ("Connection refused").
+        let (mut handshake, server) = connect_with_timeout(host, port)?;
         handshake.set_read_timeout(Some(IO_TIMEOUT))?;
         handshake.set_write_timeout(Some(IO_TIMEOUT))?;
         handshake.write_all(&request.to_bytes())?;
@@ -130,7 +134,7 @@ impl RemoteSession {
 
         let mut sockets = Vec::with_capacity(4);
         for _ in 0..4 {
-            let sock = connect_with_timeout(host, worker)?;
+            let sock = TcpStream::connect_timeout(&std::net::SocketAddr::new(server.ip(), worker), Duration::from_secs(3))?;
             sock.set_read_timeout(Some(IO_TIMEOUT))?;
             sock.set_write_timeout(Some(IO_TIMEOUT))?;
             sockets.push(sock);
@@ -735,12 +739,16 @@ fn exchange_audio(
 
 /// An unreachable network server must not hold the client's worker for the system's
 /// TCP timeout (over a minute): try each resolved address for up to 3 s.
-fn connect_with_timeout(host: &str, port: u16) -> std::io::Result<TcpStream> {
+/// IPv4 addresses first: the server listens on IPv4, and a .local name lists its IPv6
+/// addresses first. Returns the stream and the address that answered.
+fn connect_with_timeout(host: &str, port: u16) -> std::io::Result<(TcpStream, std::net::SocketAddr)> {
     use std::net::ToSocketAddrs;
+    let mut addrs: Vec<std::net::SocketAddr> = (host, port).to_socket_addrs()?.collect();
+    addrs.sort_by_key(|addr| !addr.is_ipv4());
     let mut last = std::io::Error::new(std::io::ErrorKind::NotFound, format!("{host} did not resolve"));
-    for addr in (host, port).to_socket_addrs()? {
+    for addr in addrs {
         match TcpStream::connect_timeout(&addr, Duration::from_secs(3)) {
-            Ok(stream) => return Ok(stream),
+            Ok(stream) => return Ok((stream, addr)),
             Err(err) => last = err,
         }
     }

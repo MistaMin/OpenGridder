@@ -929,6 +929,12 @@ pub unsafe extern "C" fn ag_insert_error(p: *mut c_void, buf: *mut c_char, cap: 
     }
 }
 
+/// Connected to its server right now.
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_connected(p: *mut c_void) -> bool {
+    native(p).map(|n| n.live_ctrl.connected()).unwrap_or(false)
+}
+
 /// The insert's server as host:port.
 #[no_mangle]
 pub unsafe extern "C" fn ag_insert_endpoint(p: *mut c_void, buf: *mut c_char, cap: u32) -> bool {
