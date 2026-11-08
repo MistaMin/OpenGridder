@@ -76,7 +76,7 @@ OSStatus get_property(void* self,AudioUnitPropertyID id,AudioUnitScope scope,Aud
   std::vector<uint8_t> bytes(length);UInt32 got=ag_insert_save(a->processor,bytes.data(),length);if(!got||got>length)return kAudioUnitErr_InvalidPropertyValue;
   auto dict=CFDictionaryCreateMutable(nullptr,0,&kCFTypeDictionaryKeyCallBacks,&kCFTypeDictionaryValueCallBacks);auto data=CFDataCreate(nullptr,bytes.data(),got);CFDictionarySetValue(dict,CFSTR("data"),data);CFRelease(data);
   for(auto item: {std::pair<CFStringRef,int>{CFSTR("version"),0}, {CFSTR("type"),'aufx'},{CFSTR("subtype"),'AGrd'},{CFSTR("manufacturer"),'OpGd'}}){auto value=CFNumberCreate(nullptr,kCFNumberIntType,&item.second);CFDictionarySetValue(dict,item.first,value);CFRelease(value);}
-  CFDictionarySetValue(dict,CFSTR("name"),CFSTR("AudioGridder"));*(CFPropertyListRef*)out=dict;break;
+  CFDictionarySetValue(dict,CFSTR("name"),CFSTR("OpenGridder"));*(CFPropertyListRef*)out=dict;break;
  }
  case kAudioUnitProperty_SampleRate:*(Float64*)out=a->format.mSampleRate;break;
  case kAudioUnitProperty_StreamFormat:*(AudioStreamBasicDescription*)out=a->format;break;

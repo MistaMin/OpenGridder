@@ -53,7 +53,7 @@ static PARAMS: [ParamInfo; CONSOLE_PARAMS + AUTOMATION_SLOTS] = [
 
 static INFO: PluginInfo = PluginInfo {
     id: "com.opengrid.audiogridder",
-    name: "AudioGridder",
+    name: "OpenGridder",
     vendor: "OpenGrid",
     url: "https://opengrid.studio",
     email: "contact@mistamin.com",

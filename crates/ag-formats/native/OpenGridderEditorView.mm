@@ -969,11 +969,25 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
             og_native_get_active_server(self.rust, srvBuf, sizeof(srvBuf));
         }
         NSString *srvStr = [NSString stringWithFormat:@"Server: %s ▾", srvBuf];
+        char errBuf[256] = {0};
+        const bool hasError = self.rust && og_native_last_error(self.rust, errBuf, sizeof(errBuf));
+        const bool notConnected = hasError && std::strcmp(errBuf, "Not connected") == 0;
         NSDictionary *hostAttrs = @{
             NSFontAttributeName: MonoFont(10, NSFontWeightMedium),
-            NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.95 green:0.75 blue:0.25 alpha:1.0]
+            NSForegroundColorAttributeName: notConnected ? [NSColor colorWithCalibratedRed:0.95 green:0.35 blue:0.30 alpha:1.0]
+                                                         : [NSColor colorWithCalibratedRed:0.95 green:0.75 blue:0.25 alpha:1.0]
         };
         [srvStr drawAtPoint:NSMakePoint(rx, bounds.size.height - 88) withAttributes:hostAttrs];
+        // The last problem (refused plugin, lost connection), so failures are never silent.
+        if (hasError) {
+            NSString *errStr = [NSString stringWithUTF8String:errBuf] ?: @"";
+            if (errStr.length > 44) errStr = [[errStr substringToIndex:43] stringByAppendingString:@"…"];
+            NSDictionary *errAttrs = @{
+                NSFontAttributeName: MonoFont(9, NSFontWeightRegular),
+                NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.95 green:0.40 blue:0.35 alpha:1.0]
+            };
+            [errStr drawAtPoint:NSMakePoint(rx, bounds.size.height - 100) withAttributes:errAttrs];
+        }
 
         // Profile Section Label
         NSDictionary *sectionAttrs = @{

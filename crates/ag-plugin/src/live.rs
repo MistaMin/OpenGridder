@@ -356,6 +356,12 @@ fn remember_chain(target: &mut Option<Target>, session: &RemoteSession) {
     }
 }
 /// Socket errors that mean the server went away (restart, rescan, crash), not a refused command.
+/// The command channel can no longer be trusted (connection gone, timeout, garbled or late
+/// reply). Only a server refusal leaves it in step.
+fn breaks_session(e: &std::io::Error) -> bool {
+    is_connection_lost(e) || !crate::session::is_refusal(e)
+}
+
 fn is_connection_lost(e: &std::io::Error) -> bool {
     use std::io::ErrorKind::*;
     matches!(e.kind(), BrokenPipe | ConnectionReset | ConnectionAborted | NotConnected | UnexpectedEof)
@@ -369,7 +375,8 @@ fn snapshot(shared: &Shared, session: &RemoteSession) {
         .store(!session.loaded().is_empty(), Ordering::Release);
     let mut info = shared.info.lock().unwrap_or_else(|p| p.into_inner());
     info.connected = true;
-    info.error = None;
+    // The error is cleared where things recover (connect, a successful add), not here:
+    // this runs after a refused command too, and would hide its message.
     info.slots = session.loaded().to_vec();
 }
 /// Drain command-in pushes and screen frames on their own threads (blocking reads), so a
@@ -483,7 +490,9 @@ fn run(shared: Arc<Shared>, commands: mpsc::Receiver<LiveCommand>) {
                 continue;
             };
             let result = match command {
-                LiveCommand::Add { id, settings } => s.add_plugin(&id, &settings),
+                LiveCommand::Add { id, settings } => s.add_plugin(&id, &settings).map(|()| {
+                    shared.info.lock().unwrap_or_else(|p| p.into_inner()).error = None;
+                }),
                 LiveCommand::Delete(i) => s.unload_plugin(i),
                 LiveCommand::Bypass(i, true) => s.bypass_plugin(i),
                 LiveCommand::Bypass(i, false) => s.unbypass_plugin(i),
@@ -516,7 +525,9 @@ fn run(shared: Arc<Shared>, commands: mpsc::Receiver<LiveCommand>) {
                 _ => Ok(()),
             };
             match result {
-                Err(e) if is_connection_lost(&e) => {
+                // A timeout or a garbled reply leaves a reply in flight: every later command
+                // would read the previous one's answer. Reconnect (the chain is restored).
+                Err(e) if breaks_session(&e) => {
                     remember_chain(&mut target, s);
                     disconnect(&shared, Some(e.to_string()));
                     session = None;
@@ -524,6 +535,7 @@ fn run(shared: Arc<Shared>, commands: mpsc::Receiver<LiveCommand>) {
                 }
                 Err(e) => {
                     shared.info.lock().unwrap_or_else(|p| p.into_inner()).error = Some(e.to_string());
+                    snapshot(&shared, s);
                 }
                 Ok(()) => snapshot(&shared, s),
             }
@@ -533,10 +545,12 @@ fn run(shared: Arc<Shared>, commands: mpsc::Receiver<LiveCommand>) {
                 shared.info.lock().unwrap_or_else(|p| p.into_inner()).endpoint = t.endpoint.clone();
                 let (host, port) = crate::parse_server(&t.endpoint);
                 match RemoteSession::connect_host(&host, port, t.request.clone()).and_then(|mut s| {
-                    s.replay(&t.saved)?;
-                    Ok(s)
+                    let skipped = s.replay(&t.saved)?;
+                    Ok((s, skipped))
                 }) {
-                    Ok(s) => {
+                    Ok((s, skipped)) => {
+                        shared.info.lock().unwrap_or_else(|p| p.into_inner()).error =
+                            (!skipped.is_empty()).then(|| format!("Not on this server: {}", skipped.join(", ")));
                         *shared.sockets.lock().unwrap_or_else(|p| p.into_inner()) =
                             s.shutdown_handles().unwrap_or_default();
                         if let Ok(link) = s.audio_link() {
@@ -573,6 +587,14 @@ fn run(shared: Arc<Shared>, commands: mpsc::Receiver<LiveCommand>) {
                 if let Some(id) = s.catalog_ids().get((next - 1) as usize).cloned() {
                     match s.add_plugin(&id, "") {
                         Ok(()) => snapshot(&shared, s),
+                        Err(e) if breaks_session(&e) => {
+                            remember_chain(&mut target, s);
+                            disconnect(&shared, Some(e.to_string()));
+                            session = None;
+                            next_retry = Instant::now() + RETRY_INTERVAL;
+                            selected = next;
+                            continue;
+                        }
                         Err(e) => {
                             shared.info.lock().unwrap_or_else(|p| p.into_inner()).error =
                                 Some(e.to_string())
@@ -582,16 +604,24 @@ fn run(shared: Arc<Shared>, commands: mpsc::Receiver<LiveCommand>) {
                 selected = next;
             }
             if last_cpu.elapsed() > Duration::from_secs(1) {
-                if let Ok(cpu) = s.cpu_load() {
-                    shared.info.lock().unwrap_or_else(|p| p.into_inner()).cpu = Some(cpu);
-                }
                 last_cpu = Instant::now();
+                match s.cpu_load() {
+                    Ok(cpu) => shared.info.lock().unwrap_or_else(|p| p.into_inner()).cpu = Some(cpu),
+                    Err(e) if breaks_session(&e) => {
+                        remember_chain(&mut target, s);
+                        disconnect(&shared, Some(e.to_string()));
+                        session = None;
+                        next_retry = Instant::now() + RETRY_INTERVAL;
+                        continue;
+                    }
+                    Err(_) => {}
+                }
             }
             if !s.loaded().is_empty() && last_settings.elapsed() > SETTINGS_INTERVAL {
                 last_settings = Instant::now();
                 match s.refresh_settings() {
                     Ok(()) => snapshot(&shared, s),
-                    Err(e) if is_connection_lost(&e) => {
+                    Err(e) if breaks_session(&e) => {
                         remember_chain(&mut target, s);
                         disconnect(&shared, Some(e.to_string()));
                         session = None;

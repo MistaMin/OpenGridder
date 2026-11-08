@@ -30,7 +30,10 @@ bool same(const TUID a,const FUID& b){return FUnknownPrivate::iidEqual(a,b);}
 bool stream_read(IBStream* s,void* dst,int32 count){auto* p=(char*)dst;while(count>0){int32 n=0;s->read(p,count,&n);if(n<=0||n>count)return false;p+=n;count-=n;}return true;}
 bool stream_write(IBStream* s,const void* src,int32 count){auto* p=(const char*)src;while(count>0){int32 n=0;s->write((void*)p,count,&n);if(n<=0||n>count)return false;p+=n;count-=n;}return true;}
 class View final:public IPlugView {
- std::atomic<uint32> refs{1};FUnknown* owner;void* processor;void* view=nullptr;AgEdit edit;AgGesture gesture;void* context;
+ std::atomic<uint32> refs{1};FUnknown* owner;void* processor;void* view=nullptr;AgEdit edit;AgGesture gesture;void* context;IPlugFrame* frame=nullptr;
+ // The editor grows and shrinks (collapsible panels, VU meters): ask the host to resize.
+ static void resized(void* ctx,int w,int h){auto* self=static_cast<View*>(ctx);if(self&&self->frame&&w>0&&h>0){ViewRect r{0,0,w,h};self->frame->resizeView(self,&r);}}
+ void size(int& w,int& h){if(view)ag_editor_size(view,&w,&h);else ag_editor_default_size(&w,&h);}
 public:
  View(FUnknown* o,void* p,void* c,AgEdit e,AgGesture g):owner(o),processor(p),edit(e),gesture(g),context(c){owner->addRef();}
  ~View(){if(view)ag_editor_release(view);owner->release();}
@@ -38,17 +41,17 @@ public:
  uint32 PLUGIN_API addRef()override{return refs.fetch_add(1)+1;}
  uint32 PLUGIN_API release()override{uint32 n=refs.fetch_sub(1)-1;if(!n)delete this;return n;}
  tresult PLUGIN_API isPlatformTypeSupported(FIDString type)override{return type&&std::strcmp(type,kPlatformTypeNSView)==0?kResultOk:kResultFalse;}
- tresult PLUGIN_API attached(void* parent,FIDString type)override{if(view||!parent||isPlatformTypeSupported(type)!=kResultOk)return kResultFalse;view=ag_editor_create(processor,context,edit,gesture);return ag_editor_attach(view,parent)?kResultOk:kResultFalse;}
- tresult PLUGIN_API removed()override{if(view){ag_editor_release(view);view=nullptr;}return kResultOk;}
+ tresult PLUGIN_API attached(void* parent,FIDString type)override{if(view||!parent||isPlatformTypeSupported(type)!=kResultOk)return kResultFalse;view=ag_editor_create(processor,context,edit,gesture);if(!ag_editor_attach(view,parent))return kResultFalse;ag_editor_set_resize(view,&View::resized,this);return kResultOk;}
+ tresult PLUGIN_API removed()override{if(view){ag_editor_set_resize(view,nullptr,nullptr);ag_editor_release(view);view=nullptr;}return kResultOk;}
  tresult PLUGIN_API onWheel(float)override{return kResultFalse;}
  tresult PLUGIN_API onKeyDown(char16,int16,int16)override{return kResultFalse;}
  tresult PLUGIN_API onKeyUp(char16,int16,int16)override{return kResultFalse;}
- tresult PLUGIN_API getSize(ViewRect* rect)override{if(!rect)return kInvalidArgument;*rect={0,0,720,420};return kResultOk;}
- tresult PLUGIN_API onSize(ViewRect* rect)override{return rect&&rect->right-rect->left==720&&rect->bottom-rect->top==420?kResultOk:kResultFalse;}
+ tresult PLUGIN_API getSize(ViewRect* rect)override{if(!rect)return kInvalidArgument;int w=0,h=0;size(w,h);*rect={0,0,w,h};return kResultOk;}
+ tresult PLUGIN_API onSize(ViewRect* rect)override{return rect?kResultOk:kInvalidArgument;}
  tresult PLUGIN_API onFocus(TBool)override{return kResultOk;}
- tresult PLUGIN_API setFrame(IPlugFrame*)override{return kResultOk;}
+ tresult PLUGIN_API setFrame(IPlugFrame* f)override{frame=f;return kResultOk;}
  tresult PLUGIN_API canResize()override{return kResultFalse;}
- tresult PLUGIN_API checkSizeConstraint(ViewRect* rect)override{if(!rect)return kInvalidArgument;rect->right=rect->left+720;rect->bottom=rect->top+420;return kResultOk;}
+ tresult PLUGIN_API checkSizeConstraint(ViewRect* rect)override{if(!rect)return kInvalidArgument;int w=0,h=0;size(w,h);rect->right=rect->left+w;rect->bottom=rect->top+h;return kResultOk;}
 };
 class Insert final: public IComponent, public IAudioProcessor, public IEditController {
     std::atomic<uint32> refs{1};
@@ -182,7 +185,7 @@ public:
  uint32 PLUGIN_API release()override{return 1;}
  tresult PLUGIN_API getFactoryInfo(PFactoryInfo* p)override{if(!p)return kInvalidArgument;std::memset(p,0,sizeof(*p));std::strcpy(p->vendor,"OpenGrid");std::strcpy(p->url,"https://opengrid.studio");p->flags=PFactoryInfo::kUnicode;return kResultOk;}
  int32 PLUGIN_API countClasses()override{return 1;}
- tresult PLUGIN_API getClassInfo(int32 i,PClassInfo* p)override{if(i||!p)return kInvalidArgument;std::memset(p,0,sizeof(*p));std::memcpy(p->cid,CID,16);p->cardinality=PClassInfo::kManyInstances;std::strcpy(p->category,kVstAudioEffectClass);std::strcpy(p->name,"AudioGridder");return kResultOk;}
+ tresult PLUGIN_API getClassInfo(int32 i,PClassInfo* p)override{if(i||!p)return kInvalidArgument;std::memset(p,0,sizeof(*p));std::memcpy(p->cid,CID,16);p->cardinality=PClassInfo::kManyInstances;std::strcpy(p->category,kVstAudioEffectClass);std::strcpy(p->name,"OpenGridder");return kResultOk;}
  tresult PLUGIN_API createInstance(FIDString cid,FIDString iid,void** out)override{if(!out)return kInvalidArgument;*out=nullptr;if(!cid||std::memcmp(cid,CID,16))return kNoInterface;auto* instance=new Insert();auto result=instance->queryInterface(iid,out);instance->release();return result;}
 };
 Factory factory;

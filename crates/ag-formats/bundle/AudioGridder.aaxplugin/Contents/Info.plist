@@ -5,15 +5,15 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleExecutable</key>
-	<string>AudioGridder</string>
+	<string>OpenGridder</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.opengrid.audiogridder.aax</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>AudioGridder</string>
+	<string>OpenGridder</string>
 	<key>CFBundleDisplayName</key>
-	<string>AudioGridder</string>
+	<string>OpenGridder</string>
 	<key>CFBundlePackageType</key>
 	<string>TDMw</string>
 	<key>CFBundleShortVersionString</key>

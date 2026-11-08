@@ -910,6 +910,25 @@ pub unsafe extern "C" fn ag_insert_refresh_catalog(p: *mut c_void) -> bool {
     n.live_ctrl.send(ag_plugin::live::LiveCommand::RefreshCatalog)
 }
 
+/// The last error from the server connection (refused plugin, lost connection), or
+/// false when there is none. Shown in the editor so a failure is never silent.
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_error(p: *mut c_void, buf: *mut c_char, cap: u32) -> bool {
+    let Some(n) = native(p) else { return false };
+    let (error, connected) = n.live_ctrl.with_info(|info| (info.error.clone(), info.connected));
+    match error {
+        Some(text) if !text.is_empty() => {
+            copy_cstr(&text, buf, cap);
+            true
+        }
+        _ if !connected => {
+            copy_cstr("Not connected", buf, cap);
+            true
+        }
+        _ => false,
+    }
+}
+
 /// The insert's server as host:port.
 #[no_mangle]
 pub unsafe extern "C" fn ag_insert_endpoint(p: *mut c_void, buf: *mut c_char, cap: u32) -> bool {

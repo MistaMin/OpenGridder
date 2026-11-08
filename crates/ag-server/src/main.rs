@@ -63,7 +63,7 @@ fn main() {
             println!("master {port}");
             let _ = std::io::stdout().flush();
         }
-        eprintln!("AudioGridder server {} chain sandbox on port {port}.", ag_server::build_label());
+        eprintln!("OpenGridder Server {} chain sandbox on port {port}.", ag_server::build_label());
         if let Err(err) = serve_chain(listener) {
             eprintln!("ag-server: {err}");
             std::process::exit(1);
@@ -89,7 +89,7 @@ fn main() {
             println!("master {port}");
             let _ = std::io::stdout().flush();
         }
-        eprintln!("AudioGridder server {} plugin sandbox on port {port}.", ag_server::build_label());
+        eprintln!("OpenGridder Server {} plugin sandbox on port {port}.", ag_server::build_label());
         if let Err(err) = serve_plugin(listener) {
             eprintln!("ag-server: {err}");
             std::process::exit(1);
@@ -117,7 +117,7 @@ fn main() {
         std::process::exit(1);
     });
     eprintln!(
-        "AudioGridder server {} on port {port}. Hosts builtin gain plus scanned AudioUnit, LV2, and VST3 plug-ins.",
+        "OpenGridder Server {} on port {port}: AudioUnit, VST3, CLAP and LV2 plug-ins.",
         ag_server::build_label()
     );
     let rescan = args.iter().any(|arg| arg == "--rescan");

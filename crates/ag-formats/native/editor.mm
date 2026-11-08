@@ -20,6 +20,9 @@
     AgEdit _edit;
     AgGesture _gesture;
     OpenGridderEditorView* _editor;
+@public
+    AgResize _resize;
+    void* _resizeContext;
 }
 -(id)initWithProcessor:(void*)processor owner:(void*)owner edit:(AgEdit)edit gesture:(AgGesture)gesture;
 @end
@@ -54,10 +57,14 @@
             AGOpenBridgeView* s = weakSelf;
             if (s) {
                 [s setFrameSize:NSMakeSize(newWidth, newHeight)];
+                // Tell the host so its window follows (otherwise the editor is clipped).
+                if (s->_resize) s->_resize(s->_resizeContext, (int)lround(newWidth), (int)lround(newHeight));
             }
         };
 
         [self addSubview:_editor];
+        // Start at the editor's real size (864 x 420 with the default VU meters), not a guess.
+        [self setFrameSize:[_editor preferredViewSize]];
     }
     return self;
 }
@@ -92,6 +99,26 @@
 }
 
 @end
+
+extern "C" void ag_editor_size(void* view, int* width, int* height) {
+    NSSize size = view ? ((__bridge AGOpenBridgeView*)view).frame.size : NSMakeSize(864, 420);
+    if (width) *width = (int)lround(size.width);
+    if (height) *height = (int)lround(size.height);
+}
+
+// Size before an editor exists (the host asks before attaching): the default layout,
+// every panel open with VU meters (16 + 256 + 8 + 272 + 8 + 288 + 16 = 864).
+extern "C" void ag_editor_default_size(int* width, int* height) {
+    if (width) *width = 864;
+    if (height) *height = 420;
+}
+
+extern "C" void ag_editor_set_resize(void* view, AgResize callback, void* ctx) {
+    if (!view) return;
+    AGOpenBridgeView* bridge = (__bridge AGOpenBridgeView*)view;
+    bridge->_resize = callback;
+    bridge->_resizeContext = ctx;
+}
 
 extern "C" void* ag_editor_create(void* processor, void* owner, AgEdit edit, AgGesture gesture) {
     AGOpenBridgeView* view = [[AGOpenBridgeView alloc] initWithProcessor:processor owner:owner edit:edit gesture:gesture];
@@ -396,6 +423,10 @@ void og_native_get_active_server(NativePlugin* p, char* buf, uint32_t cap) {
     if (!buf || cap == 0) return;
     buf[0] = 0;
     ag_insert_endpoint((void*)p, buf, cap);
+}
+
+bool og_native_last_error(NativePlugin* p, char* buf, uint32_t cap) {
+    return ag_insert_error((void*)p, buf, cap);
 }
 
 void og_native_refresh_catalog(NativePlugin* p) {

@@ -26,9 +26,9 @@
 	<array>
 		<dict>
 			<key>name</key>
-			<string>OpenGrid: AudioGridder</string>
+			<string>OpenGrid: OpenGridder</string>
 			<key>description</key>
-			<string>AudioGridder remote insert</string>
+			<string>OpenGridder remote insert</string>
 			<key>factoryFunction</key>
 			<string>AudioComponentFactoryFunction</string>
 			<key>manufacturer</key>

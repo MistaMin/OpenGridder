@@ -252,7 +252,8 @@ impl RemoteSession {
         let result = command::read_json_payload(&body).ok_or_else(|| invalid("add json"))?;
         if result.get("success").and_then(|value| value.as_bool()) != Some(true) {
             let err = result.get("err").and_then(|value| value.as_str()).unwrap_or("add failed");
-            return Err(invalid(err));
+            // A refusal is a complete reply (ErrorKind::Other): the session stays usable.
+            return Err(refused(err));
         }
         if let Some(latency) = result.get("latency").and_then(|value| value.as_i64()) {
             self.latency_samples = latency as i32;
@@ -345,15 +346,25 @@ impl RemoteSession {
     }
 
     /// Re-add saved slots and resend bypass. Used when the worker connects again.
-    pub fn replay(&mut self, saved: &[LoadedSlot]) -> std::io::Result<()> {
+    /// Rebuild a saved chain. A plugin this server refuses (not installed here, failed to
+    /// load) is skipped and named in the result; it must not keep the insert from connecting.
+    pub fn replay(&mut self, saved: &[LoadedSlot]) -> std::io::Result<Vec<String>> {
+        let mut skipped = Vec::new();
         for slot in saved {
-            self.add_plugin_with(&slot.id, &slot.settings, &slot.layout, slot.mono)?;
+            match self.add_plugin_with(&slot.id, &slot.settings, &slot.layout, slot.mono) {
+                Ok(()) => {}
+                Err(err) if is_refusal(&err) => {
+                    skipped.push(if slot.name.is_empty() { slot.id.clone() } else { slot.name.clone() });
+                    continue;
+                }
+                Err(err) => return Err(err),
+            }
             if slot.bypassed {
                 let index = self.slots.len() as i32 - 1;
                 self.bypass_plugin(index)?;
             }
         }
-        Ok(())
+        Ok(skipped)
     }
 
     fn set_slot_bypass(&mut self, index: i32, bypassed: bool) -> std::io::Result<()> {
@@ -786,6 +797,16 @@ fn parse_screen(body: &[u8]) -> Option<ScreenFrame> {
 
 fn is_wait(err: &std::io::Error) -> bool {
     err.kind() == std::io::ErrorKind::TimedOut || err.kind() == std::io::ErrorKind::WouldBlock
+}
+
+/// The server answered "no" (for example a plugin it cannot load).
+fn refused(message: &str) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Other, message.to_string())
+}
+
+/// A refusal leaves the command channel in step; every other error may not.
+pub fn is_refusal(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::Other
 }
 
 fn invalid(message: &str) -> std::io::Error {
