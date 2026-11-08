@@ -43,13 +43,97 @@ cp -R "$STAGE/AAX/OpenGridder.aaxplugin" "$PKG_STAGE/aax/Library/Application Sup
 cp -R "$STAGE/Standalone/OpenGridder Server.app" "$PKG_STAGE/app/Applications/"
 cp "$STAGE/Standalone/OpenGridderTray" "$PKG_STAGE/app/Applications/"
 
-echo "=== Step 4: Building Component Packages with pkgbuild ==="
-pkgbuild --root "$PKG_STAGE/vst3" --identifier com.opengrid.opengridder.pkg.vst3 --version "$VER" "$PKG_STAGE/pkgs/vst3.pkg"
-pkgbuild --root "$PKG_STAGE/au" --identifier com.opengrid.opengridder.pkg.au --version "$VER" "$PKG_STAGE/pkgs/au.pkg"
-pkgbuild --root "$PKG_STAGE/clap" --identifier com.opengrid.opengridder.pkg.clap --version "$VER" "$PKG_STAGE/pkgs/clap.pkg"
-pkgbuild --root "$PKG_STAGE/lv2" --identifier com.opengrid.opengridder.pkg.lv2 --version "$VER" "$PKG_STAGE/pkgs/lv2.pkg"
-pkgbuild --root "$PKG_STAGE/aax" --identifier com.opengrid.opengridder.pkg.aax --version "$VER" "$PKG_STAGE/pkgs/aax.pkg"
-pkgbuild --root "$PKG_STAGE/app" --identifier com.opengrid.opengridder.pkg.app --version "$VER" "$PKG_STAGE/pkgs/app.pkg"
+# Strip extended attributes and AppleDouble files
+xattr -cr "$PKG_STAGE" 2>/dev/null || true
+find "$PKG_STAGE" -name '._*' -delete 2>/dev/null || true
+find "$PKG_STAGE" -name '.DS_Store' -delete 2>/dev/null || true
+
+echo "=== Step 4: Building Component Packages with pkgbuild (Non-Relocatable) ==="
+# Generate component property lists with BundleIsRelocatable = false
+cat << 'PLIST' > "$PKG_STAGE/app-components.plist"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+	<dict>
+		<key>BundleHasStrictIdentifier</key>
+		<true/>
+		<key>BundleIsRelocatable</key>
+		<false/>
+		<key>BundleIsVersionChecked</key>
+		<false/>
+		<key>BundleOverwriteAction</key>
+		<string>upgrade</string>
+		<key>RootRelativeBundlePath</key>
+		<string>Applications/OpenGridder Server.app</string>
+	</dict>
+</array>
+</plist>
+PLIST
+
+cat << 'PLIST' > "$PKG_STAGE/vst3-components.plist"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+	<dict>
+		<key>BundleIsRelocatable</key>
+		<false/>
+		<key>BundleIsVersionChecked</key>
+		<false/>
+		<key>BundleOverwriteAction</key>
+		<string>upgrade</string>
+		<key>RootRelativeBundlePath</key>
+		<string>Library/Audio/Plug-Ins/VST3/OpenGridder.vst3</string>
+	</dict>
+</array>
+</plist>
+PLIST
+
+cat << 'PLIST' > "$PKG_STAGE/au-components.plist"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+	<dict>
+		<key>BundleIsRelocatable</key>
+		<false/>
+		<key>BundleIsVersionChecked</key>
+		<false/>
+		<key>BundleOverwriteAction</key>
+		<string>upgrade</string>
+		<key>RootRelativeBundlePath</key>
+		<string>Library/Audio/Plug-Ins/Components/OpenGridder.component</string>
+	</dict>
+</array>
+</plist>
+PLIST
+
+cat << 'PLIST' > "$PKG_STAGE/aax-components.plist"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+	<dict>
+		<key>BundleIsRelocatable</key>
+		<false/>
+		<key>BundleIsVersionChecked</key>
+		<false/>
+		<key>BundleOverwriteAction</key>
+		<string>upgrade</string>
+		<key>RootRelativeBundlePath</key>
+		<string>Library/Application Support/Avid/Audio/Plug-Ins/OpenGridder.aaxplugin</string>
+	</dict>
+</array>
+</plist>
+PLIST
+
+pkgbuild --root "$PKG_STAGE/vst3" --component-plist "$PKG_STAGE/vst3-components.plist" --install-location "/" --identifier com.opengrid.opengridder.pkg.vst3 --version "$VER" "$PKG_STAGE/pkgs/vst3.pkg"
+pkgbuild --root "$PKG_STAGE/au" --component-plist "$PKG_STAGE/au-components.plist" --install-location "/" --identifier com.opengrid.opengridder.pkg.au --version "$VER" "$PKG_STAGE/pkgs/au.pkg"
+pkgbuild --root "$PKG_STAGE/clap" --install-location "/" --identifier com.opengrid.opengridder.pkg.clap --version "$VER" "$PKG_STAGE/pkgs/clap.pkg"
+pkgbuild --root "$PKG_STAGE/lv2" --install-location "/" --identifier com.opengrid.opengridder.pkg.lv2 --version "$VER" "$PKG_STAGE/pkgs/lv2.pkg"
+pkgbuild --root "$PKG_STAGE/aax" --component-plist "$PKG_STAGE/aax-components.plist" --install-location "/" --identifier com.opengrid.opengridder.pkg.aax --version "$VER" "$PKG_STAGE/pkgs/aax.pkg"
+pkgbuild --root "$PKG_STAGE/app" --component-plist "$PKG_STAGE/app-components.plist" --install-location "/" --identifier com.opengrid.opengridder.pkg.app --version "$VER" "$PKG_STAGE/pkgs/app.pkg"
 
 echo "=== Step 5: Generating Distribution XML ==="
 cat << XML > "$PKG_STAGE/distribution.xml"
@@ -59,13 +143,16 @@ cat << XML > "$PKG_STAGE/distribution.xml"
     <options customize="always" require-scripts="false"/>
     <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
     <choices-outline>
+        <line choice="choice_app"/>
         <line choice="choice_vst3"/>
         <line choice="choice_au"/>
         <line choice="choice_clap"/>
         <line choice="choice_lv2"/>
         <line choice="choice_aax"/>
-        <line choice="choice_app"/>
     </choices-outline>
+    <choice id="choice_app" title="OpenGridder Server &amp; Tray">
+        <pkg-ref id="com.opengrid.opengridder.pkg.app"/>
+    </choice>
     <choice id="choice_vst3" title="VST3 Plugin">
         <pkg-ref id="com.opengrid.opengridder.pkg.vst3"/>
     </choice>
@@ -81,15 +168,12 @@ cat << XML > "$PKG_STAGE/distribution.xml"
     <choice id="choice_aax" title="AAX Plugin (PACE Signed)">
         <pkg-ref id="com.opengrid.opengridder.pkg.aax"/>
     </choice>
-    <choice id="choice_app" title="OpenGridder Server &amp; Tray">
-        <pkg-ref id="com.opengrid.opengridder.pkg.app"/>
-    </choice>
+    <pkg-ref id="com.opengrid.opengridder.pkg.app" version="$VER">app.pkg</pkg-ref>
     <pkg-ref id="com.opengrid.opengridder.pkg.vst3" version="$VER">vst3.pkg</pkg-ref>
     <pkg-ref id="com.opengrid.opengridder.pkg.au" version="$VER">au.pkg</pkg-ref>
     <pkg-ref id="com.opengrid.opengridder.pkg.clap" version="$VER">clap.pkg</pkg-ref>
     <pkg-ref id="com.opengrid.opengridder.pkg.lv2" version="$VER">lv2.pkg</pkg-ref>
     <pkg-ref id="com.opengrid.opengridder.pkg.aax" version="$VER">aax.pkg</pkg-ref>
-    <pkg-ref id="com.opengrid.opengridder.pkg.app" version="$VER">app.pkg</pkg-ref>
 </installer-gui-script>
 XML
 
@@ -107,9 +191,11 @@ xcrun notarytool submit "$FINAL_PKG" --keychain-profile AC_NOTARY --wait
 xcrun stapler staple "$FINAL_PKG"
 spctl --assess --type install -v "$FINAL_PKG"
 
-echo "=== Step 8: Assembling & Notarizing macOS DMG ==="
+echo "=== Step 8: Assembling & Notarizing macOS DMG with App Drag-and-Drop ==="
 DMG_STAGE=$(mktemp -d /tmp/dmg_stage_XXXXXX)
 cp "$FINAL_PKG" "$DMG_STAGE/"
+cp -R "$STAGE/Standalone/OpenGridder Server.app" "$DMG_STAGE/"
+ln -s /Applications "$DMG_STAGE/Applications"
 cp "$og_root/README.md" "$DMG_STAGE/"
 "$SKILL_DIR/scripts/build_notarized_dmg.sh" \
   "OpenGridder $VER" \
