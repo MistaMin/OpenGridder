@@ -115,7 +115,7 @@ impl RemoteSession {
 
     /// Handshake on `host:port`, then open the four worker sockets on that same host.
     pub fn connect_host(host: &str, port: u16, request: HandshakeRequest) -> std::io::Result<Self> {
-        let mut handshake = TcpStream::connect((host, port))?;
+        let mut handshake = connect_with_timeout(host, port)?;
         handshake.set_read_timeout(Some(IO_TIMEOUT))?;
         handshake.set_write_timeout(Some(IO_TIMEOUT))?;
         handshake.write_all(&request.to_bytes())?;
@@ -130,7 +130,7 @@ impl RemoteSession {
 
         let mut sockets = Vec::with_capacity(4);
         for _ in 0..4 {
-            let sock = TcpStream::connect((host, worker))?;
+            let sock = connect_with_timeout(host, worker)?;
             sock.set_read_timeout(Some(IO_TIMEOUT))?;
             sock.set_write_timeout(Some(IO_TIMEOUT))?;
             sockets.push(sock);
@@ -562,44 +562,16 @@ impl RemoteSession {
 
     /// MIDI and the block's transport travel together on the audio socket.
     pub fn exchange_midi_at(&mut self, channels: &[Vec<f32>], midi: &[crate::QueuedMidi], position: PositionInfo) -> std::io::Result<(Vec<Vec<f32>>, i32)> {
-        let samples = channels.first().map(|channel| channel.len()).unwrap_or(0);
-        let count = channels.len() as i32;
-        if samples == 0 || !(1..=2).contains(&count) || channels.iter().any(|channel| channel.len() != samples) {
-            return Err(invalid("audio shape"));
-        }
-        let header = AudioRequestHeader {
-            channels: count,
-            samples: samples as i32,
-            channels_requested: count,
-            samples_requested: samples as i32,
-            midi_events: midi.len() as i32,
-            is_double: false,
-            trace_id: [0; 16],
-        };
-        let mut bytes = Vec::with_capacity(AudioRequestHeader::WIRE_SIZE + channels.len() * samples * 4 + midi.len() * 11 + PositionInfo::WIRE_SIZE);
-        bytes.extend_from_slice(&header.to_bytes());
-        for channel in channels {
-            for sample in channel {
-                bytes.extend_from_slice(&sample.to_le_bytes());
-            }
-        }
-        for event in midi {
-            bytes.extend_from_slice(&event.sample_offset.to_le_bytes());
-            bytes.extend_from_slice(&3i32.to_le_bytes());
-            bytes.extend_from_slice(&event.data);
-        }
-        bytes.extend_from_slice(&position.to_bytes());
-        if self.pos_wire_size > PositionInfo::WIRE_SIZE {
-            bytes.resize(bytes.len() + (self.pos_wire_size - PositionInfo::WIRE_SIZE), 0);
-        }
-        self.audio.write_all(&bytes)?;
-        let mut response = vec![0u8; AudioResponseHeader::WIRE_SIZE + channels.len() * samples * 4];
-        self.audio.read_exact(&mut response)?;
-        let response_header = AudioResponseHeader::from_bytes(&response).ok_or_else(|| invalid("audio response"))?;
-        let (_header, audio) = read_audio_response(&response).ok_or_else(|| invalid("audio response"))?;
-        self.latency_samples = response_header.latency_samples;
-        self.response_midi = read_response_midi(&mut self.audio, response_header.midi_events)?;
+        let (audio, latency, response_midi) = exchange_audio(&mut self.audio, self.pos_wire_size, channels, midi, position)?;
+        self.latency_samples = latency;
+        self.response_midi = response_midi;
         Ok((audio, midi.len() as i32))
+    }
+
+    /// The audio socket on its own, for a dedicated audio thread: audio keeps flowing while
+    /// this session waits on a slow command (AudioGridder's separate AudioStreamer).
+    pub fn audio_link(&self) -> std::io::Result<AudioLink> {
+        Ok(AudioLink { audio: self.audio.try_clone()?, pos_wire_size: self.pos_wire_size, latency_samples: self.latency_samples })
     }
 
     /// MIDI events the server returned on the last [`Self::exchange_midi`] call.
@@ -668,6 +640,87 @@ fn read_message(socket: &mut TcpStream) -> std::io::Result<(i32, Vec<u8>)> {
         Some(message) => Ok(message),
         None => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "command")),
     }
+}
+
+/// One audio round trip on the audio socket.
+pub struct AudioLink {
+    audio: TcpStream,
+    pos_wire_size: usize,
+    latency_samples: i32,
+}
+
+impl AudioLink {
+    pub fn exchange(&mut self, channels: &[Vec<f32>], midi: &[crate::QueuedMidi], position: PositionInfo) -> std::io::Result<Vec<Vec<f32>>> {
+        let (audio, latency, _midi) = exchange_audio(&mut self.audio, self.pos_wire_size, channels, midi, position)?;
+        self.latency_samples = latency;
+        Ok(audio)
+    }
+
+    pub fn latency_samples(&self) -> i32 {
+        self.latency_samples
+    }
+}
+
+/// Send one block with its MIDI and playhead, read the processed block back.
+/// Returns the audio, the server's latency, and the MIDI it returned.
+fn exchange_audio(
+    socket: &mut TcpStream,
+    pos_wire_size: usize,
+    channels: &[Vec<f32>],
+    midi: &[crate::QueuedMidi],
+    position: PositionInfo,
+) -> std::io::Result<(Vec<Vec<f32>>, i32, Vec<crate::QueuedMidi>)> {
+    let samples = channels.first().map(|channel| channel.len()).unwrap_or(0);
+    let count = channels.len() as i32;
+    if samples == 0 || !(1..=2).contains(&count) || channels.iter().any(|channel| channel.len() != samples) {
+        return Err(invalid("audio shape"));
+    }
+    let header = AudioRequestHeader {
+        channels: count,
+        samples: samples as i32,
+        channels_requested: count,
+        samples_requested: samples as i32,
+        midi_events: midi.len() as i32,
+        is_double: false,
+        trace_id: [0; 16],
+    };
+    let mut bytes = Vec::with_capacity(AudioRequestHeader::WIRE_SIZE + channels.len() * samples * 4 + midi.len() * 11 + PositionInfo::WIRE_SIZE);
+    bytes.extend_from_slice(&header.to_bytes());
+    for channel in channels {
+        for sample in channel {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+    }
+    for event in midi {
+        bytes.extend_from_slice(&event.sample_offset.to_le_bytes());
+        bytes.extend_from_slice(&3i32.to_le_bytes());
+        bytes.extend_from_slice(&event.data);
+    }
+    bytes.extend_from_slice(&position.to_bytes());
+    if pos_wire_size > PositionInfo::WIRE_SIZE {
+        bytes.resize(bytes.len() + (pos_wire_size - PositionInfo::WIRE_SIZE), 0);
+    }
+    socket.write_all(&bytes)?;
+    let mut response = vec![0u8; AudioResponseHeader::WIRE_SIZE + channels.len() * samples * 4];
+    socket.read_exact(&mut response)?;
+    let response_header = AudioResponseHeader::from_bytes(&response).ok_or_else(|| invalid("audio response"))?;
+    let (_header, audio) = read_audio_response(&response).ok_or_else(|| invalid("audio response"))?;
+    let response_midi = read_response_midi(socket, response_header.midi_events)?;
+    Ok((audio, response_header.latency_samples, response_midi))
+}
+
+/// An unreachable network server must not hold the client's worker for the system's
+/// TCP timeout (over a minute): try each resolved address for up to 3 s.
+fn connect_with_timeout(host: &str, port: u16) -> std::io::Result<TcpStream> {
+    use std::net::ToSocketAddrs;
+    let mut last = std::io::Error::new(std::io::ErrorKind::NotFound, format!("{host} did not resolve"));
+    for addr in (host, port).to_socket_addrs()? {
+        match TcpStream::connect_timeout(&addr, Duration::from_secs(3)) {
+            Ok(stream) => return Ok(stream),
+            Err(err) => last = err,
+        }
+    }
+    Err(last)
 }
 
 /// One message from a blocking reader socket; `None` when its read timeout passed.
@@ -822,7 +875,7 @@ mod tests {
     use openplugin::prelude::Plugin;
 
     #[test]
-    fn command_and_screen_wait_10s_and_audio_waits_500ms() {
+    fn command_and_screen_wait_45s_and_audio_waits_500ms() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = thread::spawn(move || serve_worker(listener));
@@ -841,7 +894,8 @@ mod tests {
             "timeouts command {command_read:?} {command_write:?} inbound {inbound_read:?} {inbound_write:?} screen {screen_read:?} {screen_write:?} audio {audio_read:?} {audio_write:?}"
         );
 
-        let ten = Duration::from_secs(10);
+        // COMMAND_TIMEOUT: 45 s, so a slow plugin load (Acustica, Kontakt) is not a disconnect.
+        let ten = COMMAND_TIMEOUT;
         let audio_limit = Duration::from_millis(500);
         assert_eq!(command_read, Some(ten), "command read");
         assert_eq!(command_write, Some(ten), "command write");
@@ -912,6 +966,7 @@ mod tests {
             assert!(plugin.set_param(&format!("slot_{slot}"), 0.625));
         }
         let sent = session.apply_slot_writes(&mut plugin).unwrap();
+        session.cpu_load().unwrap(); // command reply: the writes are applied before the block
         let audio = session.exchange(&[vec![1.0; 32], vec![1.0; 32]]).unwrap();
         let expected = 10.0f32.powf(6.0 / 20.0);
         eprintln!("slot writes {sent} sample {}", audio[0][0]);
@@ -949,6 +1004,7 @@ mod tests {
         assert_eq!(session.loaded().len(), 1, "the same selection loaded another copy");
 
         session.set_parameter(0, 0, 0.625).unwrap();
+        session.cpu_load().unwrap(); // command reply: the value is applied before the block
         let audio = session.exchange(&[vec![1.0; 32], vec![1.0; 32]]).unwrap();
         let expected = 10.0f32.powf(6.0 / 20.0);
         eprintln!("selection gain {}", audio[0][0]);
@@ -1008,7 +1064,7 @@ mod tests {
         assert!((params[0].default_value - 0.5).abs() < 1.0e-5, "default {}", params[0].default_value);
 
         session.set_parameter(0, 0, 0.625).unwrap();
-        thread::sleep(Duration::from_millis(20));
+        session.cpu_load().unwrap(); // command reply: the value is applied before the block
         let updated = session.slot_parameters(0)[0].current;
         let audio = session.exchange(&[vec![1.0; 32], vec![1.0; 32]]).unwrap();
         let expected = 10.0f32.powf(6.0 / 20.0);
@@ -1152,6 +1208,7 @@ mod tests {
         impulse[0] = 1.0;
         let (dry, latency_1x) = session.exchange_measured(&[impulse.clone(), impulse.clone()]).unwrap();
         session.set_oversampling(0, 2).unwrap();
+        session.cpu_load().unwrap(); // command reply: oversampling is on before the block
         let (wet, latency_2x) = session.exchange_measured(&[impulse.clone(), impulse]).unwrap();
         let diff = dry[0].iter().zip(&wet[0]).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
         assert!(diff > 0.05, "2x oversampling left the impulse unchanged (max diff {diff})");
@@ -1192,6 +1249,7 @@ mod tests {
         let (_audio, latency_1x) = session.exchange_measured(&block).unwrap();
         assert_eq!(session.latency_samples(), latency_1x, "session dropped the audio-response latency");
         session.set_oversampling(0, 2).unwrap();
+        session.cpu_load().unwrap(); // command reply: oversampling is on before the block
         let (_audio, latency_2x) = session.exchange_measured(&block).unwrap();
         eprintln!("latency {latency_1x} -> {latency_2x}");
         assert_eq!(session.latency_samples(), latency_2x);

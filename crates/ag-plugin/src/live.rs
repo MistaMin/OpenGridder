@@ -3,7 +3,7 @@
 //! those packets, copies samples, and touches atomics; sockets and UI mutexes
 //! belong to the worker. Missing/stale packets retain the existing dry fallback.
 use crate::{
-    session::{CatalogItem, LoadedSlot, ScreenFrame},
+    session::{AudioLink, CatalogItem, LoadedSlot, ScreenFrame},
     spsc::{self, Consumer, Producer},
     AudioGridder, QueuedMidi, RemoteSession,
 };
@@ -76,6 +76,14 @@ struct Shared {
     screen: Mutex<VecDeque<ScreenFrame>>,
     /// A remote editor is open: set on edit, cleared on hide, a server-side close, or disconnect.
     editor_open: AtomicBool,
+    /// The connected session's audio socket, used only by the audio thread, tagged with a
+    /// generation so a late failure of an old link cannot drop a newer session.
+    audio_link: Mutex<Option<(u64, AudioLink)>>,
+    audio_generation: AtomicU64,
+    /// Generation of a link the audio thread lost (0: none); the network thread reconnects.
+    audio_lost: AtomicU64,
+    /// Block period for the audio thread's real-time policy (f64 bits, ms).
+    audio_period: AtomicU64,
 }
 /// Frames kept for the UI. When it falls behind, the oldest go; a full frame follows
 /// within a second (every 20th capture), so the picture recovers.
@@ -198,12 +206,23 @@ impl LiveAudio {
             sockets: Mutex::new(Vec::new()),
             screen: Mutex::new(VecDeque::new()),
             editor_open: AtomicBool::new(false),
+            audio_link: Mutex::new(None),
+            audio_generation: AtomicU64::new(0),
+            audio_lost: AtomicU64::new(0),
+            audio_period: AtomicU64::new(10.0f64.to_bits()),
         });
         let worker_shared = shared.clone();
         let handle = thread::Builder::new()
             .name("ag-network".into())
-            .spawn(move || run(worker_shared, commands, receive, return_tx))
+            .spawn(move || run(worker_shared, commands))
             .expect("network worker");
+        // Audio has its own (real-time) thread, as AudioGridder's AudioStreamer: a slow
+        // command (loading a big plugin can take seconds) never holds up the audio.
+        let audio_shared = shared.clone();
+        thread::Builder::new()
+            .name("ag-audio".into())
+            .spawn(move || audio_thread(audio_shared, receive, return_tx))
+            .expect("audio worker");
         let control = LiveController(Arc::new(Owner {
             shared: shared.clone(),
             sender,
@@ -394,6 +413,7 @@ fn disconnect(shared: &Shared, error: Option<String>) {
     for socket in shared.sockets.lock().unwrap_or_else(|p| p.into_inner()).drain(..) {
         let _ = socket.shutdown(Shutdown::Both);
     }
+    *shared.audio_link.lock().unwrap_or_else(|p| p.into_inner()) = None;
     shared.screen.lock().unwrap_or_else(|p| p.into_inner()).clear();
     shared.editor_open.store(false, Ordering::Release);
     let mut info = shared.info.lock().unwrap_or_else(|p| p.into_inner());
@@ -401,12 +421,7 @@ fn disconnect(shared: &Shared, error: Option<String>) {
     info.error = error;
     info.screen = None;
 }
-fn run(
-    shared: Arc<Shared>,
-    commands: mpsc::Receiver<LiveCommand>,
-    mut requests: Consumer<Box<Packet>>,
-    mut returns: Producer<Box<Packet>>,
-) {
+fn run(shared: Arc<Shared>, commands: mpsc::Receiver<LiveCommand>) {
     let mut session: Option<RemoteSession> = None;
     let mut selected = 0;
     let mut last_cpu = Instant::now();
@@ -519,6 +534,12 @@ fn run(
                     Ok(s) => {
                         *shared.sockets.lock().unwrap_or_else(|p| p.into_inner()) =
                             s.shutdown_handles().unwrap_or_default();
+                        if let Ok(link) = s.audio_link() {
+                            let generation = shared.audio_generation.fetch_add(1, Ordering::AcqRel) + 1;
+                            let period = ag_protocol::realtime::block_period_ms(t.request.samples_per_block, t.request.sample_rate);
+                            shared.audio_period.store(period.to_bits(), Ordering::Release);
+                            *shared.audio_link.lock().unwrap_or_else(|p| p.into_inner()) = Some((generation, link));
+                        }
                         if let Ok((inbound, screen)) = s.reader_sockets() {
                             spawn_readers(&shared, inbound, screen);
                         }
@@ -575,36 +596,49 @@ fn run(
                 }
             }
         }
+        // The audio thread lost this session's audio socket: reconnect.
+        let lost = shared.audio_lost.swap(0, Ordering::AcqRel);
+        if lost != 0 && lost == shared.audio_generation.load(Ordering::Acquire) {
+            if let Some(s) = session.as_ref() {
+                remember_chain(&mut target, s);
+                disconnect(&shared, Some("audio connection lost".into()));
+                session = None;
+                next_retry = Instant::now() + RETRY_INTERVAL;
+            }
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// Exchanges the host's audio blocks with the server, on a real-time thread with the block
+/// period (AudioGridder's AudioStreamer, `startRealtimeThread`).
+fn audio_thread(shared: Arc<Shared>, mut requests: Consumer<Box<Packet>>, mut returns: Producer<Box<Packet>>) {
+    let mut applied_period = 0.0f64;
+    while !shared.stop.load(Ordering::Acquire) {
         let Some(mut packet) = requests.pop() else {
-            thread::sleep(Duration::from_millis(1));
+            thread::sleep(Duration::from_micros(500));
             continue;
         };
+        let period = f64::from_bits(shared.audio_period.load(Ordering::Acquire));
+        if period != applied_period {
+            ag_protocol::realtime::make_current_thread_realtime(period);
+            applied_period = period;
+        }
         if packet.epoch == shared.epoch.load(Ordering::Acquire) {
-            if let Some(s) = session.as_mut() {
-                let input: Vec<Vec<f32>> = packet.audio[..packet.channels]
-                    .iter()
-                    .map(|ch| ch[..packet.frames].to_vec())
-                    .collect();
-                match s.exchange_midi_at(
-                    &input,
-                    &packet.midi[..packet.midi_count],
-                    packet.position.clone(),
-                ) {
-                    Ok((audio, _)) => {
-                        for (ch, src) in audio.iter().take(packet.channels).enumerate() {
-                            packet.audio[ch][..packet.frames]
-                                .copy_from_slice(&src[..packet.frames]);
+            let mut link = shared.audio_link.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some((generation, audio)) = link.as_mut() {
+                let input: Vec<Vec<f32>> = packet.audio[..packet.channels].iter().map(|ch| ch[..packet.frames].to_vec()).collect();
+                match audio.exchange(&input, &packet.midi[..packet.midi_count], packet.position.clone()) {
+                    Ok(output) => {
+                        for (ch, src) in output.iter().take(packet.channels).enumerate() {
+                            packet.audio[ch][..packet.frames].copy_from_slice(&src[..packet.frames]);
                         }
                         packet.valid = true;
-                        shared
-                            .latency
-                            .store(s.latency_samples().max(0) as usize, Ordering::Release);
+                        shared.latency.store(audio.latency_samples().max(0) as usize, Ordering::Release);
                     }
-                    Err(e) => {
-                        remember_chain(&mut target, s);
-                        disconnect(&shared, Some(e.to_string()));
-                        session = None;
-                        next_retry = Instant::now() + RETRY_INTERVAL;
+                    Err(_) => {
+                        shared.audio_lost.store(*generation, Ordering::Release);
+                        *link = None;
                     }
                 }
             }

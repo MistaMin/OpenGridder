@@ -4,6 +4,7 @@
 //! structs. Audio frames are not a `sizeof` of a JUCE type.
 
 pub mod command;
+pub mod realtime;
 
 pub const PROTOCOL_VERSION: i32 = 13;
 pub const SERVER_PORT: u16 = 55056;

@@ -22,6 +22,7 @@ unsafe extern "C" {
     fn ag_ui_encode_png(rgba: *const u8, width: i32, height: i32, out_len: *mut usize) -> *mut u8;
     fn ag_ui_encode_jpeg(rgba: *const u8, width: i32, height: i32, quality: f64, out_len: *mut usize) -> *mut u8;
     fn ag_ui_free(p: *mut c_void);
+    fn ag_ui_advertise(port: u16, txt: *const c_char) -> bool;
 }
 
 /// Run the AppKit loop on this (the main) thread. Never returns.
@@ -140,6 +141,13 @@ pub fn keys(id: u64, codes: &[u16]) {
     if let Some(code) = key {
         unsafe { ag_ui_key(id, code, shift, ctrl, alt, cmd) }
     }
+}
+
+/// Register the server with Bonjour (`_audiogridder._tcp`) so clients on the network
+/// list it. `txt` is the INFO record.
+pub fn advertise(port: u16, txt: &str) -> bool {
+    let txt = CString::new(txt).unwrap_or_default();
+    unsafe { ag_ui_advertise(port, txt.as_ptr()) }
 }
 
 /// Compressed PNG via ImageIO.

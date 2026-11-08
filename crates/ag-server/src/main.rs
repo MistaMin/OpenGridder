@@ -167,9 +167,10 @@ fn main() {
         port,
         hostname: host_name,
     };
-    let mut _responder = ag_server::mdns::ServiceResponder::new(mdns_info);
-    if let Err(err) = _responder.start() {
-        eprintln!("ag-server: mDNS responder warning: {err}");
+    // Bonjour through the system's mDNSResponder (the hand-written responder broadcast
+    // from a random port without answering queries, so macOS clients never saw it).
+    if !ag_server::ui::advertise(port, &mdns_info.txt_record()) {
+        eprintln!("ag-server: could not advertise the server with Bonjour");
     }
     // Clients are served on a background thread; the main thread runs the AppKit loop
     // that shows and drives the plugins' editor windows.

@@ -287,7 +287,16 @@ impl PluginChain {
         let mut instances = Vec::with_capacity(request.count);
         for _ in 0..request.count {
             match host::instantiate(&request.id, request.sample_rate, request.max_block, request.bus_channels) {
-                Some(plugin) => instances.push(plugin),
+                Some(mut plugin) => {
+                    // Warm it up off the audio path: plugins (Acustica, iZotope) do lazy setup
+                    // and start with silence in their first blocks; that would otherwise stall
+                    // the live chain and drop out when the slot is inserted.
+                    let mut silence = vec![vec![0.0f32; request.max_block.max(1)]; request.bus_channels.max(1)];
+                    for _ in 0..8 {
+                        plugin.process_f32(&mut silence, &[], request.max_block.max(1));
+                    }
+                    instances.push(plugin)
+                }
                 None => return Vec::new(),
             }
         }

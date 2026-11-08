@@ -92,6 +92,9 @@ IDENTITY="Developer ID Application: Marcos Deida (ZQYU67JUBH)"
 ENTITLEMENTS="$og_root/package/OpenGridderServer.entitlements"
 
 codesign --force --timestamp --options runtime --sign "$IDENTITY" "$STAGE/Standalone/OpenGridderTray"
+for lib in "$STAGE/Standalone/OpenGridder Server.app/Contents/Frameworks/"*.dylib; do
+    [ -e "$lib" ] && codesign --force --timestamp --options runtime --sign "$IDENTITY" "$lib"
+done
 codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$STAGE/Standalone/OpenGridder Server.app/Contents/MacOS/OpenGridderServer-bin"
 codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$STAGE/Standalone/OpenGridder Server.app/Contents/MacOS/OpenGridderServer"
 codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$STAGE/Standalone/OpenGridder Server.app"

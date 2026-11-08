@@ -36,6 +36,32 @@ struct Native {
     prepared_rate: AtomicU64,
     prepared_frames: AtomicU32,
     prepared_channels: AtomicU32,
+    // The server this insert uses (picked in the editor or restored from the session), and the
+    // format its connection was opened with, so prepare reconnects only when either changes.
+    endpoint: Mutex<String>,
+    connected_format: Mutex<(u64, u32, u32)>,
+}
+
+const DEFAULT_ENDPOINT: &str = "127.0.0.1:55056";
+
+/// Connect (or reconnect, keeping the chain) to the insert's server with the host's format.
+fn connect_now(n: &Native) -> bool {
+    let rate = f64::from_bits(n.prepared_rate.load(Ordering::Relaxed));
+    let frames = n.prepared_frames.load(Ordering::Relaxed);
+    let channels = n.prepared_channels.load(Ordering::Relaxed);
+    let prepared = rate > 0.0 && frames > 0 && channels > 0;
+    let request = ag_protocol::HandshakeRequest {
+        samples_per_block: if prepared { frames as i32 } else { 64 },
+        sample_rate: if prepared { rate } else { 48000.0 },
+        channels_in: if prepared { channels as i32 } else { 2 },
+        channels_out: if prepared { channels as i32 } else { 2 },
+        ..Default::default()
+    };
+    if let Ok(mut format) = n.connected_format.lock() {
+        *format = (request.sample_rate.to_bits(), request.samples_per_block as u32, request.channels_in as u32);
+    }
+    let endpoint = n.endpoint.lock().map(|e| e.clone()).unwrap_or_else(|_| DEFAULT_ENDPOINT.to_string());
+    n.live_ctrl.connect(&endpoint, request)
 }
 // The native wrapper follows VST3's lifecycle: prepare/reset/process are exclusive.
 // Controller calls only access `values` and `control`, never `audio`.
@@ -63,16 +89,6 @@ fn apply(n: &Native, a: &mut Audio) {
 pub extern "C" fn ag_insert_create() -> *mut c_void {
     let plugin = AudioGridder::new();
     let (live, live_ctrl) = ag_plugin::live::LiveAudio::new();
-    live_ctrl.connect(
-        "127.0.0.1:55056",
-        ag_protocol::HandshakeRequest {
-            samples_per_block: 64,
-            sample_rate: 48000.0,
-            channels_in: 2,
-            channels_out: 2,
-            ..Default::default()
-        },
-    );
     let values = params()
         .iter()
         .map(|p| AtomicU32::new(p.default.to_bits()))
@@ -98,6 +114,8 @@ pub extern "C" fn ag_insert_create() -> *mut c_void {
         prepared_rate: AtomicU64::new(0),
         prepared_frames: AtomicU32::new(0),
         prepared_channels: AtomicU32::new(0),
+        endpoint: Mutex::new(DEFAULT_ENDPOINT.to_string()),
+        connected_format: Mutex::new((0, 0, 0)),
     })) as *mut c_void
 }
 #[no_mangle]
@@ -159,17 +177,12 @@ pub unsafe extern "C" fn ag_insert_prepare(
     n.prepared_rate.store(rate.to_bits(), Ordering::Relaxed);
     n.prepared_frames.store(frames, Ordering::Relaxed);
     n.prepared_channels.store(channels, Ordering::Relaxed);
-    if !n.live_ctrl.connected() {
-        n.live_ctrl.connect(
-            "127.0.0.1:55056",
-            ag_protocol::HandshakeRequest {
-                samples_per_block: frames as i32,
-                sample_rate: rate,
-                channels_in: channels as i32,
-                channels_out: channels as i32,
-                ..Default::default()
-            },
-        );
+    // (Re)connect to this insert's server when not connected yet or when the host's format
+    // changed since the connection was opened (the server's block size follows the handshake).
+    let format = (rate.to_bits(), frames, channels);
+    let changed = n.connected_format.lock().map(|f| *f != format).unwrap_or(true);
+    if !n.live_ctrl.connected() || changed {
+        connect_now(n);
     }
     true
 }
@@ -401,7 +414,14 @@ pub unsafe extern "C" fn ag_insert_load(p: *mut c_void, data: *const u8, length:
     }
     // Rebuild the saved remote chain on the server (now, or as soon as one answers).
     let chain: Vec<ag_plugin::LoadedSlot> = control.loaded_plugins().iter().map(chain_to_slot).collect();
+    let server = control.active_server().to_string();
+    drop(control);
     n.live_ctrl.restore(chain);
+    // Reopen on the server the session was saved with.
+    if let Ok(mut endpoint) = n.endpoint.lock() {
+        *endpoint = server;
+    }
+    connect_now(n);
     n.revision.fetch_add(1, Ordering::Relaxed);
     true
 }
@@ -859,18 +879,30 @@ pub unsafe extern "C" fn ag_insert_set_plugin_param(p: *mut c_void, slot_idx: u3
 pub unsafe extern "C" fn ag_insert_connect(p: *mut c_void, endpoint: *const c_char) -> bool {
     let Some(n) = native(p) else { return false };
     if endpoint.is_null() { return false };
-    let ep = std::ffi::CStr::from_ptr(endpoint).to_string_lossy().to_string();
-    let rate = f64::from_bits(n.prepared_rate.load(Ordering::Relaxed));
-    let frames = n.prepared_frames.load(Ordering::Relaxed);
-    let channels = n.prepared_channels.load(Ordering::Relaxed);
-    let prepared = rate > 0.0 && frames > 0 && channels > 0;
-    n.live_ctrl.connect(&ep, ag_protocol::HandshakeRequest {
-        samples_per_block: if prepared { frames as i32 } else { 64 },
-        sample_rate: if prepared { rate } else { 48000.0 },
-        channels_in: if prepared { channels as i32 } else { 2 },
-        channels_out: if prepared { channels as i32 } else { 2 },
-        ..Default::default()
-    })
+    let ep = std::ffi::CStr::from_ptr(endpoint).to_string_lossy().trim().to_string();
+    if ep.is_empty() {
+        return false;
+    }
+    let (host, port) = ag_plugin::parse_server(&ep);
+    let ep = format!("{host}:{port}");
+    // Remember it in the insert's state, so the session reopens on this server.
+    if let Ok(mut control) = n.control.lock() {
+        control.set_server(&ep);
+    }
+    if let Ok(mut endpoint) = n.endpoint.lock() {
+        *endpoint = ep;
+    }
+    n.revision.fetch_add(1, Ordering::Relaxed);
+    connect_now(n)
+}
+
+/// The insert's server as host:port.
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_endpoint(p: *mut c_void, buf: *mut c_char, cap: u32) -> bool {
+    let Some(n) = native(p) else { return false };
+    let endpoint = n.endpoint.lock().map(|e| e.clone()).unwrap_or_default();
+    copy_cstr(&endpoint, buf, cap);
+    true
 }
 
 #[cfg(test)]

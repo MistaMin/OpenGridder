@@ -18,6 +18,8 @@
 #import <Carbon/Carbon.h>
 #import <ImageIO/ImageIO.h>
 #import <objc/runtime.h>
+#include <dns_sd.h>
+#include <arpa/inet.h>
 
 #include <atomic>
 #include <map>
@@ -25,6 +27,7 @@
 
 extern "C" int ag_native_editor_open(void* raw, void* nsview, int* width, int* height);
 extern "C" void ag_native_editor_close(void* raw);
+extern "C" void ag_ui_view_resized(void* nsview, int width, int height);
 
 namespace {
 
@@ -298,11 +301,26 @@ uint64_t ag_ui_open_native(void* native, const char* title, int x, int y) {
     if (!native) return 0;
     __block uint64_t result = 0;
     run_on_main(^{
+        // The container is in an on-screen window before the plugin attaches to it: plugins
+        // look up the parent's window in IPlugView::attached / clap set_parent (iZotope
+        // Ozone crashed on a parent without one).
         NSView* container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 640, 420)];
+        const uint64_t editor_id = show_editor(container, native, title, x, y);
         int width = 0, height = 0;
-        if (ag_native_editor_open(native, (__bridge void*)container, &width, &height) == 0) return;
-        if (width > 0 && height > 0) [container setFrameSize:NSMakeSize(width, height)];
-        result = show_editor(container, native, title, x, y);
+        if (ag_native_editor_open(native, (__bridge void*)container, &width, &height) == 0) {
+            AGEditor* editor = editors()[@(editor_id)];
+            editor.native = NULL;  // nothing attached, nothing to detach
+            [editor teardown];
+            editor.window.delegate = nil;
+            [editor.window orderOut:nil];
+            [editor.window close];
+            [editors() removeObjectForKey:@(editor_id)];
+            std::lock_guard<std::mutex> lock(g_capture_mutex);
+            captures().erase(editor_id);
+            return;
+        }
+        if (width > 0 && height > 0) ag_ui_view_resized((__bridge void*)container, width, height);
+        result = editor_id;
     });
     return result;
 }
@@ -445,6 +463,31 @@ static uint8_t* encode_image(const uint8_t* rgba, int width, int height, CFStrin
 }
 
 void ag_ui_free(void* p) { free(p); }
+
+// Advertise the server with the system's Bonjour (mDNSResponder) as AudioGridder's
+// "_audiogridder._tcp" service under this Mac's computer name, so clients on the network
+// find it. `txt` is AudioGridder's INFO={...} record. The registration lives as long
+// as the process.
+bool ag_ui_advertise(uint16_t port, const char* txt) {
+    static DNSServiceRef service = nullptr;
+    if (service) return true;
+    TXTRecordRef record;
+    TXTRecordCreate(&record, 0, nullptr);
+    if (txt && std::strncmp(txt, "INFO=", 5) == 0) {
+        const char* value = txt + 5;
+        TXTRecordSetValue(&record, "INFO", (uint8_t)std::min<size_t>(std::strlen(value), 255), value);
+    }
+    DNSServiceErrorType err = DNSServiceRegister(&service, 0, kDNSServiceInterfaceIndexAny, nullptr /* computer name */,
+                                                 "_audiogridder._tcp", nullptr, nullptr, htons(port),
+                                                 TXTRecordGetLength(&record), TXTRecordGetBytesPtr(&record), nullptr, nullptr);
+    TXTRecordDeallocate(&record);
+    if (err != kDNSServiceErr_NoError) {
+        service = nullptr;
+        return false;
+    }
+    DNSServiceSetDispatchQueue(service, dispatch_get_main_queue());
+    return true;
+}
 
 }  // extern "C"
 

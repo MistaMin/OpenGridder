@@ -9,6 +9,10 @@
 #include <map>
 #include <cmath>
 #import <ImageIO/ImageIO.h>
+#include <dns_sd.h>
+#include <arpa/inet.h>
+#include <algorithm>
+#include <string>
 
 @interface AGOpenBridgeView : NSView {
     void* _processor;
@@ -389,22 +393,107 @@ void og_native_toggle_ab(NativePlugin* p) { (void)p; }
 bool og_native_is_b(NativePlugin* p) { (void)p; return false; }
 
 void og_native_get_active_server(NativePlugin* p, char* buf, uint32_t cap) {
-    (void)p;
-    if (buf && cap > 0) snprintf(buf, cap, "localhost:55056");
+    if (!buf || cap == 0) return;
+    buf[0] = 0;
+    ag_insert_endpoint((void*)p, buf, cap);
 }
 
 bool og_native_set_server(NativePlugin* p, const char* host_port) {
     return ag_insert_connect((void*)p, host_port);
 }
 
+// --- Server discovery: AudioGridder servers advertise "_audiogridder._tcp" with Bonjour.
+// Browsed with the system's DNS-SD on the main queue; each found service is resolved to
+// host:port. Main thread only.
+struct AgDiscoveredServer {
+    std::string name;
+    std::string endpoint;
+};
+
+static std::vector<AgDiscoveredServer>& discovered_servers() {
+    static std::vector<AgDiscoveredServer> servers;
+    return servers;
+}
+
+static void resolve_reply(DNSServiceRef ref, DNSServiceFlags, uint32_t, DNSServiceErrorType err, const char*,
+                          const char* host, uint16_t port_be, uint16_t, const unsigned char*, void* ctx) {
+    std::string* name = static_cast<std::string*>(ctx);
+    if (err == kDNSServiceErr_NoError && host) {
+        std::string target = host;
+        if (!target.empty() && target.back() == '.') target.pop_back();
+        const std::string endpoint = target + ":" + std::to_string(ntohs(port_be));
+        auto& servers = discovered_servers();
+        auto it = std::find_if(servers.begin(), servers.end(), [&](const AgDiscoveredServer& s) { return s.name == *name; });
+        if (it == servers.end()) servers.push_back({*name, endpoint});
+        else it->endpoint = endpoint;
+    }
+    DNSServiceRefDeallocate(ref);
+    delete name;
+}
+
+static void browse_reply(DNSServiceRef, DNSServiceFlags flags, uint32_t iface, DNSServiceErrorType err, const char* name,
+                         const char* type, const char* domain, void*) {
+    if (err != kDNSServiceErr_NoError || !name) return;
+    auto& servers = discovered_servers();
+    if (flags & kDNSServiceFlagsAdd) {
+        // The same service shows up once per interface; resolve it once.
+        if (std::any_of(servers.begin(), servers.end(), [&](const AgDiscoveredServer& s) { return s.name == name; })) return;
+        servers.push_back({name, ""});
+        DNSServiceRef resolve = nullptr;
+        auto* context = new std::string(name);
+        if (DNSServiceResolve(&resolve, 0, iface, name, type, domain, resolve_reply, context) == kDNSServiceErr_NoError) {
+            DNSServiceSetDispatchQueue(resolve, dispatch_get_main_queue());
+        } else {
+            delete context;
+        }
+    } else {
+        servers.erase(std::remove_if(servers.begin(), servers.end(), [&](const AgDiscoveredServer& s) { return s.name == name; }),
+                      servers.end());
+    }
+}
+
+static void start_discovery() {
+    static DNSServiceRef browse = nullptr;
+    if (browse) return;
+    if (DNSServiceBrowse(&browse, 0, kDNSServiceInterfaceIndexAny, "_audiogridder._tcp", nullptr, browse_reply, nullptr) ==
+        kDNSServiceErr_NoError) {
+        DNSServiceSetDispatchQueue(browse, dispatch_get_main_queue());
+    } else {
+        browse = nullptr;
+    }
+}
+
+// Servers found on the network so far (resolved ones only). Starts browsing on first use.
 uint32_t og_native_num_discovered_servers(NativePlugin* p) {
     (void)p;
-    return 1;
+    start_discovery();
+    uint32_t count = 0;
+    for (const auto& server : discovered_servers()) count += server.endpoint.empty() ? 0 : 1;
+    return count;
+}
+
+static const AgDiscoveredServer* resolved_server(uint32_t idx) {
+    uint32_t seen = 0;
+    for (const auto& server : discovered_servers()) {
+        if (server.endpoint.empty()) continue;
+        if (seen++ == idx) return &server;
+    }
+    return nullptr;
 }
 
 bool og_native_get_discovered_server(NativePlugin* p, uint32_t idx, char* buf, uint32_t cap) {
-    (void)p; (void)idx;
-    if (buf && cap > 0) snprintf(buf, cap, "localhost:55056");
+    (void)p;
+    const AgDiscoveredServer* server = resolved_server(idx);
+    if (!server || !buf || cap == 0) return false;
+    snprintf(buf, cap, "%s", server->endpoint.c_str());
+    return true;
+}
+
+bool og_native_get_discovered_server_name(NativePlugin* p, uint32_t idx, char* buf, uint32_t cap) {
+    (void)p;
+    const AgDiscoveredServer* server = resolved_server(idx);
+    if (!server || !buf || cap == 0) return false;
+    snprintf(buf, cap, "%s", server->name.c_str());
     return true;
 }
 

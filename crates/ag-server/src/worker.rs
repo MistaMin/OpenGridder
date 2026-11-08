@@ -267,7 +267,12 @@ fn run_plugin_child_session(worker: TcpListener, req: HandshakeRequest) -> std::
     }
     let audio_chain = Arc::clone(&chain);
     let audio_shutdown = audio.try_clone()?;
-    let audio_thread = thread::spawn(move || audio_loop(audio, audio_chain));
+    let audio_period = ag_protocol::realtime::block_period_ms(req.samples_per_block, req.sample_rate);
+    let audio_thread = thread::spawn(move || {
+        // AudioGridder's server audio worker runs as a real-time thread with the block period.
+        ag_protocol::realtime::make_current_thread_realtime(audio_period);
+        audio_loop(audio, audio_chain)
+    });
     loop {
         let (message_type, body) = match read_cmd(&mut command) {
             Ok(message) => message,
@@ -317,6 +322,7 @@ struct PluginBridge {
 
 fn run_session_isolated(accepted: AcceptedClient) -> std::io::Result<()> {
     let AcceptedClient { worker, request: req } = accepted;
+    let audio_period = ag_protocol::realtime::block_period_ms(req.samples_per_block, req.sample_rate);
     worker.set_nonblocking(false)?;
     let mut sockets = Vec::with_capacity(4);
     for _ in 0..4 {
@@ -360,7 +366,11 @@ fn run_session_isolated(accepted: AcceptedClient) -> std::io::Result<()> {
     }));
     let audio_bridge = Arc::clone(&bridge);
     let audio_in = Arc::clone(&client_in);
-    let audio_thread = thread::spawn(move || isolated_audio(audio, audio_bridge, audio_in));
+    let audio_thread = thread::spawn(move || {
+        // AudioGridder's server audio worker runs as a real-time thread with the block period.
+        ag_protocol::realtime::make_current_thread_realtime(audio_period);
+        isolated_audio(audio, audio_bridge, audio_in)
+    });
 
     let mut quit = false;
     let mut restart: Option<&'static str> = None;
@@ -791,7 +801,12 @@ fn run_session(accepted: AcceptedClient) -> std::io::Result<()> {
         chain.prepare(req.sample_rate as f32, req.samples_per_block as usize, req.channels_in as usize);
     }
     let audio_chain = Arc::clone(&chain);
-    let audio_thread = thread::spawn(move || audio_loop(audio, audio_chain));
+    let audio_period = ag_protocol::realtime::block_period_ms(req.samples_per_block, req.sample_rate);
+    let audio_thread = thread::spawn(move || {
+        // AudioGridder's server audio worker runs as a real-time thread with the block period.
+        ag_protocol::realtime::make_current_thread_realtime(audio_period);
+        audio_loop(audio, audio_chain)
+    });
 
     let client_host = command.peer_addr().map(|addr| addr.ip().to_string()).unwrap_or_default();
     let replies = {
@@ -1435,6 +1450,11 @@ mod tests {
         assert_eq!(ty, PARAMETERS);
 
         write_cmd(&mut command, PARAMETER_VALUE, &command::parameter_value(0, 0, 0.5, 0)).unwrap();
+        // The audio socket is independent of the command socket: wait for a command reply
+        // so the value is applied before the block.
+        write_cmd(&mut command, command::CPU_LOAD, &[]).unwrap();
+        let (ty, _) = read_cmd(&mut command).unwrap();
+        assert_eq!(ty, command::CPU_LOAD);
 
         let block = write_audio_request(&[vec![1.0; 32], vec![1.0; 32]], &PositionInfo::default()).unwrap();
         sockets[1].write_all(&block).unwrap();

@@ -1820,9 +1820,13 @@ fn handshake_block_size_limits_the_hosted_block() {
     let input = vec![signal.clone(), signal.clone()];
     let mut limited = false;
     for index in 0..count.min(8) {
+        // Command and audio sockets are independent: a reply on the command socket makes
+        // sure the value is applied before the next block is sent.
         write_cmd(&mut session.command, PARAMETER_VALUE, &command::parameter_value(0, index as i32, 0.0, 0));
+        let _ = get_param(&mut session, 0, index as i32);
         let (_header, low) = exchange_f32(&mut session, &input, &[]);
         write_cmd(&mut session.command, PARAMETER_VALUE, &command::parameter_value(0, index as i32, 1.0, 0));
+        let _ = get_param(&mut session, 0, index as i32);
         let (_header, high) = exchange_f32(&mut session, &input, &[]);
         let head = max_abs_diff(&low[0][..32], &high[0][..32]);
         let tail = max_abs_diff(&high[0][32..], &signal[32..]).max(max_abs_diff(&low[0][32..], &signal[32..]));

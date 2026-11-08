@@ -1582,39 +1582,119 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
     _draggedKnob = -1;
 }
 
+// Remembered "Connect to Address…" servers, newest first (shared by every insert and host).
+static NSUserDefaults *OGServerDefaults(void) {
+    static NSUserDefaults *defaults = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ defaults = [[NSUserDefaults alloc] initWithSuiteName:@"org.opengridder.plugin"]; });
+    return defaults;
+}
+
+static NSArray<NSString *> *OGRecentServers(void) {
+    NSArray *list = [OGServerDefaults() arrayForKey:@"RecentServers"];
+    return [list isKindOfClass:[NSArray class]] ? list : @[];
+}
+
+static void OGRememberServer(NSString *endpoint) {
+    NSMutableArray *list = [OGRecentServers() mutableCopy];
+    [list removeObject:endpoint];
+    [list insertObject:endpoint atIndex:0];
+    while (list.count > 8) [list removeLastObject];
+    [OGServerDefaults() setObject:list forKey:@"RecentServers"];
+}
+
+// host:port with the default port, lower-case host, no trailing dot (for comparing).
+static NSString *OGNormalizedServer(NSString *text) {
+    NSString *trimmed = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSRange colon = [trimmed rangeOfString:@":" options:NSBackwardsSearch];
+    NSString *host = colon.location == NSNotFound ? trimmed : [trimmed substringToIndex:colon.location];
+    NSString *port = colon.location == NSNotFound ? @"55056" : [trimmed substringFromIndex:colon.location + 1];
+    if ([host hasSuffix:@"."]) host = [host substringToIndex:host.length - 1];
+    if ([host isEqualToString:@"localhost"]) host = @"127.0.0.1";
+    return [NSString stringWithFormat:@"%@:%@", host.lowercaseString, port.length ? port : @"55056"];
+}
+
+- (void)addServerItem:(NSMenu *)menu title:(NSString *)title endpoint:(NSString *)endpoint active:(NSString *)active {
+    NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:title action:@selector(onSelectServer:) keyEquivalent:@""];
+    [item setTarget:self];
+    [item setRepresentedObject:endpoint];
+    [item setEnabled:YES];
+    if ([OGNormalizedServer(endpoint) isEqualToString:active]) [item setState:NSControlStateValueOn];
+    [menu addItem:item];
+}
+
 - (void)showServerMenuAtPoint:(NSPoint)pt {
     NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Servers"];
     [menu setAutoenablesItems:NO];
     if (self.rust) {
-        uint32_t count = og_native_num_discovered_servers(self.rust);
-        char activeBuf[128] = {0};
+        char activeBuf[256] = {0};
         og_native_get_active_server(self.rust, activeBuf, sizeof(activeBuf));
-        NSString *activeStr = [NSString stringWithUTF8String:activeBuf];
+        NSString *active = OGNormalizedServer([NSString stringWithUTF8String:activeBuf] ?: @"");
+
+        NSMenuItem *header = [[NSMenuItem alloc] initWithTitle:@"Servers on the network" action:nil keyEquivalent:@""];
+        [header setEnabled:NO];
+        [menu addItem:header];
+        uint32_t count = og_native_num_discovered_servers(self.rust);
         for (uint32_t i = 0; i < count; ++i) {
-            char buf[128] = {0};
-            if (og_native_get_discovered_server(self.rust, i, buf, sizeof(buf))) {
-                NSString *srv = [NSString stringWithUTF8String:buf];
-                NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:srv action:@selector(onSelectServer:) keyEquivalent:@""];
-                [item setTarget:self];
-                [item setRepresentedObject:srv];
-                if ([srv isEqualToString:activeStr]) {
-                    [item setState:1];
-                }
-                [menu addItem:item];
-            }
+            char endpoint[256] = {0}, name[256] = {0};
+            if (!og_native_get_discovered_server(self.rust, i, endpoint, sizeof endpoint)) continue;
+            og_native_get_discovered_server_name(self.rust, i, name, sizeof name);
+            NSString *ep = [NSString stringWithUTF8String:endpoint];
+            NSString *title = [NSString stringWithFormat:@"%s  (%@)", name, ep];
+            [self addServerItem:menu title:title endpoint:ep active:active];
         }
+        if (count == 0) {
+            NSMenuItem *none = [[NSMenuItem alloc] initWithTitle:@"  Searching… (none found yet)" action:nil keyEquivalent:@""];
+            [none setEnabled:NO];
+            [menu addItem:none];
+        }
+        [menu addItem:[NSMenuItem separatorItem]];
+        [self addServerItem:menu title:@"This Mac  (127.0.0.1:55056)" endpoint:@"127.0.0.1:55056" active:active];
+        for (NSString *recent in OGRecentServers()) {
+            [self addServerItem:menu title:recent endpoint:recent active:active];
+        }
+        [menu addItem:[NSMenuItem separatorItem]];
+        NSMenuItem *manual = [[NSMenuItem alloc] initWithTitle:@"Connect to Address…" action:@selector(onConnectToAddress:) keyEquivalent:@""];
+        [manual setTarget:self];
+        [manual setEnabled:YES];
+        [menu addItem:manual];
     }
     [menu popUpMenuPositioningItem:nil atLocation:pt inView:self];
+}
+
+- (void)onConnectToAddress:(id)sender {
+    if (!self.rust) return;
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"Connect to an OpenGridder Server";
+    alert.informativeText = @"Enter the server's address, e.g. 192.168.1.20 or studio-mac.local (port 55056 unless given as host:port).";
+    [alert addButtonWithTitle:@"Connect"];
+    [alert addButtonWithTitle:@"Cancel"];
+    NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 280, 24)];
+    field.placeholderString = @"192.168.1.20:55056";
+    NSArray *recents = OGRecentServers();
+    if (recents.count > 0) field.stringValue = recents.firstObject;
+    alert.accessoryView = field;
+    [alert.window setInitialFirstResponder:field];
+    if ([alert runModal] != NSAlertFirstButtonReturn) return;
+    NSString *text = [field.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (text.length == 0) return;
+    NSString *endpoint = OGNormalizedServer(text);
+    OGRememberServer(endpoint);
+    [self connectToServer:endpoint];
+}
+
+- (void)connectToServer:(NSString *)endpoint {
+    og_native_set_server(self.rust, [endpoint UTF8String]);
+    _cachedPluginMenu = nil;
+    _cachedPluginCount = 0;
+    [self setNeedsDisplay:YES];
 }
 
 - (void)onSelectServer:(NSMenuItem *)sender {
     if (!self.rust) return;
     NSString *srv = sender.representedObject;
     if (srv.length > 0) {
-        og_native_set_server(self.rust, [srv UTF8String]);
-        _cachedPluginMenu = nil;
-        _cachedPluginCount = 0;
-        [self setNeedsDisplay:YES];
+        [self connectToServer:srv];
     }
 }
 

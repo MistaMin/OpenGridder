@@ -31,6 +31,9 @@
 #include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "pluginterfaces/vst/ivsthostapplication.h"
 #include "pluginterfaces/gui/iplugview.h"
+#include "pluginterfaces/vst/ivstmessage.h"
+#include <map>
+#include <memory>
 #include <clap/ext/gui.h>
 
 // ui_mac.mm: the editor window follows a plugin-initiated resize.
@@ -481,6 +484,119 @@ void process_lv2(Lv2Plugin* self, float** audio, int channels, int frames) {
 
 // --- VST3 -----------------------------------------------------------------------
 
+// IAttributeList and IMessage, which IHostApplication::createInstance must provide:
+// processors and controllers send each other messages through them (iZotope Ozone
+// dereferences the result unchecked and crashed the server when it was NULL).
+#define AG_FUNKNOWN_REFCOUNT(Class)                                                                         \
+    Steinberg::uint32 PLUGIN_API Class::addRef() {                                                        \
+        return static_cast<Steinberg::uint32>(__atomic_add_fetch(&__funknownRefCount, 1, __ATOMIC_ACQ_REL)); \
+    }                                                                                                      \
+    Steinberg::uint32 PLUGIN_API Class::release() {                                                       \
+        const int next = __atomic_sub_fetch(&__funknownRefCount, 1, __ATOMIC_ACQ_REL);                     \
+        if (next == 0) {                                                                                   \
+            delete this;                                                                                   \
+            return 0;                                                                                      \
+        }                                                                                                  \
+        return static_cast<Steinberg::uint32>(next);                                                       \
+    }
+
+class HostAttributeList : public Steinberg::Vst::IAttributeList {
+public:
+    HostAttributeList() { FUNKNOWN_CTOR }
+    virtual ~HostAttributeList() { FUNKNOWN_DTOR }
+    DECLARE_FUNKNOWN_METHODS
+
+    Steinberg::tresult PLUGIN_API setInt(AttrID id, Steinberg::int64 value) override {
+        if (id == nullptr) return Steinberg::kInvalidArgument;
+        ints_[id] = value;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API getInt(AttrID id, Steinberg::int64& value) override {
+        auto it = id ? ints_.find(id) : ints_.end();
+        if (it == ints_.end()) return Steinberg::kResultFalse;
+        value = it->second;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API setFloat(AttrID id, double value) override {
+        if (id == nullptr) return Steinberg::kInvalidArgument;
+        floats_[id] = value;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API getFloat(AttrID id, double& value) override {
+        auto it = id ? floats_.find(id) : floats_.end();
+        if (it == floats_.end()) return Steinberg::kResultFalse;
+        value = it->second;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API setString(AttrID id, const Steinberg::Vst::TChar* text) override {
+        if (id == nullptr || text == nullptr) return Steinberg::kInvalidArgument;
+        std::u16string value;
+        for (const Steinberg::Vst::TChar* c = text; *c; ++c) value.push_back(static_cast<char16_t>(*c));
+        strings_[id] = value;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API getString(AttrID id, Steinberg::Vst::TChar* text, Steinberg::uint32 size_bytes) override {
+        auto it = id ? strings_.find(id) : strings_.end();
+        if (it == strings_.end() || text == nullptr || size_bytes < sizeof(Steinberg::Vst::TChar)) return Steinberg::kResultFalse;
+        const size_t cap = size_bytes / sizeof(Steinberg::Vst::TChar);
+        const size_t count = std::min(cap - 1, it->second.size());
+        for (size_t i = 0; i < count; ++i) text[i] = static_cast<Steinberg::Vst::TChar>(it->second[i]);
+        text[count] = 0;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API setBinary(AttrID id, const void* data, Steinberg::uint32 size_bytes) override {
+        if (id == nullptr || (data == nullptr && size_bytes > 0)) return Steinberg::kInvalidArgument;
+        const auto* bytes = static_cast<const char*>(data);
+        binaries_[id] = std::vector<char>(bytes, bytes + size_bytes);
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API getBinary(AttrID id, const void*& data, Steinberg::uint32& size_bytes) override {
+        auto it = id ? binaries_.find(id) : binaries_.end();
+        if (it == binaries_.end()) return Steinberg::kResultFalse;
+        data = it->second.data();
+        size_bytes = static_cast<Steinberg::uint32>(it->second.size());
+        return Steinberg::kResultOk;
+    }
+
+private:
+    std::map<std::string, Steinberg::int64> ints_;
+    std::map<std::string, double> floats_;
+    std::map<std::string, std::u16string> strings_;
+    std::map<std::string, std::vector<char>> binaries_;
+};
+AG_FUNKNOWN_REFCOUNT(HostAttributeList)
+Steinberg::tresult PLUGIN_API HostAttributeList::queryInterface(const Steinberg::TUID iid, void** obj) {
+    QUERY_INTERFACE(iid, obj, Steinberg::FUnknown::iid, Steinberg::Vst::IAttributeList)
+    QUERY_INTERFACE(iid, obj, Steinberg::Vst::IAttributeList::iid, Steinberg::Vst::IAttributeList)
+    if (obj != nullptr) *obj = nullptr;
+    return Steinberg::kNoInterface;
+}
+
+class HostMessage : public Steinberg::Vst::IMessage {
+public:
+    HostMessage() : attributes_(new HostAttributeList()) { FUNKNOWN_CTOR }
+    virtual ~HostMessage() {
+        attributes_->release();
+        FUNKNOWN_DTOR
+    }
+    DECLARE_FUNKNOWN_METHODS
+
+    Steinberg::FIDString PLUGIN_API getMessageID() override { return id_.c_str(); }
+    void PLUGIN_API setMessageID(Steinberg::FIDString id) override { id_ = id ? id : ""; }
+    Steinberg::Vst::IAttributeList* PLUGIN_API getAttributes() override { return attributes_; }
+
+private:
+    std::string id_;
+    HostAttributeList* attributes_;
+};
+AG_FUNKNOWN_REFCOUNT(HostMessage)
+Steinberg::tresult PLUGIN_API HostMessage::queryInterface(const Steinberg::TUID iid, void** obj) {
+    QUERY_INTERFACE(iid, obj, Steinberg::FUnknown::iid, Steinberg::Vst::IMessage)
+    QUERY_INTERFACE(iid, obj, Steinberg::Vst::IMessage::iid, Steinberg::Vst::IMessage)
+    if (obj != nullptr) *obj = nullptr;
+    return Steinberg::kNoInterface;
+}
+
 class HostApp : public Steinberg::Vst::IHostApplication, public Steinberg::Vst::IComponentHandler {
 public:
     HostApp() { FUNKNOWN_CTOR }
@@ -498,9 +614,19 @@ public:
         return Steinberg::kResultOk;
     }
 
-    Steinberg::tresult PLUGIN_API createInstance(Steinberg::TUID, Steinberg::TUID, void** obj) override {
-        if (obj != nullptr) {
-            *obj = nullptr;
+    Steinberg::tresult PLUGIN_API createInstance(Steinberg::TUID cid, Steinberg::TUID iid, void** obj) override {
+        if (obj == nullptr) {
+            return Steinberg::kInvalidArgument;
+        }
+        *obj = nullptr;
+        using Steinberg::FUnknownPrivate::iidEqual;
+        if (iidEqual(cid, Steinberg::Vst::IMessage::iid) && iidEqual(iid, Steinberg::Vst::IMessage::iid)) {
+            *obj = static_cast<Steinberg::Vst::IMessage*>(new HostMessage());
+            return Steinberg::kResultOk;
+        }
+        if (iidEqual(cid, Steinberg::Vst::IAttributeList::iid) && iidEqual(iid, Steinberg::Vst::IAttributeList::iid)) {
+            *obj = static_cast<Steinberg::Vst::IAttributeList*>(new HostAttributeList());
+            return Steinberg::kResultOk;
         }
         return Steinberg::kNotImplemented;
     }

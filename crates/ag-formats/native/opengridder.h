@@ -70,6 +70,7 @@ void og_native_get_active_server(NativePlugin*, char* buf, uint32_t cap);
 bool og_native_set_server(NativePlugin*, const char* host_port);
 uint32_t og_native_num_discovered_servers(NativePlugin*);
 bool og_native_get_discovered_server(NativePlugin*, uint32_t idx, char* buf, uint32_t cap);
+bool og_native_get_discovered_server_name(NativePlugin*, uint32_t idx, char* buf, uint32_t cap);
 
 // --- Full State Serialization (State Version 7) (Phase 3) ---
 uint32_t og_native_get_state(NativePlugin*, uint8_t* buf, uint32_t cap);

@@ -458,6 +458,7 @@ unsafe extern "C" {
     fn dup(fd: c_int) -> c_int;
     fn dup2(from: c_int, to: c_int) -> c_int;
     fn open(path: *const c_char, flags: c_int, ...) -> c_int;
+    fn _exit(status: c_int) -> !;
 }
 
 /// `--scan-worker`: read bundle paths from stdin, report each one's entries on stdout.
@@ -489,6 +490,10 @@ pub fn worker_main() {
         let _ = writeln!(report, "END\t{path}");
         let _ = report.flush();
     }
+    let _ = report.flush();
+    // Leave without running static destructors: plugins' global destructors throw or crash
+    // at exit (each one left a crash report although its results were already sent).
+    unsafe { _exit(0) }
 }
 
 fn scan_bundle_here(path: &str) -> Vec<CatalogPlugin> {
