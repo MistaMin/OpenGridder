@@ -145,6 +145,28 @@ pub fn scan() -> Vec<CatalogPlugin> {
     found
 }
 
+/// Load the VST3/CLAP bundles that need loading in worker processes while the server is
+/// already serving; then rebuild the catalog so clients see them (they re-request the
+/// list when the plugin browser opens). One at a time.
+pub fn scan_bundles_in_background() {
+    static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    std::thread::spawn(|| {
+        let before = scan().len();
+        crate::bundle_scan::scan(true);
+        let fresh = scan_fresh();
+        let total = fresh.len();
+        *CATALOG.lock().expect("catalog") = Some(fresh);
+        SCAN_GENERATION.fetch_add(1, Ordering::Release);
+        eprintln!("ag-server: background plugin scan done, catalog {before} -> {total}");
+        println!("SCAN_BACKGROUND_DONE:{}", serde_json::json!({"total": total}));
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        RUNNING.store(false, Ordering::Release);
+    });
+}
+
 /// Catalog name for `id` if this process has already scanned. Never starts a scan
 /// (chain children have no catalog and must not rescan to name a plugin).
 pub fn cached_name(id: &str) -> Option<String> {
@@ -162,8 +184,9 @@ fn scan_fresh() -> Vec<CatalogPlugin> {
     for plugin in crate::native::scan() {
         push_unique(&mut found, plugin);
     }
-    // Every VST3 and CLAP bundle, scanned in worker processes (see bundle_scan).
-    for plugin in crate::bundle_scan::scan() {
+    // VST3 and CLAP bundles listed without loading code (cache, moduleinfo.json); the rest
+    // come from the background worker scan (`scan_bundles_in_background`).
+    for plugin in crate::bundle_scan::scan(false) {
         push_unique(&mut found, plugin);
     }
     // Every registered AudioUnit. Enumeration reads component metadata only (no instances).

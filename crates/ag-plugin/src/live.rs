@@ -120,6 +120,8 @@ pub enum LiveCommand {
         dy: f32,
     },
     Key(Vec<u16>),
+    /// Fetch the plugin list again (the plugin browser is opening).
+    RefreshCatalog,
     Oversampling(i32, i32),
     Preset(i32, i32),
 }
@@ -506,6 +508,9 @@ fn run(shared: Arc<Shared>, commands: mpsc::Receiver<LiveCommand>) {
                     s.send_mouse_event(kind, x, y, shift, ctrl, alt, dx, dy)
                 }
                 LiveCommand::Key(codes) => s.send_key(&codes),
+                LiveCommand::RefreshCatalog => s.refresh_catalog().map(|()| {
+                    shared.info.lock().unwrap_or_else(|p| p.into_inner()).catalog = s.catalog_items().to_vec();
+                }),
                 LiveCommand::Oversampling(i, n) => s.set_oversampling(i, n),
                 LiveCommand::Preset(i, p) => s.set_preset(i, p, 0),
                 _ => Ok(()),

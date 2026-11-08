@@ -896,6 +896,20 @@ pub unsafe extern "C" fn ag_insert_connect(p: *mut c_void, endpoint: *const c_ch
     connect_now(n)
 }
 
+/// Re-fetch the server's plugin list, at most every 5 s (the plugin browser is opening).
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_refresh_catalog(p: *mut c_void) -> bool {
+    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+    let Some(n) = native(p) else { return false };
+    if let Ok(mut last) = LAST.lock() {
+        if last.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(5)) {
+            return false;
+        }
+        *last = Some(std::time::Instant::now());
+    }
+    n.live_ctrl.send(ag_plugin::live::LiveCommand::RefreshCatalog)
+}
+
 /// The insert's server as host:port.
 #[no_mangle]
 pub unsafe extern "C" fn ag_insert_endpoint(p: *mut c_void, buf: *mut c_char, cap: u32) -> bool {

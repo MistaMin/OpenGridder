@@ -29,8 +29,9 @@ pub static PROGRESS: AtomicBool = AtomicBool::new(false);
 /// moduleinfo.json only.
 pub static WORKERS: AtomicBool = AtomicBool::new(false);
 
-/// A bundle that has not reported back within this time is treated as hung.
-const BUNDLE_TIMEOUT: Duration = Duration::from_secs(45);
+/// A bundle that has not reported back within this time is treated as hung (a licence or
+/// Gatekeeper dialog on a fresh machine waits forever).
+const BUNDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Workers are replaced after this many bundles: modules stay mapped (some plugins crash
 /// in dlclose), so a long-lived worker would keep growing.
 const BUNDLES_PER_WORKER: usize = 20;
@@ -258,15 +259,21 @@ fn add_to_blacklist(path: &str, reason: &str) {
     }
 }
 
+/// The worker scan runs in the background while the server is serving, so its progress
+/// goes to the server app's status (SCAN_BACKGROUND) and the log, not the start-up splash.
 fn progress(current: usize, total: usize, name: &str, format: &str) {
     if PROGRESS.load(Ordering::Relaxed) {
-        println!("SCAN_PROGRESS:{}", json!({"current": current, "total": total, "name": name, "format": format}));
+        println!("SCAN_BACKGROUND:{}", json!({"current": current, "total": total, "name": name, "format": format}));
         let _ = std::io::stdout().flush();
+    }
+    if current % 100 == 0 || current == total {
+        eprintln!("ag-server: background plugin scan {current}/{total}");
     }
 }
 
-/// All VST3 and CLAP plugins on the system, in bundle order.
-pub fn scan() -> Vec<CatalogPlugin> {
+/// All VST3 and CLAP plugins on the system, in bundle order. Without `use_workers`, only
+/// what needs no loading: the cache and moduleinfo.json (quick, for start-up).
+pub fn scan(use_workers: bool) -> Vec<CatalogPlugin> {
     let bundles = find_bundles();
     let mut cache = load_cache();
     let blacklist = load_blacklist();
@@ -290,7 +297,7 @@ pub fn scan() -> Vec<CatalogPlugin> {
         }
         todo.push(bundle.clone());
     }
-    if !todo.is_empty() && (!WORKERS.load(Ordering::Relaxed) || !can_spawn_workers()) {
+    if !todo.is_empty() && (!use_workers || !WORKERS.load(Ordering::Relaxed) || !can_spawn_workers()) {
         // Not the server's startup scan (or a test binary without `--scan-worker`).
         todo.clear();
     }
@@ -336,7 +343,8 @@ enum Outcome {
 fn scan_in_workers(todo: Vec<PathBuf>, cache: &mut HashMap<String, (u64, Vec<CatalogPlugin>)>) {
     let total = todo.len();
     let queue = Arc::new(Mutex::new(todo.into_iter().collect::<VecDeque<_>>()));
-    let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, MAX_WORKERS).min(total);
+    // Half the cores at most: the server keeps serving audio while this runs.
+    let workers = (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4) / 2).clamp(1, MAX_WORKERS).min(total);
     let (results, received) = mpsc::channel::<(PathBuf, Outcome)>();
     let mut threads = Vec::new();
     for _ in 0..workers {

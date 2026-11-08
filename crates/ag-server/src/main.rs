@@ -106,6 +106,14 @@ fn main() {
     let port = SERVER_PORT.saturating_add(id);
     let listener = TcpListener::bind(("0.0.0.0", port)).unwrap_or_else(|err| {
         eprintln!("ag-server: could not bind port {port}: {err}");
+        // Tell the server app, which otherwise keeps showing its scan screen.
+        let message = if err.kind() == std::io::ErrorKind::AddrInUse {
+            format!("Port {port} is already in use by another server (AudioGridder Server, or a second OpenGridder Server). Quit it, then start OpenGridder Server again.")
+        } else {
+            format!("Could not open port {port}: {err}")
+        };
+        println!("SERVER_ERROR:{}", serde_json::json!({"message": message, "port": port}));
+        let _ = std::io::stdout().flush();
         std::process::exit(1);
     });
     eprintln!(
@@ -171,6 +179,11 @@ fn main() {
     // from a random port without answering queries, so macOS clients never saw it).
     if !ag_server::ui::advertise(port, &mdns_info.txt_record()) {
         eprintln!("ag-server: could not advertise the server with Bonjour");
+    }
+    // New or changed VST3/CLAP bundles are loaded in scan workers while the server already
+    // serves (a fresh machine's first scan can take a long time: licence dialogs, Gatekeeper).
+    if !no_scan {
+        ag_server::host::scan_bundles_in_background();
     }
     // Clients are served on a background thread; the main thread runs the AppKit loop
     // that shows and drives the plugins' editor windows.

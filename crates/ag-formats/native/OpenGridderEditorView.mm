@@ -1741,6 +1741,8 @@ static NSString *OGNormalizedServer(NSString *text) {
         [menu popUpMenuPositioningItem:nil atLocation:pt inView:self];
         return;
     }
+    // The server may still be scanning: ask for the current list (seen next time it opens).
+    og_native_refresh_catalog(self.rust);
     uint32_t numAvail = og_native_num_available_plugins(self.rust);
 
     if (numAvail == 0) {

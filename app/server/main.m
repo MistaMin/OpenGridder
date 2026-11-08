@@ -982,6 +982,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
 @property (strong, nonatomic) SettingsWindowController *settingsController;
 @property (strong, nonatomic) NSArray<NSDictionary *> *catalog;
 @property (nonatomic) NSInteger serverPort;
+@property (nonatomic) BOOL serverErrorShown;
 @end
 
 @implementation OpenGridderAppDelegate
@@ -1117,6 +1118,8 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
 }
 
 - (void)startServerWithRescan:(BOOL)rescan noScan:(BOOL)noScan {
+    self.serverPort = 0;
+    self.serverErrorShown = NO;
     [self stopServer];
 
     NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
@@ -1182,6 +1185,12 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
     self.serverTask.terminationHandler = ^(NSTask *task) {
         dispatch_async(dispatch_get_main_queue(), ^{
             weakSelf.statusMenuItem.title = [NSString stringWithFormat:@"OpenGridder Server: Stopped (Code %d)", task.terminationStatus];
+            // Never leave the splash on "scanning" when the server is gone.
+            if (!weakSelf.serverErrorShown && weakSelf.serverPort == 0) {
+                [weakSelf.splashController setProgress:1.0
+                                                  text:[NSString stringWithFormat:@"Server stopped (code %d). See ~/Library/Logs/OpenGridder/server.log",
+                                                                                  task.terminationStatus]];
+            }
         });
     };
 
@@ -1218,6 +1227,37 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
                 [self.pluginListController updatePlugins:plugins];
             });
         }
+    } else if ([line hasPrefix:@"SERVER_ERROR:"]) {
+        NSData *jsonData = [[line substringFromIndex:13] dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:nil];
+        NSString *message = dict[@"message"] ?: @"The server could not start.";
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.serverErrorShown = YES;
+            self.statusMenuItem.title = @"OpenGridder Server: Not running";
+            [self.splashController setProgress:1.0 text:message];
+            NSAlert *alert = [[NSAlert alloc] init];
+            alert.messageText = @"OpenGridder Server could not start";
+            alert.informativeText = message;
+            [alert runModal];
+        });
+    } else if ([line hasPrefix:@"SCAN_BACKGROUND:"]) {
+        NSData *jsonData = [[line substringFromIndex:16] dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:nil];
+        if (dict) {
+            NSInteger cur = [dict[@"current"] integerValue], total = [dict[@"total"] integerValue];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.statusMenuItem.title = [NSString stringWithFormat:@"OpenGridder Server: Running (Port %ld) - scanning plug-ins %ld/%ld",
+                                                                       (long)self.serverPort, (long)cur, (long)total];
+            });
+        }
+    } else if ([line hasPrefix:@"SCAN_BACKGROUND_DONE:"]) {
+        NSData *jsonData = [[line substringFromIndex:21] dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:nil];
+        NSInteger total = [dict[@"total"] integerValue];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.pluginCountMenuItem.title = [NSString stringWithFormat:@"Plugins: %ld Active", (long)total];
+            self.statusMenuItem.title = [NSString stringWithFormat:@"OpenGridder Server: Running (Port %ld)", (long)self.serverPort];
+        });
     } else if ([line hasPrefix:@"SCAN_COMPLETE:"]) {
         NSString *jsonStr = [line substringFromIndex:14];
         NSData *jsonData = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];

@@ -175,6 +175,19 @@ impl RemoteSession {
         Ok(session)
     }
 
+    /// Ask for the plugin list again (the server's background scan may have grown it).
+    pub fn refresh_catalog(&mut self) -> std::io::Result<()> {
+        self.write_cmd(PLUGIN_LIST, &[])?;
+        let (message_type, body) = self.read_cmd()?;
+        if message_type != PLUGIN_LIST {
+            return Err(invalid("plugin list"));
+        }
+        let packed = command::read_length_prefixed(&body).ok_or_else(|| invalid("plugin list"))?;
+        self.catalog = plugin_ids(packed);
+        self.catalog_items = parse_catalog(packed);
+        Ok(())
+    }
+
     /// Full catalog items from the connect-time list.
     pub fn catalog_items(&self) -> &[CatalogItem] {
         &self.catalog_items

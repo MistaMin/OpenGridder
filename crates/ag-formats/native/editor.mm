@@ -398,6 +398,10 @@ void og_native_get_active_server(NativePlugin* p, char* buf, uint32_t cap) {
     ag_insert_endpoint((void*)p, buf, cap);
 }
 
+void og_native_refresh_catalog(NativePlugin* p) {
+    ag_insert_refresh_catalog((void*)p);
+}
+
 bool og_native_set_server(NativePlugin* p, const char* host_port) {
     return ag_insert_connect((void*)p, host_port);
 }
