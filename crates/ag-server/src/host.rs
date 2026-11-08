@@ -127,6 +127,9 @@ pub fn scan_generation() -> u64 {
 /// `restart-rescan`. The next `scan` rebuilds and advances `scan_generation`.
 pub fn rescan(wipe: bool) -> &'static str {
     *CATALOG.lock().expect("catalog") = None;
+    if wipe {
+        crate::bundle_scan::wipe();
+    }
     if wipe { "restart-rescan-wipe" } else { "restart-rescan" }
 }
 
@@ -157,6 +160,10 @@ fn scan_fresh() -> Vec<CatalogPlugin> {
         }
     }
     for plugin in crate::native::scan() {
+        push_unique(&mut found, plugin);
+    }
+    // Every VST3 and CLAP bundle, scanned in worker processes (see bundle_scan).
+    for plugin in crate::bundle_scan::scan() {
         push_unique(&mut found, plugin);
     }
     // Every registered AudioUnit. Enumeration reads component metadata only (no instances).
@@ -752,9 +759,14 @@ fn collect_type(kind: u32, instrument: bool, found: &mut Vec<CatalogPlugin>) {
 }
 
 fn plugin_record(name: String, kind: u32, subtype: u32, maker: u32, instrument: bool) -> CatalogPlugin {
+    // AudioUnit names are "Company: Plugin" by convention; the maker code is only a fallback.
+    let (company, name) = match name.split_once(": ") {
+        Some((company, plugin)) if !company.is_empty() && !plugin.is_empty() => (company.to_string(), plugin.to_string()),
+        _ => (fourcc_string(maker), name),
+    };
     CatalogPlugin {
         name,
-        company: fourcc_string(maker),
+        company,
         id: format!("au:{}:{}:{}", fourcc_string(kind), fourcc_string(subtype), fourcc_string(maker)),
         format: "AudioUnit".to_string(),
         is_instrument: instrument,

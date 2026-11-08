@@ -18,6 +18,21 @@
 
 #define OpenGridderEditorView OPENGRIDDER_VIEW_CLASS_NAME
 
+#ifndef OPENGRIDDER_SEARCH_CLASS_NAME
+#if defined(OG_BUILD_VST3)
+#define OPENGRIDDER_SEARCH_CLASS_NAME OpenGridderVST3PluginSearch
+#elif defined(OG_BUILD_AUV3)
+#define OPENGRIDDER_SEARCH_CLASS_NAME OpenGridderAUv3PluginSearch
+#elif defined(OG_BUILD_AU)
+#define OPENGRIDDER_SEARCH_CLASS_NAME OpenGridderAUPluginSearch
+#elif defined(OG_BUILD_AAX)
+#define OPENGRIDDER_SEARCH_CLASS_NAME OpenGridderAAXPluginSearch
+#else
+#define OPENGRIDDER_SEARCH_CLASS_NAME OpenGridderPluginSearch
+#endif
+#endif
+#define OpenGridderPluginSearch OPENGRIDDER_SEARCH_CLASS_NAME
+
 #ifndef NSFontWeightRegular
 #if !defined(MAC_OS_X_VERSION_10_11) || MAC_OS_X_VERSION_MAX_ALLOWED < 101100
 typedef CGFloat NSFontWeight;
@@ -100,4 +115,12 @@ typedef CGFloat NSFontWeight;
 - (void)showPluginMenuAtPoint:(NSPoint)pt;
 - (void)onSelectPlugin:(NSMenuItem *)sender;
 
+// Load catalog entry `idx` into a new slot (plugin menu and search panel).
+- (void)addPluginAtIndex:(uint32_t)idx title:(NSString *)title;
+@end
+
+// Floating plugin search window (OpenGridderEditorView.mm).
+@interface OpenGridderPluginSearch : NSWindowController <NSSearchFieldDelegate, NSTableViewDataSource, NSTableViewDelegate>
++ (instancetype)sharedSearch;
+- (void)showForEditor:(OpenGridderEditorView *)editor;
 @end

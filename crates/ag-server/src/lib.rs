@@ -13,6 +13,7 @@ mod channels;
 mod clipboard;
 mod screen;
 pub mod ui;
+pub mod bundle_scan;
 mod cpu;
 pub mod host;
 mod native;

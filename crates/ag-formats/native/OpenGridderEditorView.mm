@@ -1677,6 +1677,14 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
         _cachedPluginMenu = [[NSMenu alloc] initWithTitle:@"Available Plugins"];
         [_cachedPluginMenu setAutoenablesItems:NO];
 
+        NSMenuItem *searchItem = [[NSMenuItem alloc] initWithTitle:[NSString stringWithFormat:@"Search %u Plugins…", numAvail]
+                                                            action:@selector(onSearchPlugins:)
+                                                     keyEquivalent:@"f"];
+        [searchItem setTarget:self];
+        [searchItem setEnabled:YES];
+        [_cachedPluginMenu addItem:searchItem];
+        [_cachedPluginMenu addItem:[NSMenuItem separatorItem]];
+
         // Format submenus: "AudioUnit", "VST3", "VST"
         NSMutableDictionary *formatMenus = [NSMutableDictionary dictionary];
         // Nested (Format -> Company) submenus
@@ -1684,7 +1692,7 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
         // Nested (Format -> Company -> Category) submenus
         NSMutableDictionary *categoryMenus = [NSMutableDictionary dictionary];
 
-        NSArray *formatOrder = @[@"AudioUnit", @"VST3", @"VST"];
+        NSArray *formatOrder = @[@"AudioUnit", @"VST3", @"CLAP", @"LV2", @"VST"];
         for (NSString *fmt in formatOrder) {
             NSMenu *fmtMenu = [[NSMenu alloc] initWithTitle:fmt];
             [fmtMenu setAutoenablesItems:NO];
@@ -1785,8 +1793,16 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
 }
 
 - (void)onSelectPlugin:(NSMenuItem *)sender {
+    [self addPluginAtIndex:(uint32_t)sender.tag title:sender.title];
+}
+
+- (void)onSearchPlugins:(id)sender {
+    [[OpenGridderPluginSearch sharedSearch] showForEditor:self];
+}
+
+// Load catalog entry `idx` into a new slot (from the menu or the search panel).
+- (void)addPluginAtIndex:(uint32_t)idx title:(NSString *)pluginTitle {
     if (!self.rust) return;
-    uint32_t idx = (uint32_t)sender.tag;
     NSWindow *win = self.window;
     NSRect winFrame = win ? [win frame] : NSZeroRect;
     int32_t posX = (int32_t)(winFrame.origin.x + winFrame.size.width + 10.0);
@@ -1797,7 +1813,7 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
 
     bool isLocal = og_native_is_server_local_mode(self.rust);
     if (!isLocal) {
-        NSString *title = sender.title ?: @"Remote Plugin";
+        NSString *title = pluginTitle ?: @"Remote Plugin";
         [[OpenGridderRemoteWindowController sharedController] showForPlugin:self.rust slotIndex:newSlot title:title];
     } else {
         [[OpenGridderRemoteWindowController sharedController] hide];
@@ -1868,6 +1884,218 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
     float val = std::max(0.0f, std::min(1.0f, (float)step * 0.25f));
     og_native_set_plugin_param(self.rust, slotIdx, paramIdx, val);
     [self setNeedsDisplay:YES];
+}
+
+@end
+
+
+#pragma mark - Plugin Search
+
+// A floating panel to find a plugin by typing (AudioGridder's plugin search window).
+// A separate window, not a menu, so the DAW does not swallow the keystrokes.
+@interface OpenGridderPluginSearchEntry : NSObject
+@property (nonatomic) uint32_t index;
+@property (nonatomic, copy) NSString *name, *company, *format, *category, *haystack;
+@end
+@implementation OpenGridderPluginSearchEntry
+@end
+
+@implementation OpenGridderPluginSearch {
+    __weak OpenGridderEditorView *_editor;
+    NSSearchField *_field;
+    NSTableView *_table;
+    NSTextField *_countLabel;
+    NSArray<OpenGridderPluginSearchEntry *> *_all;
+    NSArray<OpenGridderPluginSearchEntry *> *_shown;
+}
+
++ (instancetype)sharedSearch {
+    static OpenGridderPluginSearch *shared = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ shared = [[OpenGridderPluginSearch alloc] init]; });
+    return shared;
+}
+
+- (instancetype)init {
+    NSPanel *panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 560, 420)
+                                                styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                                                           NSWindowStyleMaskResizable | NSWindowStyleMaskUtilityWindow)
+                                                  backing:NSBackingStoreBuffered
+                                                    defer:NO];
+    panel.title = @"Add Plugin";
+    panel.level = NSFloatingWindowLevel;
+    panel.releasedWhenClosed = NO;
+    panel.hidesOnDeactivate = NO;
+    panel.becomesKeyOnlyIfNeeded = NO;
+    panel.minSize = NSMakeSize(360, 220);
+    if ((self = [super initWithWindow:panel])) {
+        NSView *content = panel.contentView;
+        _field = [[NSSearchField alloc] initWithFrame:NSMakeRect(10, 384, 540, 26)];
+        _field.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
+        _field.placeholderString = @"Search name, company, format…";
+        _field.delegate = self;
+        _field.sendsSearchStringImmediately = YES;
+        [content addSubview:_field];
+
+        NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(10, 30, 540, 346)];
+        scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        scroll.hasVerticalScroller = YES;
+        scroll.borderType = NSBezelBorder;
+        _table = [[NSTableView alloc] initWithFrame:scroll.bounds];
+        NSArray *columns = @[@[@"name", @"Plugin", @250], @[@"company", @"Company", @170], @[@"format", @"Format", @80]];
+        for (NSArray *spec in columns) {
+            NSTableColumn *column = [[NSTableColumn alloc] initWithIdentifier:spec[0]];
+            column.title = spec[1];
+            column.width = [spec[2] doubleValue];
+            [_table addTableColumn:column];
+        }
+        _table.dataSource = self;
+        _table.delegate = self;
+        _table.usesAlternatingRowBackgroundColors = YES;
+        _table.allowsEmptySelection = NO;
+        _table.target = self;
+        _table.doubleAction = @selector(addSelected:);
+        scroll.documentView = _table;
+        [content addSubview:scroll];
+
+        _countLabel = [NSTextField labelWithString:@""];
+        _countLabel.frame = NSMakeRect(10, 6, 540, 18);
+        _countLabel.autoresizingMask = NSViewWidthSizable | NSViewMaxYMargin;
+        _countLabel.textColor = [NSColor secondaryLabelColor];
+        _countLabel.font = [NSFont systemFontOfSize:11];
+        [content addSubview:_countLabel];
+    }
+    return self;
+}
+
+- (void)showForEditor:(OpenGridderEditorView *)editor {
+    _editor = editor;
+    NSMutableArray *entries = [NSMutableArray array];
+    NativePlugin *rust = editor.rust;
+    const uint32_t count = rust ? og_native_num_available_plugins(rust) : 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        char name[256] = {0}, idBuf[1024] = {0}, type[64] = {0}, company[128] = {0}, category[128] = {0};
+        if (!og_native_get_available_plugin_ext(rust, i, name, sizeof name, idBuf, sizeof idBuf, type, sizeof type,
+                                                company, sizeof company, category, sizeof category)) {
+            continue;
+        }
+        OpenGridderPluginSearchEntry *entry = [[OpenGridderPluginSearchEntry alloc] init];
+        entry.index = i;
+        entry.name = [NSString stringWithUTF8String:name] ?: @"";
+        entry.company = [NSString stringWithUTF8String:company] ?: @"";
+        entry.format = [NSString stringWithUTF8String:type] ?: @"";
+        entry.category = [NSString stringWithUTF8String:category] ?: @"";
+        entry.haystack = [[NSString stringWithFormat:@"%@ %@ %@ %@", entry.name, entry.company, entry.format, entry.category] lowercaseString];
+        [entries addObject:entry];
+    }
+    [entries sortUsingComparator:^NSComparisonResult(OpenGridderPluginSearchEntry *a, OpenGridderPluginSearchEntry *b) {
+        return [a.name localizedCaseInsensitiveCompare:b.name];
+    }];
+    _all = entries;
+    [self applyFilter];
+
+    NSWindow *host = editor.window;
+    if (host) {
+        NSRect frame = host.frame;
+        [self.window setFrameTopLeftPoint:NSMakePoint(NSMinX(frame) + 40, NSMaxY(frame) - 40)];
+    } else {
+        [self.window center];
+    }
+    [self.window makeKeyAndOrderFront:nil];
+    [NSApp activateIgnoringOtherApps:YES];
+    [self.window makeFirstResponder:_field];
+    [_field selectText:nil];
+}
+
+// Every typed word must appear in the name, company, format or category.
+// Names that start with the first word come first.
+- (void)applyFilter {
+    NSString *query = [_field.stringValue.lowercaseString stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    NSArray *terms = [query componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    terms = [terms filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]];
+    if (terms.count == 0) {
+        _shown = _all;
+    } else {
+        NSMutableArray *starts = [NSMutableArray array], *others = [NSMutableArray array];
+        for (OpenGridderPluginSearchEntry *entry in _all) {
+            BOOL match = YES;
+            for (NSString *term in terms) {
+                if ([entry.haystack rangeOfString:term].location == NSNotFound) { match = NO; break; }
+            }
+            if (!match) continue;
+            if ([entry.name.lowercaseString hasPrefix:terms.firstObject]) [starts addObject:entry];
+            else [others addObject:entry];
+        }
+        [starts addObjectsFromArray:others];
+        _shown = starts;
+    }
+    [_table reloadData];
+    if (_shown.count > 0) {
+        [_table selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
+        [_table scrollRowToVisible:0];
+    }
+    _countLabel.stringValue = [NSString stringWithFormat:@"%lu of %lu plugins — Return adds the selected one",
+                               (unsigned long)_shown.count, (unsigned long)_all.count];
+}
+
+- (void)controlTextDidChange:(NSNotification *)note {
+    [self applyFilter];
+}
+
+// Arrow keys move the selection while typing; Return adds; Esc closes.
+- (BOOL)control:(NSControl *)control textView:(NSTextView *)textView doCommandBySelector:(SEL)command {
+    NSInteger row = _table.selectedRow;
+    if (command == @selector(moveDown:)) {
+        if (row + 1 < (NSInteger)_shown.count) {
+            [_table selectRowIndexes:[NSIndexSet indexSetWithIndex:row + 1] byExtendingSelection:NO];
+            [_table scrollRowToVisible:row + 1];
+        }
+        return YES;
+    }
+    if (command == @selector(moveUp:)) {
+        if (row > 0) {
+            [_table selectRowIndexes:[NSIndexSet indexSetWithIndex:row - 1] byExtendingSelection:NO];
+            [_table scrollRowToVisible:row - 1];
+        }
+        return YES;
+    }
+    if (command == @selector(insertNewline:)) {
+        [self addSelected:nil];
+        return YES;
+    }
+    if (command == @selector(cancelOperation:)) {
+        if (_field.stringValue.length > 0) {
+            _field.stringValue = @"";
+            [self applyFilter];
+        } else {
+            [self.window orderOut:nil];
+        }
+        return YES;
+    }
+    return NO;
+}
+
+- (void)addSelected:(id)sender {
+    NSInteger row = _table.selectedRow;
+    if (row < 0 || row >= (NSInteger)_shown.count) return;
+    OpenGridderPluginSearchEntry *entry = _shown[(NSUInteger)row];
+    OpenGridderEditorView *editor = _editor;
+    [self.window orderOut:nil];
+    if (editor) {
+        [editor addPluginAtIndex:entry.index title:entry.name];
+    }
+}
+
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
+    return (NSInteger)_shown.count;
+}
+
+- (id)tableView:(NSTableView *)tableView objectValueForTableColumn:(NSTableColumn *)column row:(NSInteger)row {
+    if (row < 0 || row >= (NSInteger)_shown.count) return nil;
+    OpenGridderPluginSearchEntry *entry = _shown[(NSUInteger)row];
+    if ([column.identifier isEqualToString:@"company"]) return entry.company;
+    if ([column.identifier isEqualToString:@"format"]) return entry.format;
+    return entry.name;
 }
 
 @end

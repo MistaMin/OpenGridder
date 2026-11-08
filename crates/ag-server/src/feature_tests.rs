@@ -542,10 +542,18 @@ fn vst3_effect_is_not_a_copy_of_the_input() {
 fn hosted_format_changes_the_next_block(format: &str) {
     let mut session = Session::start(256, false);
     let list = plugin_list(&mut session);
-    let effect = plugins_of(&list).into_iter().find(|plugin| {
+    // Prefer OpenGrid's own plugins: the full system catalog leads with third-party
+    // plugins that pass audio through unchanged until they are authorised.
+    let effects: Vec<_> = plugins_of(&list).into_iter().filter(|plugin| {
         plugin.get("type").and_then(|value| value.as_str()) == Some(format)
             && plugin.get("isInstrument").and_then(|value| value.as_bool()) != Some(true)
-    }).unwrap_or_else(|| panic!("plugin list has no {format} effect: {list}"));
+    }).collect();
+    let effect = effects
+        .iter()
+        .find(|plugin| plugin.get("company").and_then(|value| value.as_str()) == Some("OpenGrid"))
+        .or_else(|| effects.first())
+        .cloned()
+        .unwrap_or_else(|| panic!("plugin list has no {format} effect: {list}"));
     let id = effect["id"].as_str().unwrap();
     assert_ne!(id, BUILTIN_GAIN_ID);
     let params = add_id(&mut session, id, "");

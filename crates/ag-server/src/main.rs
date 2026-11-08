@@ -13,6 +13,13 @@ use ag_server::{sandbox_chain_child, sandbox_plugin_child, serve_chain, serve_cl
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--scan-worker") {
+        ag_server::bundle_scan::worker_main();
+        return;
+    }
+    if args.iter().any(|arg| arg == "--scan-progress") {
+        ag_server::bundle_scan::PROGRESS.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     if args.iter().any(|arg| arg == "--version" || arg == "-v") {
         println!("OpenGridder Server {}", ag_server::build_label());
         return;
@@ -114,6 +121,8 @@ fn main() {
         println!("SCAN_COMPLETE:{}", serde_json::json!({"total": 0, "port": port}));
         let _ = std::io::stdout().flush();
     } else {
+        // The startup scan loads new or changed VST3/CLAP bundles in scan worker processes.
+        ag_server::bundle_scan::WORKERS.store(true, std::sync::atomic::Ordering::Relaxed);
         let plugins = ag_server::host::scan();
         for (i, p) in plugins.iter().enumerate() {
             println!(

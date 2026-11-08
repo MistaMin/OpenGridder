@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <dlfcn.h>
+#include <CoreFoundation/CoreFoundation.h>
 
 #include <lilv/lilv.h>
 #include <lv2/atom/atom.h>
@@ -713,13 +714,26 @@ LoadedFactory load_factory(const std::string& binary) {
     if (loaded.library == nullptr) {
         return loaded;
     }
+    // macOS VST3 modules get their own CFBundleRef in bundleEntry (they find their
+    // resources and set up their globals from it; Waves crashes in GetPluginFactory with
+    // NULL). The bundle is <bundle>/Contents/MacOS/<binary>. It stays loaded, like the module.
     using Entry = bool (*)(void*);
-    auto entry = reinterpret_cast<Entry>(dlsym(loaded.library, "ModuleEntry"));
-    if (entry == nullptr) {
-        entry = reinterpret_cast<Entry>(dlsym(loaded.library, "bundleEntry"));
-    }
+    auto entry = reinterpret_cast<Entry>(dlsym(loaded.library, "bundleEntry"));
     if (entry != nullptr) {
-        entry(nullptr);
+        const std::string bundle_path = std::filesystem::path(binary).parent_path().parent_path().parent_path().string();
+        CFURLRef url = CFURLCreateFromFileSystemRepresentation(
+            kCFAllocatorDefault, reinterpret_cast<const UInt8*>(bundle_path.c_str()), static_cast<CFIndex>(bundle_path.size()), true);
+        CFBundleRef bundle = url != nullptr ? CFBundleCreate(kCFAllocatorDefault, url) : nullptr;
+        if (url != nullptr) {
+            CFRelease(url);
+        }
+        if (!entry(bundle)) {
+            dlclose(loaded.library);
+            loaded.library = nullptr;
+            return loaded;
+        }
+    } else if (auto module_entry = reinterpret_cast<Entry>(dlsym(loaded.library, "ModuleEntry"))) {
+        module_entry(loaded.library);
     }
     using FactoryFn = Steinberg::IPluginFactory* (*)();
     auto get_factory = reinterpret_cast<FactoryFn>(dlsym(loaded.library, "GetPluginFactory"));
@@ -736,6 +750,31 @@ LoadedFactory load_factory(const std::string& binary) {
     return loaded;
 }
 
+// Class id as 32 uppercase hex digits, the form moduleinfo.json uses.
+std::string cid_hex(const Steinberg::TUID cid) {
+    static const char digits[] = "0123456789ABCDEF";
+    std::string text;
+    for (int i = 0; i < 16; ++i) {
+        const auto byte = static_cast<unsigned char>(cid[i]);
+        text += digits[byte >> 4];
+        text += digits[byte & 15];
+    }
+    return text;
+}
+
+// "vst3:<bundle>#<cid>" -> bundle and cid (empty when absent: the first effect class).
+void split_vst3_id(const char* id, std::string& bundle, std::string& cid) {
+    std::string text = id + 5;
+    const size_t hash = text.rfind('#');
+    if (hash != std::string::npos && text.size() - hash - 1 == 32) {
+        cid = text.substr(hash + 1);
+        bundle = text.substr(0, hash);
+    } else {
+        bundle = text;
+        cid.clear();
+    }
+}
+
 bool collect_vst3_bundle(const std::filesystem::path& bundle, std::vector<Catalog>& out) {
     if (skipped_name(bundle.filename().string())) {
         return false;
@@ -749,19 +788,33 @@ bool collect_vst3_bundle(const std::filesystem::path& bundle, std::vector<Catalo
         return false;
     }
     bool stored = false;
+    // The factory's vendor; a class's own vendor (PClassInfo2) wins when it has one.
+    char factory_vendor[64] = "";
+    Steinberg::PFactoryInfo factory_info{};
+    if (loaded.factory->getFactoryInfo(&factory_info) == Steinberg::kResultOk) {
+        copy_cstr(factory_vendor, sizeof factory_vendor, factory_info.vendor);
+    }
     Steinberg::IPluginFactory2* factory2 = nullptr;
     loaded.factory->queryInterface(Steinberg::IPluginFactory2::iid, reinterpret_cast<void**>(&factory2));
     const Steinberg::int32 count = loaded.factory->countClasses();
+    const bool debug = std::getenv("AG_SCAN_DEBUG") != nullptr;
+    if (debug) {
+        std::fprintf(stderr, "%s: %d classes\n", bundle.string().c_str(), static_cast<int>(count));
+    }
     for (Steinberg::int32 index = 0; index < count; ++index) {
         Steinberg::PClassInfo info{};
         if (loaded.factory->getClassInfo(index, &info) != Steinberg::kResultOk) {
             continue;
         }
+        if (debug) {
+            std::fprintf(stderr, "  class %d [%s] %s\n", static_cast<int>(index), info.category, info.name);
+        }
         if (std::strcmp(info.category, kVstAudioEffectClass) != 0) {
             continue;
         }
         bool instrument = false;
-        char vendor[64] = "VST3";
+        char vendor[64] = "";
+        copy_cstr(vendor, sizeof vendor, factory_vendor);
         if (factory2 != nullptr) {
             Steinberg::PClassInfo2 info2{};
             if (factory2->getClassInfo2(index, &info2) == Steinberg::kResultOk) {
@@ -774,7 +827,8 @@ bool collect_vst3_bundle(const std::filesystem::path& bundle, std::vector<Catalo
         Catalog item{};
         copy_cstr(item.name, sizeof item.name, info.name);
         copy_cstr(item.company, sizeof item.company, vendor);
-        const std::string id = std::string("vst3:") + bundle.string();
+        // Every effect class of the bundle, told apart by its class id (a bundle may hold several).
+        const std::string id = std::string("vst3:") + bundle.string() + "#" + cid_hex(info.cid);
         if (id.size() >= sizeof item.id) {
             continue;
         }
@@ -783,7 +837,6 @@ bool collect_vst3_bundle(const std::filesystem::path& bundle, std::vector<Catalo
         item.is_instrument = instrument ? 1 : 0;
         out.push_back(item);
         stored = true;
-        break;
     }
     if (factory2 != nullptr) {
         factory2->release();
@@ -793,28 +846,13 @@ bool collect_vst3_bundle(const std::filesystem::path& bundle, std::vector<Catalo
     return stored;
 }
 
-void collect_vst3(std::vector<Catalog>& out, int cap) {
-    const std::string root = home_dir().empty() ? std::string() : home_dir() + "/Library/Audio/Plug-Ins/VST3";
-    if (root.empty() || !std::filesystem::is_directory(root)) {
-        return;
-    }
-    const char* preferred[] = {"ADAA Tester.vst3", "Blue Channel.vst3", "Harmonic Compressor.vst3", "HybridEQ.vst3", "OpenPreamp.vst3"};
-    for (const char* name : preferred) {
-        if (static_cast<int>(out.size()) >= cap) {
-            return;
-        }
-        const std::filesystem::path bundle = std::filesystem::path(root) / name;
-        if (std::filesystem::is_directory(bundle)) {
-            collect_vst3_bundle(bundle, out);
-        }
-    }
-}
-
 Vst3Plugin* open_vst3(const char* id, float sample_rate, int max_block, int channels) {
     if (id == nullptr || std::strncmp(id, "vst3:", 5) != 0) {
         return nullptr;
     }
-    const std::filesystem::path bundle = id + 5;
+    std::string bundle_text, wanted_cid;
+    split_vst3_id(id, bundle_text, wanted_cid);
+    const std::filesystem::path bundle = bundle_text;
     const std::string binary = vst3_binary(bundle);
     if (binary.empty()) {
         return nullptr;
@@ -844,6 +882,9 @@ Vst3Plugin* open_vst3(const char* id, float sample_rate, int max_block, int chan
             continue;
         }
         if (std::strcmp(info.category, kVstAudioEffectClass) != 0) {
+            continue;
+        }
+        if (!wanted_cid.empty() && cid_hex(info.cid) != wanted_cid) {
             continue;
         }
         std::memcpy(cid, info.cid, sizeof cid);
@@ -1147,26 +1188,6 @@ bool collect_clap_bundle(const std::filesystem::path& bundle, std::vector<Catalo
     return stored;
 }
 
-void collect_clap(std::vector<Catalog>& out, int cap) {
-    const std::string roots[] = {
-        "/Library/Audio/Plug-Ins/CLAP",
-        home_dir().empty() ? std::string() : home_dir() + "/Library/Audio/Plug-Ins/CLAP"
-    };
-    for (const auto& root : roots) {
-        if (root.empty() || !std::filesystem::is_directory(root)) {
-            continue;
-        }
-        for (const auto& entry : std::filesystem::directory_iterator(root)) {
-            if (static_cast<int>(out.size()) >= cap) {
-                return;
-            }
-            if (entry.path().extension() == ".clap" && std::filesystem::is_directory(entry.path())) {
-                collect_clap_bundle(entry.path(), out);
-            }
-        }
-    }
-}
-
 ClapPlugin* open_clap(const char* id, float sample_rate, int max_block, int channels) {
     if (id == nullptr || std::strncmp(id, "clap:", 5) != 0) {
         return nullptr;
@@ -1322,9 +1343,10 @@ int ag_native_scan(AgCatalogItem* out, int cap) {
     std::lock_guard<std::mutex> lock(gate());
     if (!catalog_ready()) {
         std::vector<Catalog> items;
-        collect_lv2(items, std::numeric_limits<int>::max());  // lilv metadata only, no instances
-        collect_vst3(items, static_cast<int>(items.size()) + 8);
-        collect_clap(items, static_cast<int>(items.size()) + 8);
+        // lilv metadata only, no instances. VST3 and CLAP bundles must be loaded to be
+        // listed, so they are scanned in worker processes (src/bundle_scan.rs,
+        // ag_native_scan_bundle) where a crashing plugin cannot take the server down.
+        collect_lv2(items, std::numeric_limits<int>::max());
         catalog_cache() = std::move(items);
         catalog_ready() = true;
     }
@@ -1614,6 +1636,30 @@ void ag_native_editor_close(AgNative* raw) {
     if (instance->clap != nullptr) {
         instance->clap->close_editor();
     }
+}
+
+
+// Scan one .vst3 or .clap bundle in this process (a scan worker). Returns the number of
+// entries written; with out == nullptr, the number found.
+int ag_native_scan_bundle(const char* path, AgCatalogItem* out, int cap) {
+    if (path == nullptr) {
+        return 0;
+    }
+    std::vector<Catalog> items;
+    const std::filesystem::path bundle(path);
+    if (bundle.extension() == ".vst3") {
+        collect_vst3_bundle(bundle, items);
+    } else if (bundle.extension() == ".clap") {
+        collect_clap_bundle(bundle, items);
+    }
+    if (out == nullptr) {
+        return static_cast<int>(items.size());
+    }
+    const int count = std::min(cap, static_cast<int>(items.size()));
+    for (int index = 0; index < count; ++index) {
+        std::memcpy(&out[index], &items[static_cast<size_t>(index)], sizeof(Catalog));
+    }
+    return count;
 }
 
 }  // extern "C"
