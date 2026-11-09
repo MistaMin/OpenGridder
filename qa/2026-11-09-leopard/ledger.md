@@ -1,3 +1,8 @@
+> **Moved 2026-11-09:** the RTAS/TDM source, firmware, C/Rust legacy clients and the
+> Leopard workflow now live in the private `MistaMin/OpenGridder-Legacy-Wrappers`
+> repository because the RTAS/TDM binaries are freeware, not open source. This
+> ledger records the pre-split build 44 evidence; paths below are historical.
+
 # Leopard RTAS/TDM BETA scope
 
 Source: user request, build 38 (31f5f6f), legacy/client-core and legacy/native.

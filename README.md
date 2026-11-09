@@ -1,29 +1,72 @@
-# AudioGridder Open
+# OpenGridder
 
-Active rewrite of AudioGridder on OpenPluginSDK (`/Volumes/Developer 2/Dependencies/OpenPluginSDK`). Version `2.0.0-alpha.1`. The shipping JUCE fork stays at `../audiogridder` (1.3.5) until this tree is qualified in a DAW.
+OpenGridder offloads audio plug-ins to another Mac on the network and carries
+their audio and editors back into the DAW. This is the no-JUCE Rust rewrite;
+the current pre-release is **0.1.1-alpha**. The previous 1.2.1-era project is
+archived as **Old OpenGridder** (branch `old-opengridder` in this repository and
+the local `old-opengridder` tree).
 
-This alpha is a Rust workspace:
+Server, plug-in formats and the legacy RTAS/TDM bundles are stamped with the
+same product version and build number so a release is identifiable across every
+format.
+
+## Crates
 
 | Crate | Role |
-|---|---|
-| `ag-plugin` | Insert. Input gain, output gain, drive, wet/dry, bypass, latency profiles, VU. Built as an `openplugin::Plugin`. |
-| `ag-protocol` | AudioGridder wire protocol v13 as explicit little-endian bytes. |
-| `ag-server` | One-socket host. It runs one OpenPluginSDK gain. It does not load AU or VST3 plugins. |
-| `ag-legacy` | Separate binary. Q1.23 PCM and a 64-frame / 32-slot / 16-block TDM schedule. Not a `.dpm`. |
+| --- | --- |
+| `ag-plugin` | Plug-in instance: gains, drive, wet/dry, bypass, latency profiles, state, editor model |
+| `ag-protocol` | Wire protocol v13 as explicit little-endian bytes |
+| `ag-server` | Plugin host, network server, isolated chains and AU/VST3 hosting |
+| `ag-formats` | AU, VST3, AAX, CLAP and LV2 entry points |
+| `ag-tray` | Menu bar companion for the server |
+| `ag-legacy` | TDM transport contract (Q1.23 PCM, timeslots, schedule). Not a `.dpm`; no Avid SDK |
 
 ```sh
 cargo test --workspace
-cargo tree -p ag-server
+cargo build --release -p ag-server -p ag-formats -p ag-tray
 ```
 
-`ag-server` does not depend on `ag-legacy`. The legacy symbol `ag_legacy_pcm_api_version` is in `target/debug/ag-legacy` only.
+`ag-server` does not depend on the Avid SDK and does not link `ag-legacy`.
 
-## What this alpha does not do
+## Bundles and release scripts
 
-- OpenPluginSDK's CLAP, VST3, AU, and AAX adapters do not export a plugin entry point yet, so nothing here is a bundle a DAW can load. The format SDKs are on `/Volumes/Developer 2/SDKs` (AAX 2.8.1, AudioUnitSDK, clap-sdk, PT9 RTAS/TDM) and `/Volumes/Developer 2/Dependencies/clap-wrapper`.
-- The server does not scan or host third-party plugins yet.
-- The editor is a draw list. GoodLookinDri, the window-side toolkit, is at `/Volumes/Developer 2/Dependencies/GoodLookinDri`.
-- The legacy crate does not link the PT9 SDK yet. That SDK is `/Volumes/Developer 2/SDKs/PT_90_PlugInSDK-AAX-Tools`. Prebuilt 10.7/10.8 deps are in `/Volumes/Developer 2/Dependencies/audiogridder-deps`. No Pro Tools qualification has been run.
-- Screen streaming, the four-socket session, and sandboxing are not in this alpha. The handshake answer uses the listen port, and that same socket carries one audio block.
+```sh
+bash scripts/build-all-bundles.sh       # AU, VST3, AAX, CLAP, LV2, Server.app
+bash scripts/package-release-macos.sh   # signed installer, manifest, notices
+```
 
-Protocol v13 has no authentication. It is for a trusted LAN.
+AAX is 64-bit only. No 32-bit AAX is built for Pro Tools 10. AAX, AU and VST3
+loading in real hosts is still being qualified; this is a BETA.
+
+## Legacy RTAS/TDM
+
+The RTAS and TDM plug-ins are not built from this repository. They live in the
+private, closed-source integration layer
+`MistaMin/OpenGridder-Legacy-Wrappers`, because they compile against the
+licensed Avid SDK. The compiled RTAS/TDM bundles are freeware, not open source;
+their source is not published. No Avid SDK code is included in this repository
+or in the binaries. See [LEGACY.md](LEGACY.md).
+
+The private wrappers tree also contains the ppc/i386 OS X 10.5.8 Leopard build,
+the DSP56321 firmware and its differential emulator checks. Those builds use
+the same `OG_VERSION`, `OG_BUILD_NUMBER`, `OG_GIT_COMMIT` and `OG_BUILD_DATE`
+values as this project so every format shows one release identity.
+
+## Status
+
+- BETA, not qualified by Avid or by any DAW vendor.
+- Pro Tools AAX loading, PowerPC/Leopard execution and HD Accel DMA/timing are
+  not yet verified on hardware.
+- No 32-bit AAX; no RTAS/TDM source in this repository.
+- Protocol v13 has no authentication. Use it on a trusted studio LAN only.
+
+## Licensing
+
+OpenGridder source in this repository is MIT-licensed (see `LICENSE` and
+`COPYING`) unless a file says otherwise. Externally supplied SDKs keep their own
+licences. RTAS/TDM binaries are freeware and their adapter source is private and
+proprietary; see [LEGACY.md](LEGACY.md) and
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+Avid, Pro Tools, AAX, RTAS, TDM and HD Accel are trademarks of Avid Technology,
+Inc. This project is not affiliated with or endorsed by Avid.

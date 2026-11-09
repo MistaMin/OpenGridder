@@ -4,7 +4,8 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 og_root="$(cd "$script_dir/.." && pwd)"
-VER="0.1.1-alpha"
+source "$script_dir/build-info.sh"
+VER="$OG_VERSION"
 RELEASE_DATE="$(date +%Y-%m-%d)"
 SKILL_DIR="/Users/marcosdeida/.gemini/config/skills/Make-Plugin-Release"
 

@@ -101,49 +101,5 @@ jobs:
           name: OpenGridder-linux-x86_64
           path: dist/*-linux-x86_64.tar.gz*
 
-  # -------------------------------------------------------------
-  # Legacy RTAS/TDM crate and DSP56300 firmware harness (no ppc/Leopard bundle here; see
-  # leopard-ppc-beta.yml for the self-hosted PowerPC + Intel OS X 10.5 build).
-  # -------------------------------------------------------------
-  legacy-rtas-tdm:
-    name: Legacy RTAS/TDM harness (i386 host)
-    runs-on: macos-13
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust 1.70.0 and the i686 target
-        run: |
-          rustup toolchain install 1.70.0 --profile minimal
-          rustup default 1.70.0
-          rustup target add i686-apple-darwin || true
-
-      - name: Build Legacy Crate & Binaries (RTAS & TDM entries)
-        run: |
-          cargo build --manifest-path crates/ag-legacy/Cargo.toml --release --bin rtas --bin tdm
-          cargo test --manifest-path crates/ag-legacy/Cargo.toml
-
-      - name: Run DSP56300 Firmware Offload Verification
-        run: |
-          cargo test --manifest-path legacy/firmware/Cargo.toml
-
-      - name: Package Legacy RTAS & TDM Deliverables
-        run: |
-          VER=$(cat VERSION 2>/dev/null || echo "0.1.1-alpha")
-          PKG_NAME="OpenGridder-${VER}-legacy-rtas-tdm"
-          mkdir -p "dist/${PKG_NAME}/bin"
-          mkdir -p "dist/${PKG_NAME}/firmware"
-
-          cp target/release/rtas "dist/${PKG_NAME}/bin/OpenGridderRTAS" 2>/dev/null || cp crates/ag-legacy/target/release/rtas "dist/${PKG_NAME}/bin/" 2>/dev/null || true
-          cp target/release/tdm "dist/${PKG_NAME}/bin/OpenGridderTDM" 2>/dev/null || cp crates/ag-legacy/target/release/tdm "dist/${PKG_NAME}/bin/" 2>/dev/null || true
-          cp legacy/firmware/firmware/* "dist/${PKG_NAME}/firmware/" 2>/dev/null || true
-          cp legacy/PROVENANCE.md "dist/${PKG_NAME}/" 2>/dev/null || true
-
-          tar -C dist -czf "dist/${PKG_NAME}.tar.gz" "${PKG_NAME}"
-          shasum -a 256 "dist/${PKG_NAME}.tar.gz" > "dist/${PKG_NAME}.tar.gz.sha256"
-
-      - name: Upload legacy harness artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: OpenGridder-legacy-rtas-tdm
-          path: dist/*-legacy-rtas-tdm.tar.gz*
+  # RTAS/TDM are built from the private, closed-source OpenGridder-Legacy-Wrappers
+  # repository against the licensed Avid SDK. See LEGACY.md.

@@ -44,7 +44,7 @@ cp -R "$og_root/crates/ag-formats/bundle/AudioGridder.aaxplugin" "$STAGE/AAX/Ope
 mkdir -p "$STAGE/AAX/OpenGridder.aaxplugin/Contents/MacOS"
 cp "$DYLIB" "$STAGE/AAX/OpenGridder.aaxplugin/Contents/MacOS/OpenGridder"
 ln -sf "OpenGridder" "$STAGE/AAX/OpenGridder.aaxplugin/Contents/MacOS/AudioGridder"
-cat << 'PLIST' > "$STAGE/AAX/OpenGridder.aaxplugin/Contents/Info.plist"
+cat << PLIST > "$STAGE/AAX/OpenGridder.aaxplugin/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -69,6 +69,14 @@ cat << 'PLIST' > "$STAGE/AAX/OpenGridder.aaxplugin/Contents/Info.plist"
     <string>0.1.1-alpha</string>
     <key>CFBundleVersion</key>
     <string>0.1.1-alpha</string>
+    <key>OGBuild</key>
+    <string>${OG_VERSION} build ${OG_BUILD_NUMBER} ${OG_GIT_COMMIT} ${OG_BUILD_DATE}</string>
+    <key>OGBuildNumber</key>
+    <string>${OG_BUILD_NUMBER}</string>
+    <key>OGBuildClass</key>
+    <string>modern</string>
+    <key>OGMinOS</key>
+    <string>11.0</string>
     <key>CSResourcesFileMapped</key>
     <true/>
 </dict>

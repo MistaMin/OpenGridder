@@ -1,22 +1,18 @@
 #!/usr/bin/env bash
+# Bump the OpenGridder product version in the version file, workspace and source strings.
+#   scripts/bump-version.sh 0.1.2-alpha
 set -euo pipefail
-
-NEW_VER="0.1.1-alpha"
-echo "Bumping version to $NEW_VER..."
-
-echo "$NEW_VER" > /Volumes/Developer/OpenGrid/audiogridder-open/VERSION
-
-sed -i '' 's/version = "0.1.0-alpha"/version = "0.1.1-alpha"/g' /Volumes/Developer/OpenGrid/audiogridder-open/Cargo.toml
-sed -i '' 's/"0.1.0-alpha"/"0.1.1-alpha"/g' /Volumes/Developer/OpenGrid/audiogridder-open/crates/ag-plugin/src/lib.rs
-sed -i '' 's/"0.1.0-alpha"/"0.1.1-alpha"/g' /Volumes/Developer/OpenGrid/audiogridder-open/crates/ag-server/src/lib.rs
-sed -i '' 's/"0.1.0-alpha"/"0.1.1-alpha"/g' /Volumes/Developer/OpenGrid/audiogridder-open/crates/ag-server/src/main.rs
-sed -i '' 's/"0.1.0-alpha"/"0.1.1-alpha"/g' /Volumes/Developer/OpenGrid/audiogridder-open/crates/ag-server/src/menu.rs
-sed -i '' 's/"0.1.0-alpha"/"0.1.1-alpha"/g' /Volumes/Developer/OpenGrid/audiogridder-open/crates/ag-server/src/mdns.rs
-sed -i '' 's/"0.1.0-alpha"/"0.1.1-alpha"/g' /Volumes/Developer/OpenGrid/audiogridder-open/crates/ag-tray/src/main.rs
-sed -i '' 's/"0.1.0-alpha"/"0.1.1-alpha"/g' /Volumes/Developer/OpenGrid/audiogridder-open/crates/ag-server/native/host.cpp
-sed -i '' 's/0.1.0-alpha/0.1.1-alpha/g' /Volumes/Developer/OpenGrid/audiogridder-open/.github/workflows/crossplatform-legacy.yml
-
-echo "Updated files. Updating Cargo.lock..."
-cd /Volumes/Developer/OpenGrid/audiogridder-open
-cargo check --workspace
-echo "Version bumped to $NEW_VER successfully."
+new="${1:?usage: bump-version.sh <version>}"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+old="$(tr -d '[:space:]' < "$root/VERSION")"
+test -n "$old"
+test "$new" != "$old"
+echo "Bumping OpenGridder $old -> $new"
+printf '%s\n' "$new" > "$root/VERSION"
+files="$(git -C "$root" grep -l -F "$old" -- Cargo.toml crates scripts README.md LEGACY.md 2>/dev/null || true)"
+for file in $files; do
+    sed -i '' "s|$old|$new|g" "$root/$file"
+done
+echo "Updated:"
+printf '%s\n' "$files"
+echo "Run cargo build/test once so Cargo.lock records the workspace version."

@@ -1,4 +1,4 @@
-// Adapted from the archived MIT OpenGridder-TDM-Emulator. See legacy/PROVENANCE.md.
+// Adapted from the archived MIT OpenGridder-TDM-Emulator. See LEGACY.md; the source is now in the private legacy wrappers repository.
 use crate::pcm::Pcm24;
 
 /// Configurable frame-major timeslot fabric. All slot numbers are abstract indices,
