@@ -58,7 +58,7 @@ static GAIN_PARAMS: [ParamInfo; 1] = [ParamInfo::new("gain", "Gain", -24.0, 24.0
 
 static GAIN_INFO: PluginInfo = PluginInfo {
     id: "com.opengrid.audiogridder.hostgain",
-    name: "AudioGridder Host Gain",
+    name: "OpenGridder Host Gain",
     vendor: "OpenGrid",
     url: "https://opengrid.studio",
     email: "contact@mistamin.com",

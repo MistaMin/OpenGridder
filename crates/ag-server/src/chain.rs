@@ -755,7 +755,7 @@ impl PluginChain {
             self.push_status(self.slots.len() - 1, true, "");
             let instances = self.slots.last().map(Slot::channel_instances).unwrap_or(1);
             return self.added_reply(
-                "AudioGridder Host Gain",
+                "OpenGridder Host Gain",
                 false,
                 true,
                 builtin_params(self.slots.last().unwrap()),
@@ -1037,7 +1037,7 @@ impl PluginChain {
 
     fn catalog(&self) -> serde_json::Value {
         let mut plugins = vec![serde_json::json!({
-            "name": "AudioGridder Host Gain",
+            "name": "OpenGridder Host Gain",
             "company": "OpenGrid",
             "id": BUILTIN_GAIN_ID,
             "id2": BUILTIN_GAIN_ID,

@@ -1496,7 +1496,7 @@ mod tests {
         assert_eq!(ty, ADD_PLUGIN_RESULT);
         let result = command::read_json_payload(&body).unwrap();
         assert_eq!(result["success"], true);
-        assert_eq!(result["name"], "AudioGridder Host Gain");
+        assert_eq!(result["name"], "OpenGridder Host Gain");
         let (ty, _) = read_cmd(&mut command).unwrap();
         assert_eq!(ty, PRESETS);
         let (ty, _) = read_cmd(&mut command).unwrap();

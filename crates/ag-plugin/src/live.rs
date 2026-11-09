@@ -734,7 +734,7 @@ mod tests {
                 ..HandshakeRequest::default()
             },
             saved: vec![LoadedSlot {
-                name: "AudioGridder Host Gain".into(),
+                name: "OpenGridder Host Gain".into(),
                 id: crate::BUILTIN_GAIN_ID.into(),
                 settings: "6".into(),
                 layout: "Stereo".into(),
