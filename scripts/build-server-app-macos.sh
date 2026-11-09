@@ -68,7 +68,9 @@ if otool -L "$og_app_dest/Contents/MacOS/OpenGridderServer-bin" | grep -q '/opt/
 fi
 echo "Bundled $(printf '%s' "$og_bundle_libs" | grep -c .) libraries into Contents/Frameworks"
 
+OG_LABEL="$OG_VERSION build $OG_BUILD_NUMBER $OG_GIT_COMMIT $OG_BUILD_DATE"
 sed -e "s|@OG_VERSION@|$OG_VERSION|g" \
+    -e "s|@OG_BUILD@|$OG_LABEL|g" \
     -e "s|@OG_BUILD_NUMBER@|$OG_BUILD_NUMBER|g" \
     -e "s|@OG_GIT_COMMIT@|$OG_GIT_COMMIT|g" \
     -e "s|@OG_BUILD_DATE@|$OG_BUILD_DATE|g" \

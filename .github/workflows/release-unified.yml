@@ -1,0 +1,108 @@
+name: OpenGridder Unified macOS Release
+
+# Modern macOS release on the private self-hosted signing runner. Builds the server,
+# the AU/VST3/AAX/CLAP/LV2 bundles and the standalone OpenGridder Server.app from this
+# repository, then tests the staged bundles against one release identity.
+#
+# RTAS/TDM are deliberately NOT built here. They compile against the separately licensed
+# Avid RTAS/TDM SDK and are built by the private OpenGridder-Legacy-Wrappers workflow,
+# which consumes the same OG_VERSION / OG_BUILD_NUMBER / OG_GIT_COMMIT identity. No SDK
+# sources or binaries, no application source and no RTAS/TDM bundles are uploaded by
+# this job: only the staged modern release images leave the runner.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version stamped into every modern format
+        required: false
+        default: 0.1.1-alpha
+        type: string
+      build_number:
+        description: Release build number stamped into every modern format
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opengridder-release-unified
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Modern macOS release (ARM64)
+    runs-on: [self-hosted, macOS, ARM64, opengridder-aax-release]
+    timeout-minutes: 90
+    env:
+      # build-info.sh keeps values that are already exported, so this identity is stamped
+      # into the server, every format bundle and Server.app instead of being re-derived.
+      OG_VERSION: ${{ inputs.version }}
+      OG_BUILD_NUMBER: ${{ inputs.build_number }}
+      OG_GIT_COMMIT: ${{ github.sha }}
+      # External SDK locations come from repository variables on the self-hosted runner
+      # and are optional: without them the native builds use the SDKs installed locally.
+      OPENGRIDDER_VST3_SDK: ${{ vars.OPENGRIDDER_VST3_SDK }}
+      AAX_SDK_ROOT: ${{ vars.AAX_SDK_ROOT || vars.OPENGRIDDER_AAX_SDK_ROOT }}
+    steps:
+      - name: Checkout repository with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release identity and external SDKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OG_VERSION"
+          test -n "$OG_BUILD_NUMBER"
+
+          # Export only non-empty SDK locations. An empty AAX_SDK_ROOT would shadow the
+          # SDK paths that crates/ag-formats/build.rs falls back to on this runner.
+          if [ -n "${OPENGRIDDER_VST3_SDK:-}" ]; then
+            test -d "$OPENGRIDDER_VST3_SDK/pluginterfaces"
+            # crates/ag-formats/build.rs compiles the VST3 interface against VST3_SDK_ROOT.
+            echo "VST3_SDK_ROOT=$OPENGRIDDER_VST3_SDK" >> "$GITHUB_ENV"
+          else
+            echo "OPENGRIDDER_VST3_SDK is not configured; using the local VST3 SDK." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -n "${AAX_SDK_ROOT:-}" ]; then
+            test -d "$AAX_SDK_ROOT/Interfaces"
+          else
+            echo "AAX_SDK_ROOT is not configured; using the local AAX SDK." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          {
+            echo "### OpenGridder $OG_VERSION"
+            echo ""
+            echo "- build number: \`$OG_BUILD_NUMBER\`"
+            echo "- commit: \`$OG_GIT_COMMIT\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build, stage and sign modern macOS bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep the build's local SDK fallbacks when a repository variable is absent.
+          [ -n "${OPENGRIDDER_VST3_SDK:-}" ] || unset OPENGRIDDER_VST3_SDK
+          [ -n "${AAX_SDK_ROOT:-}" ] || unset AAX_SDK_ROOT
+          bash scripts/build-all-bundles.sh
+
+      - name: Test workspace libraries
+        shell: bash
+        run: cargo test --workspace --locked --lib
+
+      - name: Test staged plugin formats
+        shell: bash
+        run: cargo test -p ag-plugin --test formats --locked
+
+      # Upload only the staged release images: plug-in bundles and Server.app. The SDKs,
+      # the build tree, application source and any RTAS/TDM output stay on the runner.
+      - name: Upload modern release bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenGridder-${{ inputs.version }}-macos-arm64-build-${{ inputs.build_number }}
+          path: build/release/OpenGridder_artefacts/Release/
+          if-no-files-found: error
+          retention-days: 14

@@ -22,6 +22,14 @@
     <string>@OG_VERSION@</string>
     <key>CFBundleVersion</key>
     <string>@OG_BUILD_NUMBER@</string>
+    <key>OGBuild</key>
+    <string>@OG_BUILD@</string>
+    <key>OGBuildNumber</key>
+    <string>@OG_BUILD_NUMBER@</string>
+    <key>OGBuildClass</key>
+    <string>modern</string>
+    <key>OGMinOS</key>
+    <string>11.0</string>
     <key>OGGitCommit</key>
     <string>@OG_GIT_COMMIT@</string>
     <key>OGBuildDate</key>

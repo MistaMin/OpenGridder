@@ -1,105 +1,86 @@
-name: OpenGridder Cross-Platform & Legacy Builds
+# Historical path: this file used to build Windows and Linux on GitHub-hosted
+# runners and carried the RTAS/TDM job. Only the self-hosted macOS runner can
+# build this workspace: Cargo.toml and crates/ag-formats/Cargo.toml link
+# OpenPluginSDK and GoodLookinDri by absolute macOS path
+# ("/Volumes/Developer 2/..."), and the licensed Avid SDK / RTAS/TDM build moved
+# to the private OpenGridder-Legacy-Wrappers repository (see LEGACY.md). The
+# Windows, Linux and legacy jobs were removed rather than left permanently red.
+name: OpenGridder macOS ARM64
 
 on:
   workflow_dispatch:
   push:
     tags: ["v*"]
-    branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  # -------------------------------------------------------------
-  # Windows x86_64 Build (VST3, CLAP, LV2, Standalone Server/Tray)
-  # -------------------------------------------------------------
-  windows:
-    name: Windows x86_64
-    runs-on: windows-latest
+  macos:
+    name: macOS ARM64 (self-hosted)
+    runs-on: [self-hosted, macOS, ARM64, opengridder-aax-release]
+    timeout-minutes: 60
+
     steps:
-      - name: Checkout repository
+      - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # scripts/build-info.sh derives the build number from the full history.
+          fetch-depth: 0
 
-      - name: Install stable Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build Windows binaries
-        shell: pwsh
+      - name: Show toolchain
         run: |
-          cargo build --release --locked
+          cargo --version
+          rustc --version
+          sw_vers
 
-      - name: Package Windows assets
-        shell: pwsh
+      - name: Check local Cargo dependencies
         run: |
-          $ver = if (Test-Path "VERSION") { (Get-Content "VERSION").Trim() } else { "0.1.1-alpha" }
-          $pkgName = "OpenGridder-$ver-windows-x86_64"
-          New-Item -ItemType Directory -Force -Path "dist/$pkgName/plugins"
-          New-Item -ItemType Directory -Force -Path "dist/$pkgName/bin"
+          set -euo pipefail
+          for manifest in \
+            "/Volumes/Developer 2/Dependencies/OpenPluginSDK/crates/openplugin/Cargo.toml" \
+            "/Volumes/Developer 2/Dependencies/GoodLookinDri/shell/Cargo.toml"; do
+            if [ ! -f "$manifest" ]; then
+              echo "Missing local Cargo dependency: $manifest" >&2
+              echo "Run this job on the macOS build machine that hosts the OpenPluginSDK and GoodLookinDri checkouts." >&2
+              exit 1
+            fi
+          done
 
-          if (Test-Path "target/release/ag_formats.dll") {
-            Copy-Item "target/release/ag_formats.dll" "dist/$pkgName/plugins/OpenGridder.vst3"
-            Copy-Item "target/release/ag_formats.dll" "dist/$pkgName/plugins/OpenGridder.clap"
-          }
-          if (Test-Path "target/release/ag-server.exe") {
-            Copy-Item "target/release/ag-server.exe" "dist/$pkgName/bin/OpenGridderServer.exe"
-          }
-          if (Test-Path "target/release/ag-tray.exe") {
-            Copy-Item "target/release/ag-tray.exe" "dist/$pkgName/bin/OpenGridderTray.exe"
-          }
+      - name: Test workspace libraries
+        run: cargo test --workspace --locked --lib
 
-          Get-ChildItem -Path "README.md", "COPYING", "VERSION" -ErrorAction SilentlyContinue | Copy-Item -Destination "dist/$pkgName/"
-          Compress-Archive -Path "dist/$pkgName" -DestinationPath "dist/$pkgName.zip"
-          (Get-FileHash -Algorithm SHA256 "dist/$pkgName.zip").Hash | Out-File -FilePath "dist/$pkgName.zip.sha256"
+      # scripts/build-all-bundles.sh is a release step: it signs AAX with PACE
+      # Eden through a physical iLok and signs every bundle with the Developer ID
+      # keychain. CI only compiles and uploads the outputs; run the bundle and
+      # packaging scripts on the release machine when signing material is ready.
+      - name: Build release outputs
+        run: cargo build --release --locked -p ag-server -p ag-formats -p ag-tray
 
-      - name: Upload Windows Artifact
+      - name: Record build identity
+        run: |
+          set -euo pipefail
+          source scripts/build-info.sh
+          mkdir -p dist
+          {
+            echo "version: $OG_VERSION"
+            echo "build: $OG_BUILD_NUMBER"
+            echo "commit: $OG_GIT_COMMIT"
+            echo "date: $OG_BUILD_DATE"
+          } | tee dist/BUILD-INFO.txt
+
+      - name: Upload compiled outputs and notices
         uses: actions/upload-artifact@v4
         with:
-          name: OpenGridder-windows-x86_64
-          path: dist/*-windows-x86_64.zip*
-
-  # -------------------------------------------------------------
-  # Linux x86_64 Build (VST3, CLAP, LV2, Standalone Server/Tray)
-  # -------------------------------------------------------------
-  linux:
-    name: Linux x86_64
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev libjack-jackd2-dev pkg-config
-
-      - name: Install stable Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build Linux binaries
-        run: |
-          cargo build --release --locked
-
-      - name: Package Linux assets
-        run: |
-          VER=$(cat VERSION 2>/dev/null || echo "0.1.1-alpha")
-          PKG_NAME="OpenGridder-${VER}-linux-x86_64"
-          mkdir -p "dist/${PKG_NAME}/plugins"
-          mkdir -p "dist/${PKG_NAME}/bin"
-
-          cp target/release/libag_formats.so "dist/${PKG_NAME}/plugins/OpenGridder.vst3" 2>/dev/null || true
-          cp target/release/libag_formats.so "dist/${PKG_NAME}/plugins/OpenGridder.clap" 2>/dev/null || true
-          cp target/release/ag-server "dist/${PKG_NAME}/bin/OpenGridderServer" 2>/dev/null || true
-          cp target/release/ag-tray "dist/${PKG_NAME}/bin/OpenGridderTray" 2>/dev/null || true
-          cp README.md COPYING VERSION "dist/${PKG_NAME}/" 2>/dev/null || true
-
-          tar -C dist -czf "dist/${PKG_NAME}.tar.gz" "${PKG_NAME}"
-          sha256sum "dist/${PKG_NAME}.tar.gz" > "dist/${PKG_NAME}.tar.gz.sha256"
-
-      - name: Upload Linux Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: OpenGridder-linux-x86_64
-          path: dist/*-linux-x86_64.tar.gz*
-
-  # RTAS/TDM are built from the private, closed-source OpenGridder-Legacy-Wrappers
-  # repository against the licensed Avid SDK. See LEGACY.md.
+          name: opengridder-macos-arm64-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            target/release/ag-server
+            target/release/ag-tray
+            target/release/libag_formats.dylib
+            dist/BUILD-INFO.txt
+            COPYING
+            LICENSE
+            THIRD_PARTY_LICENSES.md
+            VERSION
