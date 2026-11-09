@@ -28,6 +28,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # build number is the commit count
 
       - name: Locate private local SDKs and assembler bottle
         shell: bash
