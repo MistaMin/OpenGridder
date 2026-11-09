@@ -50,8 +50,8 @@ jobs:
             echo "Using the OpenGridder Server already listening on 127.0.0.1:55076"
           else
             cargo build --release --locked -p ag-server
-            target/release/ag-server --id 20 > target/leopard-test-server.log 2>&1 &
-            echo "$!" > target/leopard-test-server.pid
+            target/release/ag-server --id 20 > "$RUNNER_TEMP/leopard-test-server.log" 2>&1 &
+            echo "$!" > "$RUNNER_TEMP/leopard-test-server.pid"
             for _ in $(seq 1 120); do
               if (echo > /dev/tcp/127.0.0.1/55076) 2>/dev/null; then break; fi
               sleep 1
@@ -65,9 +65,10 @@ jobs:
           OPENGRIDDER_TEST_ADDR: 127.0.0.1:55076
         run: |
           set -euo pipefail
-          bash legacy/native/scripts/build-leopard-release.sh 2>&1 | tee target/leopard-build.log
+          log="$RUNNER_TEMP/leopard-build.log"
+          bash legacy/native/scripts/build-leopard-release.sh 2>&1 | tee "$log"
           # A truncated log must not hide a failed build.
-          ! grep -q 'RESULT: FAILED' target/leopard-build.log
+          ! grep -q 'RESULT: FAILED' "$log"
 
       - name: Upload only the signed package and checksums
         uses: actions/upload-artifact@v4
@@ -81,6 +82,6 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if [ -f target/leopard-test-server.pid ]; then
-            kill "$(cat target/leopard-test-server.pid)" 2>/dev/null || true
+          if [ -f "$RUNNER_TEMP/leopard-test-server.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/leopard-test-server.pid")" 2>/dev/null || true
           fi
