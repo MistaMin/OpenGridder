@@ -1003,7 +1003,7 @@ fn write_screen(socket: &mut TcpStream, width: i32, height: i32, pixels: &[u8]) 
 fn handle_unlocked(chain: &Arc<Mutex<PluginChain>>, message_type: i32, body: &[u8]) -> Vec<(i32, Vec<u8>)> {
     let started = std::time::Instant::now();
     let replies = handle_unlocked_inner(chain, message_type, body);
-    if started.elapsed() > Duration::from_millis(50) && !matches!(message_type, command::EDIT_PLUGIN | command::ADD_PLUGIN) {
+    if started.elapsed() > Duration::from_millis(50) && !matches!(message_type, command::EDIT_PLUGIN | command::ADD_PLUGIN | command::HIDE_PLUGIN) {
         eprintln!("ag-server: command {message_type} held the chain for {:.0} ms", started.elapsed().as_secs_f64() * 1000.0);
     }
     replies
@@ -1027,6 +1027,13 @@ fn handle_unlocked_inner(chain: &Arc<Mutex<PluginChain>>, message_type: i32, bod
                 chain.preload(instances, true);
             }
             chain.handle(message_type, body)
+        }
+        command::HIDE_PLUGIN => {
+            let window = chain.lock().expect("chain").take_window();
+            if window != 0 {
+                crate::ui::close(window);
+            }
+            chain.lock().expect("chain").handle(message_type, body)
         }
         command::GET_PLUGIN_SETTINGS => {
             let target = chain.lock().expect("chain").settings_target(body);

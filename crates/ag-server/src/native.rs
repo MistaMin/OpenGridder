@@ -7,6 +7,7 @@ use std::os::raw::c_int;
 use serde_json::{json, Value};
 
 use crate::host::{CatalogPlugin, EditorFrame, Hosted};
+use ag_protocol::PositionInfo;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -30,6 +31,7 @@ unsafe extern "C" {
     fn ag_native_set_param(raw: *mut AgNative, index: c_int, normalized: f32) -> c_int;
     fn ag_native_get_param(raw: *mut AgNative, index: c_int) -> f32;
     fn ag_native_process(raw: *mut AgNative, audio: *mut *mut f32, channels: c_int, frames: c_int);
+    fn ag_native_set_transport(raw: *mut AgNative, bpm: f64, numerator: c_int, denominator: c_int, samples: i64, ppq: f64, playing: c_int);
 }
 
 pub fn scan() -> Vec<CatalogPlugin> {
@@ -185,6 +187,23 @@ impl Hosted for NativePlugin {
 
     fn oversampling_latency(&self) -> i32 {
         0
+    }
+
+    fn set_transport(&mut self, position: &PositionInfo) {
+        if self.raw.is_null() {
+            return;
+        }
+        unsafe {
+            ag_native_set_transport(
+                self.raw,
+                position.bpm,
+                position.time_sig_numerator as c_int,
+                position.time_sig_denominator as c_int,
+                position.time_in_samples,
+                position.ppq_position,
+                c_int::from(position.playing),
+            )
+        };
     }
 
     fn process_f32(&mut self, audio: &mut [Vec<f32>], _midi: &[[u8; 3]], frames: usize) {

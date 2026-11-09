@@ -33,6 +33,8 @@
 #include "pluginterfaces/gui/iplugview.h"
 #include "pluginterfaces/vst/ivstmessage.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
+#include "pluginterfaces/vst/ivstevents.h"
+#include "pluginterfaces/vst/ivstprocesscontext.h"
 #include <map>
 #include <memory>
 #include <clap/ext/gui.h>
@@ -836,6 +838,64 @@ public:
     Steinberg::int32 count = 0;
 };
 
+// Output parameter changes from process(): accepted and dropped (the controller reports edits itself).
+class Vst3SinkQueue : public Steinberg::Vst::IParamValueQueue {
+public:
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID, void** obj) override {
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1; }
+    Steinberg::Vst::ParamID PLUGIN_API getParameterId() override { return 0; }
+    Steinberg::int32 PLUGIN_API getPointCount() override { return 0; }
+    Steinberg::tresult PLUGIN_API getPoint(Steinberg::int32, Steinberg::int32&, Steinberg::Vst::ParamValue&) override {
+        return Steinberg::kResultFalse;
+    }
+    Steinberg::tresult PLUGIN_API addPoint(Steinberg::int32, Steinberg::Vst::ParamValue, Steinberg::int32& index) override {
+        index = 0;
+        return Steinberg::kResultOk;
+    }
+};
+
+class Vst3SinkChanges : public Steinberg::Vst::IParameterChanges {
+public:
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID, void** obj) override {
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1; }
+    Steinberg::int32 PLUGIN_API getParameterCount() override { return 0; }
+    Steinberg::Vst::IParamValueQueue* PLUGIN_API getParameterData(Steinberg::int32) override { return nullptr; }
+    Steinberg::Vst::IParamValueQueue* PLUGIN_API addParameterData(const Steinberg::Vst::ParamID&, Steinberg::int32& index) override {
+        index = 0;
+        return &queue;
+    }
+    Vst3SinkQueue queue;
+};
+
+// An empty event list: effects get no notes, and events they send out are dropped.
+class Vst3EventList : public Steinberg::Vst::IEventList {
+public:
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID, void** obj) override {
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1; }
+    Steinberg::int32 PLUGIN_API getEventCount() override { return 0; }
+    Steinberg::tresult PLUGIN_API getEvent(Steinberg::int32, Steinberg::Vst::Event&) override { return Steinberg::kResultFalse; }
+    Steinberg::tresult PLUGIN_API addEvent(Steinberg::Vst::Event&) override { return Steinberg::kResultOk; }
+};
+
+// Buffers for one audio bus. process() gets every bus the plug-in declares, as JUCE and the
+// SDK's HostProcessData do; a plug-in that reads its sidechain bus must not find it missing.
+struct Vst3BusBuffers {
+    std::vector<std::vector<float>> channels;
+    std::vector<float*> pointers;
+};
+
 struct Vst3Param {
     Steinberg::Vst::ParamID id = 0;
     std::string name;
@@ -863,6 +923,15 @@ struct Vst3Plugin {
     std::vector<Vst3Param> params;
     std::vector<std::vector<float>> scratch_in;
     std::vector<std::vector<float>> scratch_out;
+    std::vector<Vst3BusBuffers> in_bus_buffers;
+    std::vector<Vst3BusBuffers> out_bus_buffers;
+    std::vector<Steinberg::Vst::AudioBusBuffers> in_buses;
+    std::vector<Steinberg::Vst::AudioBusBuffers> out_buses;
+    Vst3SinkChanges output_changes;
+    Vst3EventList input_events;
+    Vst3EventList output_events;
+    Steinberg::Vst::ProcessContext context{};
+    bool transport_from_host = false;   // the DAW's play head arrived; otherwise time is ours
 
     void close_editor() {
         if (view != nullptr) {
@@ -918,17 +987,7 @@ struct Vst3Plugin {
         if (host != nullptr) {
             host->release();
         }
-        using Exit = bool (*)();
-        if (library != nullptr) {
-            auto exit_module = reinterpret_cast<Exit>(dlsym(library, "ModuleExit"));
-            if (exit_module == nullptr) {
-                exit_module = reinterpret_cast<Exit>(dlsym(library, "bundleExit"));
-            }
-            if (exit_module != nullptr) {
-                exit_module();
-            }
-            dlclose(library);
-        }
+        // The module stays loaded and entered (load_factory): no bundleExit, no dlclose.
     }
 };
 
@@ -965,7 +1024,31 @@ struct LoadedFactory {
     Steinberg::IPluginFactory* factory = nullptr;
 };
 
+LoadedFactory load_factory_uncached(const std::string& binary);
+
+// Modules load once and stay loaded for the life of the server, as in JUCE's VST3 host
+// (AudioGridder): bundleEntry runs once per module and bundleExit never runs. Calling
+// bundleEntry/bundleExit per instance tore down a JUCE plug-in's runtime (Acustica's NUW)
+// while other instances of it were alive, and the next one deadlocked when it closed.
+// Each caller gets its own reference to the factory and releases it.
 LoadedFactory load_factory(const std::string& binary) {
+    static std::mutex mutex;
+    static std::map<std::string, LoadedFactory> modules;
+    std::lock_guard<std::mutex> lock(mutex);
+    auto found = modules.find(binary);
+    if (found == modules.end()) {
+        LoadedFactory loaded = load_factory_uncached(binary);
+        if (loaded.factory == nullptr) {
+            return loaded;
+        }
+        found = modules.emplace(binary, loaded).first;
+    }
+    LoadedFactory shared = found->second;
+    shared.factory->addRef();
+    return shared;
+}
+
+LoadedFactory load_factory_uncached(const std::string& binary) {
     LoadedFactory loaded;
     loaded.library = dlopen(binary.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (loaded.library == nullptr) {
@@ -1215,20 +1298,56 @@ Vst3Plugin* open_vst3(const char* id, float sample_rate, int max_block, int chan
         }
     }
 
-    Steinberg::Vst::SpeakerArrangement stereo = Steinberg::Vst::SpeakerArr::kStereo;
-    const Steinberg::int32 inputs = self->component->getBusCount(Steinberg::Vst::kAudio, Steinberg::Vst::kInput);
-    const Steinberg::int32 outputs = self->component->getBusCount(Steinberg::Vst::kAudio, Steinberg::Vst::kOutput);
-    if (inputs > 0 || outputs > 0) {
-        self->processor->setBusArrangements(inputs > 0 ? &stereo : nullptr, inputs > 0 ? 1 : 0, outputs > 0 ? &stereo : nullptr, outputs > 0 ? 1 : 0);
-    }
-    if (inputs > 0) {
-        self->component->activateBus(Steinberg::Vst::kAudio, Steinberg::Vst::kInput, 0, 1);
-    }
-    if (outputs > 0) {
-        self->component->activateBus(Steinberg::Vst::kAudio, Steinberg::Vst::kOutput, 0, 1);
-    }
     self->max_block = std::max(1, max_block);
     self->channels = std::clamp(channels, 1, 2);
+    // Negotiate every audio bus, as JUCE does: the main buses get our layout, the others
+    // (sidechains, extra outputs) keep the plug-in's own. The count passed must equal the
+    // plug-in's bus count, or the call is rejected and the plug-in keeps a layout we do not feed.
+    using Steinberg::Vst::SpeakerArrangement;
+    const SpeakerArrangement main_layout = self->channels == 1 ? Steinberg::Vst::SpeakerArr::kMono : Steinberg::Vst::SpeakerArr::kStereo;
+    const Steinberg::int32 inputs = self->component->getBusCount(Steinberg::Vst::kAudio, Steinberg::Vst::kInput);
+    const Steinberg::int32 outputs = self->component->getBusCount(Steinberg::Vst::kAudio, Steinberg::Vst::kOutput);
+    auto layouts = [&](Steinberg::Vst::BusDirection direction, Steinberg::int32 count) {
+        std::vector<SpeakerArrangement> result;
+        for (Steinberg::int32 bus = 0; bus < count; ++bus) {
+            SpeakerArrangement layout = 0;
+            self->processor->getBusArrangement(direction, bus, layout);
+            result.push_back(bus == 0 ? main_layout : layout);
+        }
+        return result;
+    };
+    std::vector<SpeakerArrangement> in_layouts = layouts(Steinberg::Vst::kInput, inputs);
+    std::vector<SpeakerArrangement> out_layouts = layouts(Steinberg::Vst::kOutput, outputs);
+    const bool debug = std::getenv("AG_VST3_DEBUG") != nullptr;
+    auto prepare_buses = [&](Steinberg::Vst::BusDirection direction, Steinberg::int32 count,
+                             std::vector<Vst3BusBuffers>& storage, std::vector<Steinberg::Vst::AudioBusBuffers>& buses) {
+        storage.resize(static_cast<size_t>(count));
+        buses.resize(static_cast<size_t>(count));
+        for (Steinberg::int32 bus = 0; bus < count; ++bus) {
+            Steinberg::Vst::BusInfo info{};
+            self->component->getBusInfo(Steinberg::Vst::kAudio, direction, bus, info);
+            SpeakerArrangement layout = 0;
+            self->processor->getBusArrangement(direction, bus, layout);
+            int width = Steinberg::Vst::SpeakerArr::getChannelCount(layout);
+            if (width <= 0) width = std::max<Steinberg::int32>(0, info.channelCount);
+            const bool active = bus == 0 || (info.flags & Steinberg::Vst::BusInfo::kDefaultActive) != 0;
+            self->component->activateBus(Steinberg::Vst::kAudio, direction, bus, active ? 1 : 0);
+            Vst3BusBuffers& buffers = storage[static_cast<size_t>(bus)];
+            buffers.channels.assign(static_cast<size_t>(width), std::vector<float>(static_cast<size_t>(self->max_block), 0.0f));
+            buffers.pointers.clear();
+            for (auto& channel : buffers.channels) buffers.pointers.push_back(channel.data());
+            Steinberg::Vst::AudioBusBuffers& out = buses[static_cast<size_t>(bus)];
+            out = Steinberg::Vst::AudioBusBuffers{};
+            out.numChannels = width;
+            out.channelBuffers32 = buffers.pointers.empty() ? nullptr : buffers.pointers.data();
+            if (debug) {
+                char name[128];
+                utf16_to_utf8(info.name, name, sizeof name);
+                std::fprintf(stderr, "ag-server: vst3 %s bus %d '%s' type=%d channels=%d active=%d\n",
+                             direction == Steinberg::Vst::kInput ? "input" : "output", bus, name, info.busType, width, active ? 1 : 0);
+            }
+        }
+    };
     Steinberg::Vst::ProcessSetup setup{};
     setup.processMode = Steinberg::Vst::kRealtime;
     setup.symbolicSampleSize = Steinberg::Vst::kSample32;
@@ -1238,6 +1357,22 @@ Vst3Plugin* open_vst3(const char* id, float sample_rate, int max_block, int chan
         delete self;
         return nullptr;
     }
+    // Same order as JUCE: setupProcessing, setBusArrangements, activateBus, setActive.
+    SpeakerArrangement none = 0;   // some plug-ins crash on a null array, even with a count of 0
+    const Steinberg::tresult arranged = self->processor->setBusArrangements(
+        in_layouts.empty() ? &none : in_layouts.data(), inputs,
+        out_layouts.empty() ? &none : out_layouts.data(), outputs);
+    if (debug) std::fprintf(stderr, "ag-server: vst3 setBusArrangements -> %d\n", static_cast<int>(arranged));
+    prepare_buses(Steinberg::Vst::kInput, inputs, self->in_bus_buffers, self->in_buses);
+    prepare_buses(Steinberg::Vst::kOutput, outputs, self->out_bus_buffers, self->out_buses);
+    self->context = Steinberg::Vst::ProcessContext{};
+    self->context.sampleRate = sample_rate;
+    self->context.tempo = 120.0;
+    self->context.timeSigNumerator = 4;
+    self->context.timeSigDenominator = 4;
+    self->context.state = Steinberg::Vst::ProcessContext::kPlaying | Steinberg::Vst::ProcessContext::kTempoValid |
+                          Steinberg::Vst::ProcessContext::kTimeSigValid | Steinberg::Vst::ProcessContext::kContTimeValid |
+                          Steinberg::Vst::ProcessContext::kProjectTimeMusicValid;
     if (self->component->setActive(1) != Steinberg::kResultOk) {
         delete self;
         return nullptr;
@@ -1251,37 +1386,53 @@ Vst3Plugin* open_vst3(const char* id, float sample_rate, int max_block, int chan
 
 void process_vst3(Vst3Plugin* self, float** audio, int channels, int frames) {
     frames = std::max(0, std::min(frames, self->max_block));
-    const int count = std::min(channels, self->channels);
-    float* inputs[2] = {};
-    float* outputs[2] = {};
-    for (int channel = 0; channel < count; ++channel) {
-        std::memcpy(self->scratch_in[static_cast<size_t>(channel)].data(), audio[channel], static_cast<size_t>(frames) * sizeof(float));
-        inputs[channel] = self->scratch_in[static_cast<size_t>(channel)].data();
-        outputs[channel] = self->scratch_out[static_cast<size_t>(channel)].data();
-        std::fill(self->scratch_out[static_cast<size_t>(channel)].begin(), self->scratch_out[static_cast<size_t>(channel)].begin() + frames, 0.0f);
+    const int count = std::max(0, std::min(channels, self->channels));
+    if (count == 0 || self->out_buses.empty()) return;
+    // Main input: our channels (a mono source feeds every channel of a wider bus).
+    if (!self->in_buses.empty()) {
+        Vst3BusBuffers& main_in = self->in_bus_buffers[0];
+        for (size_t channel = 0; channel < main_in.channels.size(); ++channel) {
+            const float* source = audio[std::min<int>(static_cast<int>(channel), count - 1)];
+            std::memcpy(main_in.channels[channel].data(), source, static_cast<size_t>(frames) * sizeof(float));
+        }
+        for (size_t bus = 1; bus < self->in_bus_buffers.size(); ++bus) {   // sidechains hear silence
+            for (auto& channel : self->in_bus_buffers[bus].channels) std::fill(channel.begin(), channel.begin() + frames, 0.0f);
+        }
+        for (auto& bus : self->in_buses) bus.silenceFlags = 0;
     }
-    const Steinberg::int32 input_buses = self->component->getBusCount(Steinberg::Vst::kAudio, Steinberg::Vst::kInput);
-    Steinberg::Vst::AudioBusBuffers input{};
-    input.numChannels = count;
-    input.silenceFlags = 0;
-    input.channelBuffers32 = inputs;
-    Steinberg::Vst::AudioBusBuffers output{};
-    output.numChannels = count;
-    output.silenceFlags = 0;
-    output.channelBuffers32 = outputs;
+    for (size_t bus = 0; bus < self->out_bus_buffers.size(); ++bus) {
+        for (auto& channel : self->out_bus_buffers[bus].channels) std::fill(channel.begin(), channel.begin() + frames, 0.0f);
+        self->out_buses[bus].silenceFlags = 0;
+    }
     Steinberg::Vst::ProcessData data{};
     data.processMode = Steinberg::Vst::kRealtime;
     data.symbolicSampleSize = Steinberg::Vst::kSample32;
     data.numSamples = frames;
-    data.numInputs = input_buses > 0 ? 1 : 0;
-    data.numOutputs = 1;
-    data.inputs = input_buses > 0 ? &input : nullptr;
-    data.outputs = &output;
+    data.numInputs = static_cast<Steinberg::int32>(self->in_buses.size());
+    data.numOutputs = static_cast<Steinberg::int32>(self->out_buses.size());
+    data.inputs = self->in_buses.empty() ? nullptr : self->in_buses.data();
+    data.outputs = self->out_buses.data();
     self->changes.take(self->inbox);
-    data.inputParameterChanges = self->changes.count > 0 ? &self->changes : nullptr;
+    data.inputParameterChanges = &self->changes;
+    data.outputParameterChanges = &self->output_changes;
+    data.inputEvents = &self->input_events;
+    data.outputEvents = &self->output_events;
+    Steinberg::Vst::ProcessContext& context = self->context;
+    if (!self->transport_from_host) {
+        context.projectTimeMusic = static_cast<double>(context.projectTimeSamples) / context.sampleRate * context.tempo / 60.0;
+    }
+    data.processContext = &context;
     self->processor->process(data);
+    if (!self->transport_from_host) context.projectTimeSamples += frames;
+    context.continousTimeSamples += frames;
+    const Vst3BusBuffers& main_out = self->out_bus_buffers[0];
     for (int channel = 0; channel < count; ++channel) {
-        std::memcpy(audio[channel], outputs[channel], static_cast<size_t>(frames) * sizeof(float));
+        if (main_out.channels.empty()) {
+            std::fill(audio[channel], audio[channel] + frames, 0.0f);
+        } else {
+            const auto& source = main_out.channels[std::min<size_t>(static_cast<size_t>(channel), main_out.channels.size() - 1)];
+            std::memcpy(audio[channel], source.data(), static_cast<size_t>(frames) * sizeof(float));
+        }
     }
 }
 
@@ -1327,18 +1478,55 @@ struct ClapPlugin {
             plugin->destroy(plugin);
             plugin = nullptr;
         }
-        if (entry != nullptr && entry->deinit != nullptr) {
-            entry->deinit();
-            entry = nullptr;
-        }
+        // The module stays loaded and initialised (load_clap_module): no deinit, no dlclose.
+        entry = nullptr;
         delete host;
         host = nullptr;
-        if (library != nullptr) {
-            dlclose(library);
-            library = nullptr;
-        }
+        library = nullptr;
     }
 };
+
+// CLAP modules, like VST3 ones (load_factory): dlopen and entry->init once per module,
+// kept for the life of the server. Returns the factory, or nullptr.
+struct ClapModule {
+    void* library = nullptr;
+    const clap_plugin_entry* entry = nullptr;
+    const clap_plugin_factory* factory = nullptr;
+};
+
+ClapModule load_clap_module(const std::string& binary) {
+    static std::mutex mutex;
+    static std::map<std::string, ClapModule> modules;
+    std::lock_guard<std::mutex> lock(mutex);
+    auto found = modules.find(binary);
+    if (found != modules.end()) {
+        return found->second;
+    }
+    ClapModule module;
+    void* lib = dlopen(binary.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (lib == nullptr) {
+        lib = dlopen(binary.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    }
+    if (lib == nullptr) {
+        return module;
+    }
+    auto* entry = static_cast<const clap_plugin_entry*>(dlsym(lib, "clap_entry"));
+    if (entry == nullptr || !entry->init(binary.c_str())) {
+        dlclose(lib);
+        return module;
+    }
+    auto* factory = static_cast<const clap_plugin_factory*>(entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
+    if (factory == nullptr) {
+        if (entry->deinit != nullptr) entry->deinit();
+        dlclose(lib);
+        return module;
+    }
+    module.library = lib;
+    module.entry = entry;
+    module.factory = factory;
+    modules.emplace(binary, module);
+    return module;
+}
 
 static void clap_host_cb_request_restart(const clap_host*) {}
 static void clap_host_cb_request_process(const clap_host*) {}
@@ -1413,21 +1601,9 @@ bool collect_clap_bundle(const std::filesystem::path& bundle, std::vector<Catalo
     if (binary.empty()) {
         return false;
     }
-    void* lib = dlopen(binary.c_str(), RTLD_NOW | RTLD_LOCAL);
-    if (lib == nullptr) {
-        lib = dlopen(binary.c_str(), RTLD_NOW | RTLD_GLOBAL);
-    }
-    if (lib == nullptr) {
-        return false;
-    }
-    auto* entry = static_cast<const clap_plugin_entry*>(dlsym(lib, "clap_entry"));
-    if (entry == nullptr || !entry->init(binary.c_str())) {
-        dlclose(lib);
-        return false;
-    }
-    auto* factory = static_cast<const clap_plugin_factory*>(entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
+    const ClapModule module = load_clap_module(binary);
+    const clap_plugin_factory* factory = module.factory;
     if (factory == nullptr) {
-        dlclose(lib);
         return false;
     }
     const uint32_t count = factory->get_plugin_count(factory);
@@ -1475,21 +1651,11 @@ ClapPlugin* open_clap(const char* id, float sample_rate, int max_block, int chan
     if (binary.empty()) {
         return nullptr;
     }
-    void* lib = dlopen(binary.c_str(), RTLD_NOW | RTLD_LOCAL);
-    if (lib == nullptr) {
-        lib = dlopen(binary.c_str(), RTLD_NOW | RTLD_GLOBAL);
-    }
-    if (lib == nullptr) {
-        return nullptr;
-    }
-    auto* entry = static_cast<const clap_plugin_entry*>(dlsym(lib, "clap_entry"));
-    if (entry == nullptr || !entry->init(binary.c_str())) {
-        dlclose(lib);
-        return nullptr;
-    }
-    auto* factory = static_cast<const clap_plugin_factory*>(entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
+    const ClapModule module = load_clap_module(binary);
+    void* lib = module.library;
+    const clap_plugin_entry* entry = module.entry;
+    const clap_plugin_factory* factory = module.factory;
     if (factory == nullptr) {
-        dlclose(lib);
         return nullptr;
     }
 
@@ -1511,8 +1677,7 @@ ClapPlugin* open_clap(const char* id, float sample_rate, int max_block, int chan
             plugin->destroy(plugin);
         }
         delete host;
-        dlclose(lib);
-        return nullptr;
+        return nullptr;   // the module stays loaded (load_clap_module)
     }
 
     auto* self = new ClapPlugin();
@@ -1866,6 +2031,24 @@ void ag_native_process(AgNative* raw, float** audio, int channels, int frames) {
     }
 }
 
+
+// The DAW's play head for the next process() call (audio thread, like process).
+void ag_native_set_transport(AgNative* raw, double bpm, int numerator, int denominator, int64_t samples, double ppq, int playing) {
+    auto* instance = reinterpret_cast<Instance*>(raw);
+    if (instance == nullptr || instance->kind != Kind::Vst3 || instance->vst3 == nullptr) {
+        return;
+    }
+    Steinberg::Vst::ProcessContext& context = instance->vst3->context;
+    context.tempo = bpm > 0.0 ? bpm : 120.0;
+    context.timeSigNumerator = numerator > 0 ? numerator : 4;
+    context.timeSigDenominator = denominator > 0 ? denominator : 4;
+    context.projectTimeSamples = samples;
+    context.projectTimeMusic = ppq;
+    context.state = Steinberg::Vst::ProcessContext::kTempoValid | Steinberg::Vst::ProcessContext::kTimeSigValid |
+                    Steinberg::Vst::ProcessContext::kContTimeValid | Steinberg::Vst::ProcessContext::kProjectTimeMusicValid |
+                    (playing != 0 ? Steinberg::Vst::ProcessContext::kPlaying : 0);
+    instance->vst3->transport_from_host = true;
+}
 
 // Attach the plugin's own editor to nsview (main thread). Returns 1 with the editor size,
 // 0 when the plugin has no editor (LV2 UIs are not hosted).

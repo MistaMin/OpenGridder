@@ -24,6 +24,9 @@
 #include <arpa/inet.h>
 
 #include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <pthread.h>
 #include <map>
 #include <mutex>
 
@@ -51,11 +54,70 @@ std::map<uint64_t, CaptureInfo>& captures() {
     return map;
 }
 
+// Without the main run loop (tests, tools), "main thread" work still runs on one thread:
+// this one, started on first use. JUCE plug-ins (Acustica's NUW) make the first thread that
+// creates them their message thread for good, and an instance created or closed from any other
+// thread later waits for that thread forever. Running it inline on each caller's thread hung
+// the second test that used the same plug-in.
+struct StandInMain {
+    std::mutex mutex;
+    std::condition_variable wake;
+    std::deque<void (^)(void)> jobs;
+    pthread_t thread{};
+};
+
+StandInMain& stand_in_main() {
+    static StandInMain* state = [] {
+        auto* created = new StandInMain();
+        pthread_create(&created->thread, nullptr, [](void* raw) -> void* {
+            auto* self = static_cast<StandInMain*>(raw);
+            for (;;) {
+                void (^job)(void) = nil;
+                {
+                    std::unique_lock<std::mutex> lock(self->mutex);
+                    self->wake.wait(lock, [&] { return !self->jobs.empty(); });
+                    job = self->jobs.front();
+                    self->jobs.pop_front();
+                }
+                @autoreleasepool { job(); }
+            }
+            return nullptr;
+        }, created);
+        return created;
+    }();
+    return *state;
+}
+
 void run_on_main(void (^work)(void)) {
-    if ([NSThread isMainThread] || !g_loop_running.load()) {
+    if ([NSThread isMainThread]) {
         work();
-    } else {
+    } else if (g_loop_running.load()) {
         dispatch_sync(dispatch_get_main_queue(), work);
+    } else {
+        StandInMain& main = stand_in_main();
+        if (pthread_equal(pthread_self(), main.thread)) {
+            work();
+            return;
+        }
+        bool done = false;
+        std::mutex finished_mutex;
+        std::condition_variable finished;
+        bool* done_ptr = &done;
+        std::mutex* finished_mutex_ptr = &finished_mutex;
+        std::condition_variable* finished_ptr = &finished;
+        void (^job)(void) = ^{
+            work();
+            std::lock_guard<std::mutex> lock(*finished_mutex_ptr);
+            *done_ptr = true;
+            finished_ptr->notify_all();
+        };
+        {
+            std::lock_guard<std::mutex> lock(main.mutex);
+            main.jobs.push_back([job copy]);
+        }
+        main.wake.notify_one();
+        std::unique_lock<std::mutex> lock(finished_mutex);
+        finished.wait(lock, [&] { return done; });
     }
 }
 

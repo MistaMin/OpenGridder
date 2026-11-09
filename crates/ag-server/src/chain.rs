@@ -295,29 +295,48 @@ impl PluginChain {
         let mut instances = Vec::with_capacity(request.count);
         for _ in 0..request.count {
             match host::instantiate(&request.id, request.sample_rate, request.max_block, request.bus_channels) {
-                Some(mut plugin) => {
-                    // The plugin's own saved state (AudioGridder's setStateInformation), before
-                    // it goes live. Multi-mono instances all get the same state.
-                    if let (Some(chunk), Some(target)) = (state_blob(&request.settings), plugin.editor_target()) {
-                        if !crate::ui::set_state(target, &chunk) {
-                            eprintln!("ag-server: {} refused its saved state", request.id);
+                Some(plugin) => {
+                    // All of the set-up runs on the main thread, where the plug-in was created,
+                    // as in AudioGridder (JUCE's message thread). A JUCE plug-in that sets up
+                    // lazily (Acustica's NUW) makes the first thread that touches its runtime
+                    // its message thread; when that was this session thread, the plug-in later
+                    // deadlocked on the main thread when it was closed.
+                    let plugin = crate::ui::on_main(move || {
+                        let mut plugin = plugin;
+                        let values = state_values(&request.settings);
+                        let before: Vec<f32> = values.as_ref().map(|values| (0..values.len()).map(|index| plugin.param(index as i32)).collect()).unwrap_or_default();
+                        // The plugin's own saved state (AudioGridder's setStateInformation),
+                        // before it goes live. Multi-mono instances all get the same state.
+                        let mut state_applied = false;
+                        if let (Some(chunk), Some(target)) = (state_blob(&request.settings), plugin.editor_target()) {
+                            state_applied = crate::ui::set_state(target, &chunk);
+                            if !state_applied {
+                                eprintln!("ag-server: {} refused its saved state", request.id);
+                            }
                         }
-                    }
-                    // Then the saved parameter values on top: some plugins (Acustica, Softube
-                    // AUs) accept their state blob without the values their controls show.
-                    // For plugins whose state already has them, this changes nothing.
-                    if let Some(values) = state_values(&request.settings) {
-                        for (index, value) in values.iter().enumerate() {
-                            plugin.set_param(index as i32, *value);
+                        // Then the saved parameter values, for the parameters the state left
+                        // alone: some plugins (Softube AUs) accept their state blob without the
+                        // values their controls show. A parameter the state did set keeps the
+                        // state's value; the saved value can be stale, because a plug-in's own
+                        // window does not report every edit to the host (Acustica's attack and
+                        // release), and putting it back undid the user's setting.
+                        if let Some(values) = values {
+                            for (index, value) in values.iter().enumerate() {
+                                let set_by_state = state_applied && (plugin.param(index as i32) - before[index]).abs() > 1.0e-6;
+                                if !set_by_state {
+                                    plugin.set_param(index as i32, *value);
+                                }
+                            }
                         }
-                    }
-                    // Warm it up off the audio path: plugins (Acustica, iZotope) do lazy setup
-                    // and start with silence in their first blocks; that would otherwise stall
-                    // the live chain and drop out when the slot is inserted.
-                    let mut silence = vec![vec![0.0f32; request.max_block.max(1)]; request.bus_channels.max(1)];
-                    for _ in 0..8 {
-                        plugin.process_f32(&mut silence, &[], request.max_block.max(1));
-                    }
+                        // Warm it up off the audio path: plugins (Acustica, iZotope) do lazy setup
+                        // and start with silence in their first blocks; that would otherwise stall
+                        // the live chain and drop out when the slot is inserted.
+                        let mut silence = vec![vec![0.0f32; request.max_block.max(1)]; request.bus_channels.max(1)];
+                        for _ in 0..8 {
+                            plugin.process_f32(&mut silence, &[], request.max_block.max(1));
+                        }
+                        plugin
+                    });
                     instances.push(plugin)
                 }
                 None => return Vec::new(),
@@ -401,6 +420,14 @@ impl PluginChain {
     }
 
     /// Close the real editor window, if one is open. Runs before its plugin can be dropped.
+    /// HIDE_PLUGIN, first half (under the lock): detach the editor window so the caller can
+    /// close it without the chain lock. Closing runs on the main thread and can take a
+    /// second (Acustica); the audio thread needs the chain meanwhile.
+    pub fn take_window(&mut self) -> u64 {
+        self.live_editor.store(0, Ordering::Release);
+        std::mem::take(&mut self.editor_window)
+    }
+
     fn close_window(&mut self) {
         if self.editor_window != 0 {
             let id = std::mem::take(&mut self.editor_window);
