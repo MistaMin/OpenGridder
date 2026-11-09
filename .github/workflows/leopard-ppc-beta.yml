@@ -1,0 +1,85 @@
+name: Legacy Leopard BETA (PowerPC + Intel)
+
+# Builds the OS X 10.5.8 RTAS/TDM BETA for PowerPC and Intel Macs on the self-hosted Mac.
+# The licensed Pro Tools SDK and the Apple 10.5 SDK stay in their local paths; neither is
+# copied into the repository or uploaded. Only the signed bundles, self-test and notices
+# leave the machine as the workflow artifact.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opengridder-leopard-beta
+  cancel-in-progress: false
+
+jobs:
+  leopard-beta:
+    if: github.repository == 'MistaMin/OpenGridder-Plugins'
+    runs-on: [self-hosted, macOS, ARM64, opengridder-aax-release]
+    timeout-minutes: 90
+    env:
+      OPENGRIDDER_LEGACY_SDK: ${{ vars.OPENGRIDDER_LEGACY_PT_SDK }}
+      OPENGRIDDER_RTAS_APPLE_SDK: ${{ vars.OPENGRIDDER_RTAS_APPLE_SDK }}
+      OPENGRIDDER_CORE_ROOT: ${{ github.workspace }}/legacy
+      OPENGRIDDER_EMULATOR_ROOT: ${{ github.workspace }}/legacy/firmware
+      OPENGRIDDER_SIGN_IDENTITY: 'Developer ID Application: Marcos Deida (ZQYU67JUBH)'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Locate private local SDKs and assembler bottle
+        shell: bash
+        run: |
+          test -d "$OPENGRIDDER_LEGACY_SDK"
+          test -f "$OPENGRIDDER_LEGACY_SDK/AlturaPorts/TDMPlugIns/PlugInLibrary/EffectClasses/CEffectProcessRTAS.h"
+          test -d /Volumes/Developer/OpenGrid/opengridder-old/OpenGridder-Legacy-Toolchain/leopard/root/SDKs/MacOSX10.5.sdk
+          test -x /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine
+          mkdir -p legacy/native/.local
+          ln -sfn /Volumes/Developer/OpenGrid/opengridder-old/OpenGridder-Legacy-Wrappers/.local/dsp-assembler \
+            legacy/native/.local/dsp-assembler
+
+      - name: Start a test server if none is listening
+        shell: bash
+        run: |
+          set -euo pipefail
+          if (echo > /dev/tcp/127.0.0.1/55076) 2>/dev/null; then
+            echo "Using the OpenGridder Server already listening on 127.0.0.1:55076"
+          else
+            cargo build --release --locked -p ag-server
+            target/release/ag-server --id 20 > target/leopard-test-server.log 2>&1 &
+            echo "$!" > target/leopard-test-server.pid
+            for _ in $(seq 1 120); do
+              if (echo > /dev/tcp/127.0.0.1/55076) 2>/dev/null; then break; fi
+              sleep 1
+            done
+            (echo > /dev/tcp/127.0.0.1/55076) 2>/dev/null
+          fi
+
+      - name: Build, test, sign and package the Leopard BETA
+        shell: bash
+        env:
+          OPENGRIDDER_TEST_ADDR: 127.0.0.1:55076
+        run: |
+          set -euo pipefail
+          bash legacy/native/scripts/build-leopard-release.sh 2>&1 | tee target/leopard-build.log
+          # A truncated log must not hide a failed build.
+          ! grep -q 'RESULT: FAILED' target/leopard-build.log
+
+      - name: Upload only the signed package and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenGridder-Legacy-BETA-macos-ppc-i386
+          path: legacy/native/dist/leopard-beta-*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Stop the test server started by this job
+        if: always()
+        shell: bash
+        run: |
+          if [ -f target/leopard-test-server.pid ]; then
+            kill "$(cat target/leopard-test-server.pid)" 2>/dev/null || true
+          fi

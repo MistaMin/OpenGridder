@@ -102,16 +102,17 @@ jobs:
           path: dist/*-linux-x86_64.tar.gz*
 
   # -------------------------------------------------------------
-  # Legacy RTAS & TDM (i386 & PPC / DSP56300) Build Harness
+  # Legacy RTAS/TDM crate and DSP56300 firmware harness (no ppc/Leopard bundle here; see
+  # leopard-ppc-beta.yml for the self-hosted PowerPC + Intel OS X 10.5 build).
   # -------------------------------------------------------------
   legacy-rtas-tdm:
-    name: Legacy RTAS (i386) & TDM (PPC / DSP56300)
+    name: Legacy RTAS/TDM harness (i386 host)
     runs-on: macos-13
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust 1.70.0 and i686/PPC targets
+      - name: Install Rust 1.70.0 and the i686 target
         run: |
           rustup toolchain install 1.70.0 --profile minimal
           rustup default 1.70.0
@@ -141,7 +142,7 @@ jobs:
           tar -C dist -czf "dist/${PKG_NAME}.tar.gz" "${PKG_NAME}"
           shasum -a 256 "dist/${PKG_NAME}.tar.gz" > "dist/${PKG_NAME}.tar.gz.sha256"
 
-      - name: Upload Legacy Deliverables
+      - name: Upload legacy harness artifacts
         uses: actions/upload-artifact@v4
         with:
           name: OpenGridder-legacy-rtas-tdm
