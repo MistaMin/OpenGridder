@@ -22,7 +22,6 @@ jobs:
     timeout-minutes: 90
     env:
       OPENGRIDDER_LEGACY_SDK: ${{ vars.OPENGRIDDER_LEGACY_PT_SDK }}
-      OPENGRIDDER_RTAS_APPLE_SDK: ${{ vars.OPENGRIDDER_RTAS_APPLE_SDK }}
       OPENGRIDDER_CORE_ROOT: ${{ github.workspace }}/legacy
       OPENGRIDDER_EMULATOR_ROOT: ${{ github.workspace }}/legacy/firmware
       OPENGRIDDER_SIGN_IDENTITY: 'Developer ID Application: Marcos Deida (ZQYU67JUBH)'
