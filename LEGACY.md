@@ -13,8 +13,10 @@ source**.
 
 ## What this means
 
-- No Avid RTAS or TDM SDK source, headers, documentation, tools or libraries
-  are committed in this repository, and none are uploaded as build artifacts.
+- No Avid RTAS or TDM SDK source, headers, documentation, tools, licence keys or
+  standalone libraries are committed in this repository, and none are uploaded as
+  build artifacts. The compiled RTAS/TDM bundles statically link plug-in-library
+  object code from the separately licensed SDK; that does not redistribute the SDK.
 - No RTAS/TDM adapter source is published here. The compiled `.dpm` bundles may
   be distributed free of charge with their notices; the source stays private.
 - The MIT `crates/ag-legacy` crate in this repository is only the TDM transport
@@ -42,3 +44,12 @@ in the private tree are documented in the wrappers repository's `LICENSE` and
 `THIRD_PARTY_LICENSES.md`. Avid, Pro Tools, RTAS, TDM and HD Accel are
 trademarks of Avid Technology, Inc.; this project is not affiliated with or
 endorsed by Avid.
+
+## Before this repository becomes public
+
+This repository is private. Its history predates the split and still contains the
+RTAS/TDM source in old commits (`legacy/`), even though the current tree and all
+new commits do not. Before changing visibility or adding collaborators, either
+keep the repository private, or rewrite the history to purge `legacy/` (for
+example `git filter-repo --path legacy --invert-paths`) and re-stamp the release
+build. The private wrappers repository keeps the full legacy history.

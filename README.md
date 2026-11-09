@@ -44,8 +44,10 @@ The RTAS and TDM plug-ins are not built from this repository. They live in the
 private, closed-source integration layer
 `MistaMin/OpenGridder-Legacy-Wrappers`, because they compile against the
 licensed Avid SDK. The compiled RTAS/TDM bundles are freeware, not open source;
-their source is not published. No Avid SDK code is included in this repository
-or in the binaries. See [LEGACY.md](LEGACY.md).
+their source is not published. No Avid SDK source, headers or tools are in this
+repository. The compiled AAX plug-in links the AAX SDK runtime under Avid's
+licence; the RTAS/TDM bundles do the same with the separately licensed RTAS/TDM
+SDK in the private repository. See [LEGACY.md](LEGACY.md).
 
 The private wrappers tree also contains the ppc/i386 OS X 10.5.8 Leopard build,
 the DSP56321 firmware and its differential emulator checks. Those builds use

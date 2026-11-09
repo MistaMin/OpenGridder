@@ -83,6 +83,20 @@ cat << PLIST > "$STAGE/AAX/OpenGridder.aaxplugin/Contents/Info.plist"
 </plist>
 PLIST
 
+# AU and VST3 bundles are copied from templates; stamp the same build identity the
+# server, AAX and legacy bundles carry so every format reports one release number.
+OG_LABEL="$OG_VERSION build $OG_BUILD_NUMBER $OG_GIT_COMMIT $OG_BUILD_DATE"
+for plist in     "$STAGE/AU/OpenGridder.component/Contents/Info.plist"     "$STAGE/VST3/OpenGridder.vst3/Contents/Info.plist"; do
+  plutil -remove OGBuild "$plist" 2>/dev/null || true
+  plutil -insert OGBuild -string "$OG_LABEL" "$plist"
+  plutil -remove OGBuildNumber "$plist" 2>/dev/null || true
+  plutil -insert OGBuildNumber -string "$OG_BUILD_NUMBER" "$plist"
+  plutil -remove OGBuildClass "$plist" 2>/dev/null || true
+  plutil -insert OGBuildClass -string modern "$plist"
+  plutil -remove OGMinOS "$plist" 2>/dev/null || true
+  plutil -insert OGMinOS -string 11.0 "$plist"
+done
+
 # Standalone Server App
 cp -R "$og_root/build/OpenGridder Server.app" "$STAGE/Standalone/OpenGridder Server.app"
 cp "$og_root/target/release/ag-tray" "$STAGE/Standalone/OpenGridderTray"

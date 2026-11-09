@@ -20,8 +20,10 @@ integration live in the private repository
 `MistaMin/OpenGridder-Legacy-Wrappers`. The compiled RTAS/TDM bundles may be
 distributed free of charge as freeware with their notices, but their source is
 not published and is not covered by this repository's MIT licence. No Avid SDK
-code is included there or in the binaries. See that repository's `LICENSE` and
-`THIRD_PARTY_LICENSES.md`, and `LEGACY.md` here.
+source, headers or tools are distributed there. The compiled RTAS/TDM bundles
+statically link plug-in-library object code from the separately licensed Avid
+SDK; that linked code remains governed by the Avid SDK licence. See that
+repository's `LICENSE` and `THIRD_PARTY_LICENSES.md`, and `LEGACY.md` here.
 
 AAX, Pro Tools, Avid, RTAS, TDM, HD Accel, Control|24 and C|24 are trademarks
 of Avid Technology, Inc. VST is a trademark of Steinberg Media Technologies
