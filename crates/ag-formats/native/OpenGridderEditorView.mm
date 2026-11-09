@@ -15,6 +15,21 @@ static NSFont *SysFont(CGFloat size, NSFontWeight weight) {
     return [NSFont systemFontOfSize:size];
 }
 
+// Rack layout (the editor is 420 px high in every format). Up to kMaxSlots plugins plus the
+// "+ Add Plugin" row fit below the one-row latency profile; the master switch is in the header.
+static const uint32_t kMaxSlots = 8;
+static const CGFloat kSlotH = 23.0;
+static const CGFloat kSlotStep = 25.0;
+static CGFloat SlotRowY(CGFloat boundsHeight, uint32_t index) {
+    return boundsHeight - 196.0 - index * kSlotStep;
+}
+static CGRect ProfileButtonRect(CGFloat rx, CGFloat boundsHeight, int index) {
+    return CGRectMake(rx + index * 56.67, boundsHeight - 148.0, 52.0, 24.0);
+}
+static CGRect MasterButtonRect(CGFloat rx, CGFloat boundsHeight) {
+    return CGRectMake(rx + 181.0, boundsHeight - 69.0, 26.0, 17.0);
+}
+
 static NSFont *MonoFont(CGFloat size, NSFontWeight weight) {
     if ([NSFont respondsToSelector:@selector(monospacedDigitSystemFontOfSize:weight:)]) {
         return ((NSFont *(*)(id, SEL, CGFloat, CGFloat))objc_msgSend)([NSFont class], @selector(monospacedDigitSystemFontOfSize:weight:), size, weight);
@@ -952,12 +967,30 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
         [abTxt drawAtPoint:NSMakePoint(abRect.origin.x + (36 - abSz.width) * 0.5, abRect.origin.y + 2.5) withAttributes:abAttrs];
 
         // Connection LED Dot
-        CGFloat ledX = rx + 174, ledY = bounds.size.height - 60.5;
+        CGFloat ledX = rx + 170, ledY = bounds.size.height - 60.5;
         CGContextSetRGBFillColor(ctx, connected ? 0.3 : 0.9, connected ? 0.9 : 0.3, 0.3, 1.0);
         CGContextFillEllipseInRect(ctx, CGRectMake(ledX - 4, ledY - 4, 8, 8));
         CGContextSetRGBStrokeColor(ctx, connected ? 0.5 : 1.0, 1.0, 0.5, 0.6);
         CGContextSetLineWidth(ctx, 1.6);
         CGContextStrokeEllipseInRect(ctx, CGRectMake(ledX - 5.5, ledY - 5.5, 11, 11));
+
+        // Master switch next to the LED: ON processes the chain, BYP bypasses all of it.
+        {
+            CGRect masterRect = MasterButtonRect(rx, bounds.size.height);
+            CGContextSetRGBFillColor(ctx, _isBypassed ? 0.35 : 0.16, _isBypassed ? 0.20 : 0.28, _isBypassed ? 0.10 : 0.18, 1.0);
+            CGContextFillRect(ctx, masterRect);
+            CGContextSetRGBStrokeColor(ctx, _isBypassed ? 0.95 : 0.40, _isBypassed ? 0.55 : 0.80, _isBypassed ? 0.25 : 0.45, 1.0);
+            CGContextSetLineWidth(ctx, 1.0);
+            CGContextStrokeRect(ctx, masterRect);
+            NSString *masterTxt = _isBypassed ? @"BYP" : @"ON";
+            NSDictionary *masterAttrs = @{
+                NSFontAttributeName: MonoFont(8, NSFontWeightBold),
+                NSForegroundColorAttributeName: _isBypassed ? [NSColor colorWithCalibratedRed:0.98 green:0.70 blue:0.35 alpha:1.0]
+                                                            : [NSColor colorWithCalibratedRed:0.55 green:0.95 blue:0.60 alpha:1.0]
+            };
+            NSSize masterSz = [masterTxt sizeWithAttributes:masterAttrs];
+            [masterTxt drawAtPoint:NSMakePoint(CGRectGetMidX(masterRect) - masterSz.width * 0.5, masterRect.origin.y + 3.0) withAttributes:masterAttrs];
+        }
 
         // Bank 1 Clap-Close Button [◂]
         CGRect rackFoldBtn = CGRectMake(CGRectGetMaxX(rackBank) - 32.0, bounds.size.height - 69.0, 22.0, 17.0);
@@ -996,12 +1029,11 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
         };
         [@"LATENCY PROFILE (PDC)" drawAtPoint:NSMakePoint(rx, bounds.size.height - 114) withAttributes:sectionAttrs];
 
-        // 4 Latency Profile Buttons
-        NSArray *profileLabels = @[@"LOW (128)", @"STD (256)", @"HIGH (512)", @"STUDIO (1024)"];
+        // 4 Latency Profile Buttons, one row: name over block size
+        NSArray *profileNames = @[@"LOW", @"STD", @"HIGH", @"STUDIO"];
+        NSArray *profileSizes = @[@"128", @"256", @"512", @"1024"];
         for (int i = 0; i < 4; ++i) {
-            CGFloat bx = rx + (i % 2) * 114;
-            CGFloat by = bounds.size.height - 146 - (i / 2) * 28;
-            CGRect bRect = CGRectMake(bx, by, 108, 24);
+            CGRect bRect = ProfileButtonRect(rx, bounds.size.height, i);
 
             BOOL active = (_activeProfile == i);
             CGContextSetRGBFillColor(ctx, active ? 0.25 : 0.15, active ? 0.32 : 0.17, active ? 0.38 : 0.19, 1.0);
@@ -1011,26 +1043,27 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
             CGContextStrokeRect(ctx, bRect);
 
             NSDictionary *btnAttrs = @{
-                NSFontAttributeName: MonoFont(9, active ? NSFontWeightBold : NSFontWeightRegular),
+                NSFontAttributeName: MonoFont(7.5, active ? NSFontWeightBold : NSFontWeightRegular),
                 NSForegroundColorAttributeName: active ? [NSColor whiteColor] : [NSColor colorWithCalibratedWhite:0.75 alpha:1.0]
             };
-            NSString *txt = profileLabels[i];
-            NSSize sz = [txt sizeWithAttributes:btnAttrs];
-            [txt drawAtPoint:NSMakePoint(bx + (108 - sz.width) * 0.5, by + 5) withAttributes:btnAttrs];
+            NSString *name = profileNames[i];
+            NSString *size = profileSizes[i];
+            NSSize nameSz = [name sizeWithAttributes:btnAttrs];
+            NSSize sizeSz = [size sizeWithAttributes:btnAttrs];
+            [name drawAtPoint:NSMakePoint(CGRectGetMidX(bRect) - nameSz.width * 0.5, bRect.origin.y + 12.5) withAttributes:btnAttrs];
+            [size drawAtPoint:NSMakePoint(CGRectGetMidX(bRect) - sizeSz.width * 0.5, bRect.origin.y + 2.5) withAttributes:btnAttrs];
         }
 
         // Plugin Slots Header
-        [@"REMOTE PLUGIN SLOTS" drawAtPoint:NSMakePoint(rx, bounds.size.height - 198) withAttributes:sectionAttrs];
+        [@"REMOTE PLUGIN SLOTS" drawAtPoint:NSMakePoint(rx, bounds.size.height - 170) withAttributes:sectionAttrs];
 
         // Dynamic Plugin Slots with Per-Plugin Bypass, Presets, Reorder, Oversampling, and Unload
         uint32_t numLoaded = self.rust ? og_native_num_loaded_plugins(self.rust) : 0;
-        CGFloat slotH = 26;
-        CGFloat slotSpacing = 4;
-        CGFloat baseY = bounds.size.height - 230;
+        CGFloat slotH = kSlotH;
         CGFloat slotW = 222.0;
 
         for (uint32_t i = 0; i < numLoaded; ++i) {
-            CGFloat sy = baseY - i * (slotH + slotSpacing);
+            CGFloat sy = SlotRowY(bounds.size.height, i);
             CGRect slotRect = CGRectMake(rx, sy, slotW, slotH);
             BOOL selected = (_activeSlot == i);
 
@@ -1048,7 +1081,7 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
             if (slotTitle.length == 0) slotTitle = [NSString stringWithFormat:@"Plugin %u", i];
 
             // 1. Per-Plugin Bypass Button [B]
-            CGRect bypBadge = CGRectMake(slotRect.origin.x + 3, sy + 3, 18, 20);
+            CGRect bypBadge = CGRectMake(slotRect.origin.x + 3, sy + 2, 18, 19);
             CGContextSetRGBFillColor(ctx, bypassed ? 0.85 : 0.12, bypassed ? 0.45 : 0.14, bypassed ? 0.15 : 0.16, 1.0);
             CGContextFillRect(ctx, bypBadge);
             CGContextSetRGBStrokeColor(ctx, bypassed ? 1.0 : 0.4, bypassed ? 0.7 : 0.4, bypassed ? 0.3 : 0.4, 1.0);
@@ -1059,7 +1092,7 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
                 NSForegroundColorAttributeName: bypassed ? [NSColor blackColor] : [NSColor colorWithCalibratedWhite:0.6 alpha:1.0]
             };
             NSSize bSz = [@"B" sizeWithAttributes:bBadgeAttrs];
-            [@"B" drawAtPoint:NSMakePoint(bypBadge.origin.x + (18 - bSz.width) * 0.5, bypBadge.origin.y + 4) withAttributes:bBadgeAttrs];
+            [@"B" drawAtPoint:NSMakePoint(bypBadge.origin.x + (18 - bSz.width) * 0.5, bypBadge.origin.y + 3.5) withAttributes:bBadgeAttrs];
 
             // 2. Plugin Title
             NSDictionary *slotAttrs = @{
@@ -1069,10 +1102,10 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
             if (slotTitle.length > 13) {
                 slotTitle = [NSString stringWithFormat:@"%@…", [slotTitle substringToIndex:12]];
             }
-            [slotTitle drawAtPoint:NSMakePoint(rx + 24, sy + 6) withAttributes:slotAttrs];
+            [slotTitle drawAtPoint:NSMakePoint(rx + 24, sy + 5) withAttributes:slotAttrs];
 
             // 3. Preset Badge [P]
-            CGRect preBadge = CGRectMake(CGRectGetMaxX(slotRect) - 86, sy + 3, 16, 20);
+            CGRect preBadge = CGRectMake(CGRectGetMaxX(slotRect) - 86, sy + 2, 16, 19);
             CGContextSetRGBFillColor(ctx, 0.13, 0.16, 0.20, 1.0);
             CGContextFillRect(ctx, preBadge);
             CGContextSetRGBStrokeColor(ctx, 0.35, 0.55, 0.75, 0.8);
@@ -1082,19 +1115,24 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
                 NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.55 green:0.80 blue:0.98 alpha:1.0]
             };
             NSSize pSz = [@"P" sizeWithAttributes:pAttrs];
-            [@"P" drawAtPoint:NSMakePoint(preBadge.origin.x + (16 - pSz.width) * 0.5, preBadge.origin.y + 4) withAttributes:pAttrs];
+            [@"P" drawAtPoint:NSMakePoint(preBadge.origin.x + (16 - pSz.width) * 0.5, preBadge.origin.y + 3.5) withAttributes:pAttrs];
 
-            // 4. Reorder Badge [↕]
-            CGRect ordBadge = CGRectMake(CGRectGetMaxX(slotRect) - 68, sy + 3, 16, 20);
+            // 4. Move Up Badge [↑] (dimmed on the first slot)
+            CGRect ordBadge = CGRectMake(CGRectGetMaxX(slotRect) - 68, sy + 2, 16, 19);
             CGContextSetRGBFillColor(ctx, 0.14, 0.15, 0.17, 1.0);
             CGContextFillRect(ctx, ordBadge);
             CGContextSetRGBStrokeColor(ctx, 0.45, 0.48, 0.52, 0.8);
             CGContextStrokeRect(ctx, ordBadge);
-            NSSize oSz = [@"↕" sizeWithAttributes:pAttrs];
-            [@"↕" drawAtPoint:NSMakePoint(ordBadge.origin.x + (16 - oSz.width) * 0.5, ordBadge.origin.y + 4) withAttributes:pAttrs];
+            NSDictionary *upAttrs = @{
+                NSFontAttributeName: SysFont(9, NSFontWeightBold),
+                NSForegroundColorAttributeName: (i > 0) ? [NSColor colorWithCalibratedRed:0.55 green:0.80 blue:0.98 alpha:1.0]
+                                                       : [NSColor colorWithCalibratedWhite:0.35 alpha:1.0]
+            };
+            NSSize oSz = [@"↑" sizeWithAttributes:upAttrs];
+            [@"↑" drawAtPoint:NSMakePoint(ordBadge.origin.x + (16 - oSz.width) * 0.5, ordBadge.origin.y + 3.0) withAttributes:upAttrs];
 
             // 5. Per-Plugin Oversampling Badge (1x / 2x / 4x)
-            CGRect osBadge = CGRectMake(CGRectGetMaxX(slotRect) - 50, sy + 3, 24, 20);
+            CGRect osBadge = CGRectMake(CGRectGetMaxX(slotRect) - 50, sy + 2, 24, 19);
             CGContextSetRGBFillColor(ctx, 0.12, 0.14, 0.16, 1.0);
             CGContextFillRect(ctx, osBadge);
             CGContextSetRGBStrokeColor(ctx, (osFactor > 1) ? 0.95 : 0.5, (osFactor > 1) ? 0.75 : 0.5, (osFactor > 1) ? 0.25 : 0.5, 0.8);
@@ -1107,10 +1145,10 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
                 NSForegroundColorAttributeName: (osFactor > 1) ? [NSColor colorWithCalibratedRed:0.95 green:0.75 blue:0.25 alpha:1.0] : [NSColor colorWithCalibratedWhite:0.65 alpha:1.0]
             };
             NSSize osSz = [osText sizeWithAttributes:osAttrs];
-            [osText drawAtPoint:NSMakePoint(osBadge.origin.x + (24 - osSz.width) * 0.5, osBadge.origin.y + 4) withAttributes:osAttrs];
+            [osText drawAtPoint:NSMakePoint(osBadge.origin.x + (24 - osSz.width) * 0.5, osBadge.origin.y + 3.5) withAttributes:osAttrs];
 
             // 6. Unload / Delete Button [✕]
-            CGRect delBadge = CGRectMake(CGRectGetMaxX(slotRect) - 23, sy + 3, 20, 20);
+            CGRect delBadge = CGRectMake(CGRectGetMaxX(slotRect) - 23, sy + 2, 20, 19);
             CGContextSetRGBFillColor(ctx, 0.18, 0.12, 0.12, 1.0);
             CGContextFillRect(ctx, delBadge);
             CGContextSetRGBStrokeColor(ctx, 0.6, 0.25, 0.25, 0.8);
@@ -1121,12 +1159,12 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
                 NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.85 green:0.4 blue:0.4 alpha:1.0]
             };
             NSSize dSz = [@"✕" sizeWithAttributes:delAttrs];
-            [@"✕" drawAtPoint:NSMakePoint(delBadge.origin.x + (20 - dSz.width) * 0.5, delBadge.origin.y + 4) withAttributes:delAttrs];
+            [@"✕" drawAtPoint:NSMakePoint(delBadge.origin.x + (20 - dSz.width) * 0.5, delBadge.origin.y + 3.5) withAttributes:delAttrs];
         }
 
         // Add Plugin Button [+]
-        CGFloat addSy = baseY - numLoaded * (slotH + slotSpacing);
-        if (addSy >= 88) {
+        CGFloat addSy = SlotRowY(bounds.size.height, numLoaded);
+        if (numLoaded < kMaxSlots) {
             CGRect addRect = CGRectMake(rx, addSy, slotW, slotH);
             CGContextSetRGBFillColor(ctx, 0.12, 0.14, 0.16, 0.8);
             CGContextFillRect(ctx, addRect);
@@ -1142,24 +1180,9 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
             };
             NSString *addTxt = @"+ Add Plugin...";
             NSSize addSz = [addTxt sizeWithAttributes:addAttrs];
-            [addTxt drawAtPoint:NSMakePoint(addRect.origin.x + (slotW - addSz.width) * 0.5, addSy + 6) withAttributes:addAttrs];
+            [addTxt drawAtPoint:NSMakePoint(addRect.origin.x + (slotW - addSz.width) * 0.5, addSy + 5) withAttributes:addAttrs];
         }
 
-        // Master Bypass Toggle
-        CGRect bypRect = CGRectMake(rx, 48, slotW, 30);
-        CGContextSetRGBFillColor(ctx, _isBypassed ? 0.35 : 0.18, _isBypassed ? 0.15 : 0.28, _isBypassed ? 0.15 : 0.20, 1.0);
-        CGContextFillRect(ctx, bypRect);
-        CGContextSetRGBStrokeColor(ctx, _isBypassed ? 0.85 : 0.45, _isBypassed ? 0.35 : 0.75, _isBypassed ? 0.35 : 0.45, 1.0);
-        CGContextSetLineWidth(ctx, 1.2);
-        CGContextStrokeRect(ctx, bypRect);
-
-        NSString *bypText = _isBypassed ? @"MASTER BYPASS: ENGAGED" : @"MASTER: ACTIVE (PROCESSING)";
-        NSDictionary *bypAttrs = @{
-            NSFontAttributeName: SysFont(10.5, NSFontWeightBold),
-            NSForegroundColorAttributeName: [NSColor whiteColor]
-        };
-        NSSize bypSz = [bypText sizeWithAttributes:bypAttrs];
-        [bypText drawAtPoint:NSMakePoint(bypRect.origin.x + (slotW - bypSz.width) * 0.5, bypRect.origin.y + 7) withAttributes:bypAttrs];
     }
 
     // =========================================================================
@@ -1322,9 +1345,7 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
 
         // Check Latency Profile Buttons
         for (int i = 0; i < 4; ++i) {
-            CGFloat bx = rx + (i % 2) * 114;
-            CGFloat by = bounds.size.height - 146 - (i / 2) * 28;
-            CGRect bRect = CGRectMake(bx, by, 108, 24);
+            CGRect bRect = ProfileButtonRect(rx, bounds.size.height, i);
             if (CGRectContainsPoint(bRect, cp)) {
                 _activeProfile = i;
                 uint32_t target = (i == 0) ? 128 : (i == 1) ? 256 : (i == 2) ? 512 : 1024;
@@ -1343,15 +1364,13 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
 
         // Dynamic Plugin Slots
         uint32_t numLoaded = self.rust ? og_native_num_loaded_plugins(self.rust) : 0;
-        CGFloat slotH = 26;
-        CGFloat slotSpacing = 4;
-        CGFloat baseY = bounds.size.height - 230;
+        CGFloat slotH = kSlotH;
 
         for (uint32_t i = 0; i < numLoaded; ++i) {
-            CGFloat sy = baseY - i * (slotH + slotSpacing);
+            CGFloat sy = SlotRowY(bounds.size.height, i);
             CGRect slotRect = CGRectMake(rx, sy, slotW, slotH);
 
-            CGRect bypBadge = CGRectMake(slotRect.origin.x + 3, sy + 3, 18, 20);
+            CGRect bypBadge = CGRectMake(slotRect.origin.x + 3, sy + 2, 18, 19);
             if (CGRectContainsPoint(bypBadge, cp)) {
                 char nameBuf[256] = {0};
                 bool bypassed = false;
@@ -1362,23 +1381,24 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
                 return;
             }
 
-            CGRect preBadge = CGRectMake(CGRectGetMaxX(slotRect) - 86, sy + 3, 16, 20);
+            CGRect preBadge = CGRectMake(CGRectGetMaxX(slotRect) - 86, sy + 2, 16, 19);
             if (CGRectContainsPoint(preBadge, cp)) {
                 [self showPresetMenuForSlot:i atPoint:p];
                 return;
             }
 
-            CGRect ordBadge = CGRectMake(CGRectGetMaxX(slotRect) - 68, sy + 3, 16, 20);
+            CGRect ordBadge = CGRectMake(CGRectGetMaxX(slotRect) - 68, sy + 2, 16, 19);
             if (CGRectContainsPoint(ordBadge, cp)) {
-                if (numLoaded > 1) {
-                    uint32_t targetIdx = (i + 1) % numLoaded;
-                    og_native_exchange_plugins(self.rust, i, targetIdx);
+                if (i > 0) {
+                    og_native_exchange_plugins(self.rust, i, i - 1);
+                    if (_activeSlot == i) _activeSlot = i - 1;
+                    else if (_activeSlot == i - 1) _activeSlot = i;
                     [self setNeedsDisplay:YES];
                 }
                 return;
             }
 
-            CGRect osBadge = CGRectMake(CGRectGetMaxX(slotRect) - 50, sy + 3, 24, 20);
+            CGRect osBadge = CGRectMake(CGRectGetMaxX(slotRect) - 50, sy + 2, 24, 19);
             if (CGRectContainsPoint(osBadge, cp)) {
                 char nameBuf[256] = {0};
                 bool bypassed = false;
@@ -1390,7 +1410,7 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
                 return;
             }
 
-            CGRect delBadge = CGRectMake(CGRectGetMaxX(slotRect) - 23, sy + 3, 20, 20);
+            CGRect delBadge = CGRectMake(CGRectGetMaxX(slotRect) - 23, sy + 2, 20, 19);
             if (CGRectContainsPoint(delBadge, cp)) {
                 og_native_unload_plugin(self.rust, i);
                 [[OpenGridderRemoteWindowController sharedController] hide];
@@ -1422,8 +1442,8 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
             }
         }
 
-        CGFloat addSy = baseY - numLoaded * (slotH + slotSpacing);
-        if (addSy >= 88) {
+        CGFloat addSy = SlotRowY(bounds.size.height, numLoaded);
+        if (numLoaded < kMaxSlots) {
             CGRect addRect = CGRectMake(rx, addSy, slotW, slotH);
             if (CGRectContainsPoint(addRect, cp)) {
                 [self showPluginMenuAtPoint:p];
@@ -1431,8 +1451,7 @@ static void DrawMasterMeteringBay(CGContextRef ctx,
             }
         }
 
-        CGRect bypRect = CGRectMake(rx, 48, slotW, 30);
-        if (CGRectContainsPoint(bypRect, cp)) {
+        if (CGRectContainsPoint(MasterButtonRect(rx, bounds.size.height), cp)) {
             _isBypassed = !_isBypassed;
             if (self.rust) og_native_bypass(self.rust, _isBypassed);
             if (self.onParameterChanged) self.onParameterChanged(0, _isBypassed ? 1.0f : 0.0f);
@@ -1922,12 +1941,10 @@ static NSString *OGNormalizedServer(NSString *text) {
     NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
     CGRect bounds = NSRectToCGRect(self.bounds);
     uint32_t numLoaded = og_native_num_loaded_plugins(self.rust);
-    CGFloat slotH = 26;
-    CGFloat slotSpacing = 4;
-    CGFloat baseY = bounds.size.height - 230;
+    CGFloat slotH = kSlotH;
 
     for (uint32_t i = 0; i < numLoaded; ++i) {
-        CGFloat sy = baseY - i * (slotH + slotSpacing);
+        CGFloat sy = SlotRowY(bounds.size.height, i);
         CGRect slotRect = CGRectMake(40, sy, 208, slotH);
         if (CGRectContainsPoint(slotRect, NSPointToCGPoint(p))) {
             NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Slot Context"];
