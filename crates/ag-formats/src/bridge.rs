@@ -40,6 +40,16 @@ struct Native {
     // format its connection was opened with, so prepare reconnects only when either changes.
     endpoint: Mutex<String>,
     connected_format: Mutex<(u64, u32, u32)>,
+    // A/B: two complete versions of this insert (console, server, chain with each plugin's
+    // settings). Switching saves the side being left, so edits on either side are kept.
+    ab: Mutex<AbSides>,
+}
+
+#[derive(Default)]
+struct AbSides {
+    a: Vec<u8>,
+    b: Vec<u8>,
+    on_b: bool,
 }
 
 const DEFAULT_ENDPOINT: &str = "127.0.0.1:55056";
@@ -116,6 +126,7 @@ pub extern "C" fn ag_insert_create() -> *mut c_void {
         prepared_channels: AtomicU32::new(0),
         endpoint: Mutex::new(DEFAULT_ENDPOINT.to_string()),
         connected_format: Mutex::new((0, 0, 0)),
+        ab: Mutex::new(AbSides::default()),
     })) as *mut c_void
 }
 #[no_mangle]
@@ -370,8 +381,19 @@ pub unsafe extern "C" fn ag_insert_save(p: *mut c_void, out: *mut u8, capacity: 
     let Some(n) = native(p) else {
         return 0;
     };
-    let Ok(mut control) = n.control.lock() else {
+    let Some(bytes) = save_bytes(n) else {
         return 0;
+    };
+    if !out.is_null() && capacity as usize >= bytes.len() {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len());
+    }
+    bytes.len() as u32
+}
+
+/// The whole insert state, with every remote slot's settings read fresh from the server.
+fn save_bytes(n: &Native) -> Option<Vec<u8>> {
+    let Ok(mut control) = n.control.lock() else {
+        return None;
     };
     for (i, param) in params().iter().enumerate() {
         control.set_param(
@@ -385,19 +407,13 @@ pub unsafe extern "C" fn ag_insert_save(p: *mut c_void, out: *mut u8, capacity: 
     drop(control);
     n.live_ctrl.sync_settings(std::time::Duration::from_secs(3));
     let Ok(mut control) = n.control.lock() else {
-        return 0;
+        return None;
     };
     let (connected, slots) = n.live_ctrl.with_info(|info| (info.connected, info.slots.clone()));
     if connected || !slots.is_empty() {
         control.set_loaded_plugins(slots.iter().map(slot_to_chain).collect());
     }
-    let Some(bytes) = control.save_state() else {
-        return 0;
-    };
-    if !out.is_null() && capacity as usize >= bytes.len() {
-        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len());
-    }
-    bytes.len() as u32
+    control.save_state()
 }
 #[no_mangle]
 pub unsafe extern "C" fn ag_insert_load(p: *mut c_void, data: *const u8, length: u32) -> bool {
@@ -428,6 +444,87 @@ pub unsafe extern "C" fn ag_insert_load(p: *mut c_void, data: *const u8, length:
         *endpoint = server;
     }
     connect_now(n);
+    n.revision.fetch_add(1, Ordering::Relaxed);
+    true
+}
+
+/// A/B switch. The side being left is saved (so its edits are kept), then the other side is
+/// applied. A side never visited starts as a copy of the current one.
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_toggle_ab(p: *mut c_void) -> bool {
+    let Some(n) = native(p) else {
+        return false;
+    };
+    let Some(current) = save_bytes(n) else {
+        return false;
+    };
+    let target = {
+        let Ok(mut ab) = n.ab.lock() else {
+            return false;
+        };
+        if ab.on_b {
+            ab.b = current;
+        } else {
+            ab.a = current;
+        }
+        ab.on_b = !ab.on_b;
+        if ab.on_b { ab.b.clone() } else { ab.a.clone() }
+    };
+    n.revision.fetch_add(1, Ordering::Relaxed);
+    if target.is_empty() {
+        return true;
+    }
+    apply_side(n, &target)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ag_insert_is_b(p: *mut c_void) -> bool {
+    native(p).and_then(|n| n.ab.lock().ok().map(|ab| ab.on_b)).unwrap_or(false)
+}
+
+/// Load one A/B side. With the same plugins on the same server, each slot's settings, bypass
+/// and oversampling are applied to the running plugins (no reload, audio keeps going);
+/// otherwise the side's chain is rebuilt like a session load.
+fn apply_side(n: &Native, data: &[u8]) -> bool {
+    let Ok(mut control) = n.control.lock() else {
+        return false;
+    };
+    let server_before = control.active_server().to_string();
+    if !control.load_state(data) {
+        return false;
+    }
+    for (i, param) in params().iter().enumerate() {
+        if let Some(value) = control.param(param.id) {
+            n.values[i].store(value.to_bits(), Ordering::Relaxed);
+        }
+    }
+    let chain: Vec<ag_plugin::ChainPlugin> = control.loaded_plugins().to_vec();
+    let server = control.active_server().to_string();
+    drop(control);
+    let live: Vec<ag_plugin::LoadedSlot> = n.live_ctrl.with_info(|info| info.slots.clone());
+    let same_plugins = chain.len() == live.len() && chain.iter().zip(&live).all(|(saved, running)| saved.id == running.id);
+    if server == server_before && same_plugins && n.live_ctrl.connected() {
+        use ag_plugin::live::LiveCommand;
+        for (index, (saved, running)) in chain.iter().zip(&live).enumerate() {
+            let index = index as i32;
+            if !saved.settings.is_empty() && saved.settings != running.settings {
+                n.live_ctrl.send(LiveCommand::ApplySettings(index, saved.settings.clone()));
+            }
+            if saved.bypassed != running.bypassed {
+                n.live_ctrl.send(LiveCommand::Bypass(index, saved.bypassed));
+            }
+            let factor = saved.oversampling.max(1);
+            if factor as u32 != running.oversampling.max(1) {
+                n.live_ctrl.send(LiveCommand::Oversampling(index, factor));
+            }
+        }
+    } else {
+        n.live_ctrl.restore(chain.iter().map(chain_to_slot).collect());
+        if let Ok(mut endpoint) = n.endpoint.lock() {
+            *endpoint = server;
+        }
+        connect_now(n);
+    }
     n.revision.fetch_add(1, Ordering::Relaxed);
     true
 }

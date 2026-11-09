@@ -11,6 +11,8 @@ bool ag_insert_param_id(uint32_t,char*,uint32_t);
 bool ag_insert_param_text(uint32_t,double,char*,uint32_t);
 double ag_insert_get(void*,uint32_t);
 bool ag_insert_set(void*,uint32_t,double);
+bool ag_insert_toggle_ab(void*);
+bool ag_insert_is_b(void*);
 uint32_t ag_insert_latency(void*);
 bool ag_insert_process(void*,const float*const*,float*const*,uint32_t,uint32_t,bool);
 bool ag_insert_process64(void*,const double*const*,double*const*,uint32_t,uint32_t,bool);

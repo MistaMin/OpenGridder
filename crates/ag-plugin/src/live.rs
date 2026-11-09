@@ -126,6 +126,8 @@ pub enum LiveCommand {
     SyncSettings(SyncSender<()>),
     Oversampling(i32, i32),
     Preset(i32, i32),
+    /// Apply saved settings (plugin state and values) to a running slot (A/B switch).
+    ApplySettings(i32, String),
 }
 struct Owner {
     shared: Arc<Shared>,
@@ -547,6 +549,7 @@ fn run(shared: Arc<Shared>, commands: mpsc::Receiver<LiveCommand>) {
                 }),
                 LiveCommand::Oversampling(i, n) => s.set_oversampling(i, n),
                 LiveCommand::Preset(i, p) => s.set_preset(i, p, 0),
+                LiveCommand::ApplySettings(i, settings) => s.apply_settings(i, &settings),
                 _ => Ok(()),
             };
             match result {

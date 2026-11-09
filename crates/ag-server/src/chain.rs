@@ -958,18 +958,25 @@ impl PluginChain {
         if restored {
             return; // state and values were restored when the instance was created
         }
+        let values = state_values(text);
+        let before: Vec<f32> = values.as_ref().map(|values| (0..values.len()).map(|i| slot.param(i as i32)).collect()).unwrap_or_default();
+        let mut state_applied = false;
         if let Some(chunk) = state_blob(text) {
             if let Processor::Plugin(plugin) = &slot.processor {
                 if let Some(target) = plugin.editor_target() {
-                    crate::ui::set_state(target, &chunk);
+                    state_applied = crate::ui::set_state(target, &chunk);
                 }
             }
         }
-        let Some(values) = state_values(text) else {
+        let Some(values) = values else {
             return;
         };
+        // As in `instantiate_for`: a parameter the state set keeps the state's value.
         for (i, value) in values.iter().enumerate() {
-            slot.set_param(i as i32, *value);
+            let set_by_state = state_applied && (slot.param(i as i32) - before[i]).abs() > 1.0e-6;
+            if !set_by_state {
+                slot.set_param(i as i32, *value);
+            }
         }
     }
 

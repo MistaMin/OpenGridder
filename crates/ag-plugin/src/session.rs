@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use ag_protocol::command::{
     self, ADD_PLUGIN, ADD_PLUGIN_RESULT, BYPASS_PLUGIN, CPU_LOAD, DEL_PLUGIN, EDIT_PLUGIN, EXCHANGE_PLUGINS, GET_PARAMETER_VALUE,
-    GET_PLUGIN_SETTINGS, KEY, MOUSE, PARAMETER_VALUE, PARAMETERS, PLUGIN_LIST, PLUGIN_SETTINGS, PRESET, PRESETS, RESULT,
+    GET_PLUGIN_SETTINGS, KEY, SET_PLUGIN_SETTINGS, MOUSE, PARAMETER_VALUE, PARAMETERS, PLUGIN_LIST, PLUGIN_SETTINGS, PRESET, PRESETS, RESULT,
     SCREEN_CAPTURE, SET_MONO_CHANNELS, SET_PLUGIN_OVERSAMPLING, UNBYPASS_PLUGIN,
 };
 use ag_protocol::{
@@ -562,6 +562,17 @@ impl RemoteSession {
     }
 
     /// `SetPluginOversampling`: two little-endian i32s, index then factor (1, 2, or 4).
+    /// SetPluginSettings then PluginSettings (AudioGridder's pair): the server applies these
+    /// settings, as GetPluginSettings returned them, to the running slot. No reply.
+    pub fn apply_settings(&mut self, index: i32, settings: &str) -> std::io::Result<()> {
+        self.write_cmd(SET_PLUGIN_SETTINGS, &command::number(index))?;
+        self.write_cmd(PLUGIN_SETTINGS, &command::length_prefixed(settings.as_bytes()))?;
+        if let Some(slot) = self.slots.get_mut(index as usize) {
+            slot.settings = settings.to_string();
+        }
+        Ok(())
+    }
+
     pub fn set_oversampling(&mut self, index: i32, factor: i32) -> std::io::Result<()> {
         let mut body = [0u8; 8];
         body[..4].copy_from_slice(&index.to_le_bytes());

@@ -432,8 +432,8 @@ bool og_native_set_plugin_param(NativePlugin* p, uint32_t loaded_idx, uint32_t p
 
 void og_native_store_a(NativePlugin* p) { (void)p; }
 void og_native_store_b(NativePlugin* p) { (void)p; }
-void og_native_toggle_ab(NativePlugin* p) { (void)p; }
-bool og_native_is_b(NativePlugin* p) { (void)p; return false; }
+void og_native_toggle_ab(NativePlugin* p) { ag_insert_toggle_ab((void*)p); }
+bool og_native_is_b(NativePlugin* p) { return ag_insert_is_b((void*)p); }
 
 void og_native_get_active_server(NativePlugin* p, char* buf, uint32_t cap) {
     if (!buf || cap == 0) return;

@@ -612,23 +612,20 @@ impl AudioGridder {
         self.settings_b = self.save_state().unwrap_or_default();
     }
 
-    /// Leave the active side and load the other snapshot.
-    /// A stored side is kept. An empty side is filled from the live console first.
+    /// Leave the active side and load the other snapshot. The side being left is saved
+    /// first, so edits on either side are kept; a side never visited starts as a copy.
+    /// (The plug-in formats use `ag_insert_toggle_ab`, which does the same with the remote chain.)
     pub fn toggle_ab(&mut self) -> bool {
         let next = if self.active_is_b {
-            if self.settings_b.is_empty() {
-                self.store_settings_b();
-            }
+            self.store_settings_b();
             self.active_is_b = false;
             self.settings_a.clone()
         } else {
-            if self.settings_a.is_empty() {
-                self.store_settings_a();
-            }
+            self.store_settings_a();
             self.active_is_b = true;
             self.settings_b.clone()
         };
-        !next.is_empty() && self.load_state(&next)
+        next.is_empty() || self.load_state(&next)
     }
 
     /// Hosted writes queued by an assigned slot since the last take.
@@ -1997,10 +1994,11 @@ mod tests {
         let mut plugin = prepared();
         plugin.set_param("input_gain", -12.0);
         plugin.prepare(48_000.0, 4096, 1);
-        plugin.store_settings_a();
+        assert!(plugin.toggle_ab()); // A keeps -12 dB; B starts as a copy
         plugin.set_param("input_gain", 6.0);
         plugin.prepare(48_000.0, 4096, 1);
-        plugin.store_settings_b();
+        assert!(plugin.toggle_ab()); // B keeps +6 dB, back on A
+        assert!((plugin.param("input_gain").unwrap() - -12.0).abs() < 1.0e-4);
         assert!(plugin.toggle_ab());
         let on_b = render(&mut plugin, &[0.5; 256]);
         let plus = 0.5 * 10.0f32.powf(6.0 / 20.0);
@@ -2016,6 +2014,11 @@ mod tests {
         let back = render(&mut plugin, &[0.5; 256]);
         eprintln!("ab b again {}", back[200]);
         assert!((back[200] - plus).abs() < 1.0e-4, "B again {}", back[200]);
+        // An edit on a side that was already stored is kept too.
+        plugin.set_param("input_gain", 3.0);
+        assert!(plugin.toggle_ab());
+        assert!(plugin.toggle_ab());
+        assert!((plugin.param("input_gain").unwrap() - 3.0).abs() < 1.0e-4, "B edit lost");
     }
 
     #[test]
