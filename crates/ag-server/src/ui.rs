@@ -23,6 +23,11 @@ unsafe extern "C" {
     fn ag_ui_encode_jpeg(rgba: *const u8, width: i32, height: i32, quality: f64, out_len: *mut usize) -> *mut u8;
     fn ag_ui_free(p: *mut c_void);
     fn ag_ui_advertise(port: u16, txt: *const c_char) -> bool;
+    fn ag_au_get_state(unit: *mut c_void, out_len: *mut usize) -> *mut u8;
+    fn ag_au_set_state(unit: *mut c_void, bytes: *const u8, len: usize) -> bool;
+    fn ag_native_get_state(native: *mut c_void, out_len: *mut usize) -> *mut u8;
+    fn ag_native_set_state(native: *mut c_void, bytes: *const u8, len: usize) -> i32;
+    fn ag_native_free(p: *mut c_void);
 }
 
 /// Run the AppKit loop on this (the main) thread. Never returns.
@@ -148,6 +153,37 @@ pub fn keys(id: u64, codes: &[u16]) {
 pub fn advertise(port: u16, txt: &str) -> bool {
     let txt = CString::new(txt).unwrap_or_default();
     unsafe { ag_ui_advertise(port, txt.as_ptr()) }
+}
+
+/// The plugin's own state, as a DAW saves it (AU ClassInfo, VST3 component and controller
+/// state, CLAP state). `None` when it has none. Runs on the main thread (some frameworks
+/// expect their state calls there) and needs no chain lock.
+pub fn get_state(target: crate::host::EditorTarget) -> Option<Vec<u8>> {
+    on_main(move || {
+        let mut len = 0usize;
+        let (raw, free): (*mut u8, unsafe extern "C" fn(*mut c_void)) = unsafe {
+            match target {
+                crate::host::EditorTarget::Au(unit) => (ag_au_get_state(unit as *mut c_void, &mut len), ag_ui_free),
+                crate::host::EditorTarget::Native(raw) => (ag_native_get_state(raw as *mut c_void, &mut len), ag_native_free),
+            }
+        };
+        if raw.is_null() {
+            return None;
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(raw, len) }.to_vec();
+        unsafe { free(raw as *mut c_void) };
+        Some(bytes)
+    })
+}
+
+/// Restore state saved by `get_state`. False when the plugin refused it.
+pub fn set_state(target: crate::host::EditorTarget, bytes: &[u8]) -> bool {
+    on_main(move || unsafe {
+        match target {
+            crate::host::EditorTarget::Au(unit) => ag_au_set_state(unit as *mut c_void, bytes.as_ptr(), bytes.len()),
+            crate::host::EditorTarget::Native(raw) => ag_native_set_state(raw as *mut c_void, bytes.as_ptr(), bytes.len()) == 1,
+        }
+    })
 }
 
 /// Compressed PNG via ImageIO.

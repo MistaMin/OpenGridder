@@ -518,6 +518,44 @@ static uint8_t* encode_image(const uint8_t* rgba, int width, int height, CFStrin
 
 void ag_ui_free(void* p) { free(p); }
 
+// An AudioUnit's state as a DAW saves it: kAudioUnitProperty_ClassInfo, as a binary plist.
+// Returns a malloc'd buffer (free with ag_ui_free) or NULL.
+uint8_t* ag_au_get_state(void* unit, size_t* out_len) {
+    *out_len = 0;
+    if (!unit) return NULL;
+    CFPropertyListRef plist = NULL;
+    UInt32 size = sizeof(plist);
+    if (AudioUnitGetProperty((AudioUnit)unit, kAudioUnitProperty_ClassInfo, kAudioUnitScope_Global, 0, &plist, &size) != noErr || !plist) {
+        return NULL;
+    }
+    CFDataRef data = CFPropertyListCreateData(kCFAllocatorDefault, plist, kCFPropertyListBinaryFormat_v1_0, 0, NULL);
+    CFRelease(plist);
+    if (!data) return NULL;
+    const CFIndex len = CFDataGetLength(data);
+    uint8_t* out = (uint8_t*)malloc(len > 0 ? (size_t)len : 1);
+    if (out) {
+        memcpy(out, CFDataGetBytePtr(data), (size_t)len);
+        *out_len = (size_t)len;
+    }
+    CFRelease(data);
+    return out;
+}
+
+bool ag_au_set_state(void* unit, const uint8_t* bytes, size_t len) {
+    if (!unit || !bytes || len == 0) return false;
+    CFDataRef data = CFDataCreate(kCFAllocatorDefault, bytes, (CFIndex)len);
+    CFPropertyListRef plist = data ? CFPropertyListCreateWithData(kCFAllocatorDefault, data, kCFPropertyListImmutable, NULL, NULL) : NULL;
+    if (data) CFRelease(data);
+    if (!plist) return false;
+    const OSStatus status = AudioUnitSetProperty((AudioUnit)unit, kAudioUnitProperty_ClassInfo, kAudioUnitScope_Global, 0, &plist, sizeof(plist));
+    CFRelease(plist);
+    if (status != noErr) return false;
+    // Tell the unit's views and listeners that every parameter may have changed.
+    AudioUnitParameter all = {(AudioUnit)unit, kAUParameterListener_AnyParameter, kAudioUnitScope_Global, 0};
+    AUParameterListenerNotify(NULL, NULL, &all);
+    return true;
+}
+
 // Advertise the server with the system's Bonjour (mDNSResponder) as AudioGridder's
 // "_audiogridder._tcp" service under this Mac's computer name, so clients on the network
 // find it. `txt` is AudioGridder's INFO={...} record. The registration lives as long

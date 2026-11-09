@@ -80,6 +80,8 @@ pub struct PluginChain {
     /// Instances created outside the chain lock for the next ADD_PLUGIN (`preload`).
     /// An empty list means creating them failed.
     preloaded: Option<Vec<Box<dyn host::Hosted>>>,
+    /// The preloaded instances already had the slot's saved state restored.
+    state_restored: bool,
     outbound: Vec<(i32, Vec<u8>)>,
     /// Last playhead the audio thread applied. AudioGridder does not put this
     /// in the plugin settings chunk. GetPluginSettings appends it so a client
@@ -109,6 +111,7 @@ impl PluginChain {
             editor_window: 0,
             live_editor: Arc::new(AtomicU64::new(0)),
             preloaded: None,
+            state_restored: false,
             outbound: Vec::new(),
             last_playhead: PositionInfo::default(),
         }
@@ -284,7 +287,8 @@ impl PluginChain {
         let layout = layout_name(json.get("layout").and_then(|v| v.as_str()).unwrap_or(""));
         let count = if layout == "Multi-Mono" { self.channels.max(1) } else { 1 };
         let bus_channels = if layout == "Mono" || layout == "Multi-Mono" { 1 } else { self.channels };
-        Some(LoadRequest { id, sample_rate: self.sample_rate, max_block: self.max_block, bus_channels, count })
+        let settings = json.get("settings").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        Some(LoadRequest { id, settings, sample_rate: self.sample_rate, max_block: self.max_block, bus_channels, count })
     }
 
     pub fn instantiate_for(request: &LoadRequest) -> Vec<Box<dyn host::Hosted>> {
@@ -292,6 +296,21 @@ impl PluginChain {
         for _ in 0..request.count {
             match host::instantiate(&request.id, request.sample_rate, request.max_block, request.bus_channels) {
                 Some(mut plugin) => {
+                    // The plugin's own saved state (AudioGridder's setStateInformation), before
+                    // it goes live. Multi-mono instances all get the same state.
+                    if let (Some(chunk), Some(target)) = (state_blob(&request.settings), plugin.editor_target()) {
+                        if !crate::ui::set_state(target, &chunk) {
+                            eprintln!("ag-server: {} refused its saved state", request.id);
+                        }
+                    }
+                    // Then the saved parameter values on top: some plugins (Acustica, Softube
+                    // AUs) accept their state blob without the values their controls show.
+                    // For plugins whose state already has them, this changes nothing.
+                    if let Some(values) = state_values(&request.settings) {
+                        for (index, value) in values.iter().enumerate() {
+                            plugin.set_param(index as i32, *value);
+                        }
+                    }
                     // Warm it up off the audio path: plugins (Acustica, iZotope) do lazy setup
                     // and start with silence in their first blocks; that would otherwise stall
                     // the live chain and drop out when the slot is inserted.
@@ -307,8 +326,36 @@ impl PluginChain {
         instances
     }
 
-    pub fn preload(&mut self, instances: Vec<Box<dyn host::Hosted>>) {
+    pub fn preload(&mut self, instances: Vec<Box<dyn host::Hosted>>, state_restored: bool) {
         self.preloaded = Some(instances);
+        self.state_restored = state_restored;
+    }
+
+    /// GET_PLUGIN_SETTINGS, first half (under the lock): the plugin whose state to read.
+    /// The state itself is read without the lock (`ui::get_state`): it can be large and slow
+    /// (Acustica) and the audio thread needs the chain meanwhile.
+    pub fn settings_target(&self, body: &[u8]) -> Option<host::EditorTarget> {
+        let index = command::read_number(body).and_then(usize_index)?;
+        match &self.slots.get(index)?.processor {
+            Processor::Plugin(plugin) => plugin.editor_target(),
+            Processor::Gain(_) => None,
+        }
+    }
+
+    /// GET_PLUGIN_SETTINGS, second half: the parameter values plus the plugin's own state.
+    pub fn settings_reply(&self, body: &[u8], state: Option<Vec<u8>>) -> Vec<(i32, Vec<u8>)> {
+        let mut replies = self.get_settings(body);
+        let Some(state) = state else { return replies };
+        if let Some((PLUGIN_SETTINGS, reply)) = replies.first_mut().map(|(t, b)| (*t, b)) {
+            if let Some(text) = command::read_length_prefixed(reply).and_then(|b| std::str::from_utf8(b).ok()) {
+                if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(text) {
+                    value["v"] = serde_json::json!(2);
+                    value["state"] = serde_json::json!(base64_encode(&state));
+                    *reply = command::length_prefixed(value.to_string().as_bytes());
+                }
+            }
+        }
+        replies
     }
 
     /// EDIT_PLUGIN, first half (under the lock): close the open editor, select the slot,
@@ -715,10 +762,14 @@ impl PluginChain {
         let name = first.name();
         let has_editor = first.has_editor();
         let supports_double = first.supports_double();
-        let params = first.parameters();
         let processor = instances.remove(0);
         self.push_slot(processor, instances, settings.clone(), layout.clone(), mono);
         self.apply_state_chunk(self.slots.len() - 1, &settings);
+        // The values after the saved settings were applied (the client keeps these).
+        let params = match self.slots.last().map(|slot| &slot.processor) {
+            Some(Processor::Plugin(plugin)) => plugin.parameters(),
+            _ => serde_json::json!([]),
+        };
         self.remember_recent(id);
         self.push_status(self.slots.len() - 1, true, "");
         let presets = self.slots.last().map(Slot::preset_list).unwrap_or_default();
@@ -874,6 +925,19 @@ impl PluginChain {
             return;
         };
         slot.settings = text.to_string();
+        let restored = std::mem::take(&mut self.state_restored);
+        // Settings with the plugin's own state: that state is authoritative. It was restored
+        // when the instance was created (`instantiate_for`); otherwise restore it here.
+        if restored {
+            return; // state and values were restored when the instance was created
+        }
+        if let Some(chunk) = state_blob(text) {
+            if let Processor::Plugin(plugin) = &slot.processor {
+                if let Some(target) = plugin.editor_target() {
+                    crate::ui::set_state(target, &chunk);
+                }
+            }
+        }
         let Some(values) = state_values(text) else {
             return;
         };
@@ -1218,6 +1282,8 @@ impl Slot {
 /// A hosted plugin to create for ADD_PLUGIN (see `PluginChain::load_request`).
 pub struct LoadRequest {
     pub id: String,
+    /// The slot's saved settings; their plugin state is restored before the slot goes live.
+    pub settings: String,
     pub sample_rate: f32,
     pub max_block: usize,
     pub bus_channels: usize,
@@ -1229,6 +1295,51 @@ impl Drop for PluginChain {
     fn drop(&mut self) {
         self.close_window();
     }
+}
+
+/// The plugin's own state in a settings JSON (`"state"`, base64), if any.
+fn state_blob(settings: &str) -> Option<Vec<u8>> {
+    let value: serde_json::Value = serde_json::from_str(settings).ok()?;
+    base64_decode(value.get("state")?.as_str()?)
+}
+
+const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+pub fn base64_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16) | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8) | u32::from(*chunk.get(2).unwrap_or(&0));
+        out.push(BASE64[(n >> 18) as usize & 63] as char);
+        out.push(BASE64[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { BASE64[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { BASE64[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
+pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len() / 4 * 3);
+    let mut buffer = 0u32;
+    let mut bits = 0;
+    for byte in text.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => break,
+            b'\n' | b'\r' | b' ' => continue,
+            _ => return None,
+        };
+        buffer = (buffer << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+        }
+    }
+    Some(out)
 }
 
 fn layout_name(layout: &str) -> String {
@@ -1391,7 +1502,8 @@ fn usize_index(index: i32) -> Option<usize> {
 /// Plugin-settings chunk. A JSON number or a bare gain string is not a chunk.
 fn state_values(text: &str) -> Option<Vec<f32>> {
     let value: serde_json::Value = serde_json::from_str(text).ok()?;
-    if value.get("v").and_then(|v| v.as_i64()) != Some(1) {
+    // v1: values only; v2: values plus the plugin's own state.
+    if !matches!(value.get("v").and_then(|v| v.as_i64()), Some(1) | Some(2)) {
         return None;
     }
     let params = value.get("params")?.as_array()?;

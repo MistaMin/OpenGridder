@@ -122,6 +122,8 @@ pub enum LiveCommand {
     Key(Vec<u16>),
     /// Fetch the plugin list again (the plugin browser is opening).
     RefreshCatalog,
+    /// Read every slot's settings (with the plugin's state) now; reply when done.
+    SyncSettings(SyncSender<()>),
     Oversampling(i32, i32),
     Preset(i32, i32),
 }
@@ -173,6 +175,19 @@ impl LiveController {
     pub fn connected(&self) -> bool {
         self.0.shared.connected.load(Ordering::Acquire)
     }
+    /// Read every slot's settings from the server now (the DAW is saving). Waits up to
+    /// `timeout`; on timeout the last periodic read is saved (AudioGridder blocks the same way).
+    pub fn sync_settings(&self, timeout: Duration) -> bool {
+        if !self.connected() {
+            return false;
+        }
+        let (done, wait) = mpsc::sync_channel(1);
+        if !self.send(LiveCommand::SyncSettings(done)) {
+            return false;
+        }
+        wait.recv_timeout(timeout).is_ok()
+    }
+
     /// The oldest editor frame not yet shown.
     pub fn pop_screen(&self) -> Option<ScreenFrame> {
         self.0.shared.screen.lock().unwrap_or_else(|p| p.into_inner()).pop_front()
@@ -343,7 +358,9 @@ impl LiveAudio {
 }
 const RETRY_INTERVAL: Duration = Duration::from_secs(2);
 /// How often loaded plugins' settings are re-read for state saves and reconnect replays.
-const SETTINGS_INTERVAL: Duration = Duration::from_secs(3);
+// The plugin's full state comes with the settings (it can be large): every 10 s, plus a
+// fresh read whenever the DAW saves (`LiveController::sync_settings`).
+const SETTINGS_INTERVAL: Duration = Duration::from_secs(10);
 struct Target {
     endpoint: String,
     request: HandshakeRequest,
@@ -517,6 +534,14 @@ fn run(shared: Arc<Shared>, commands: mpsc::Receiver<LiveCommand>) {
                     s.send_mouse_event(kind, x, y, shift, ctrl, alt, dx, dy)
                 }
                 LiveCommand::Key(codes) => s.send_key(&codes),
+                LiveCommand::SyncSettings(done) => {
+                    let result = s.refresh_settings();
+                    if result.is_ok() {
+                        snapshot(&shared, s); // the saving thread reads these slots next
+                    }
+                    let _ = done.try_send(());
+                    result
+                }
                 LiveCommand::RefreshCatalog => s.refresh_catalog().map(|()| {
                     shared.info.lock().unwrap_or_else(|p| p.into_inner()).catalog = s.catalog_items().to_vec();
                 }),

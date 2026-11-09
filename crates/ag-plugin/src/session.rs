@@ -420,6 +420,14 @@ impl RemoteSession {
                 object.remove("playhead");
             }
             if let Some(slot) = self.slots.get_mut(index) {
+                // Keep the parameter values the client shows in step with the server's.
+                if let Some(values) = value.get("params").and_then(|v| v.as_array()) {
+                    for (i, current) in values.iter().enumerate() {
+                        if let (Some(current), Some(param)) = (current.as_f64(), slot.params.iter_mut().find(|p| p.idx == i as i32)) {
+                            param.current = current as f32;
+                        }
+                    }
+                }
                 slot.settings = value.to_string();
             }
         }

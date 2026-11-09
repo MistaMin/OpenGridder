@@ -32,9 +32,12 @@
 #include "pluginterfaces/vst/ivsthostapplication.h"
 #include "pluginterfaces/gui/iplugview.h"
 #include "pluginterfaces/vst/ivstmessage.h"
+#include "pluginterfaces/vst/ivstparameterchanges.h"
 #include <map>
 #include <memory>
 #include <clap/ext/gui.h>
+#include <clap/ext/state.h>
+#include "pluginterfaces/base/ibstream.h"
 
 // ui_mac.mm: the editor window follows a plugin-initiated resize.
 extern "C" void ag_ui_view_resized(void* nsview, int width, int height);
@@ -597,6 +600,24 @@ Steinberg::tresult PLUGIN_API HostMessage::queryInterface(const Steinberg::TUID 
     return Steinberg::kNoInterface;
 }
 
+// Parameter changes waiting for the next process() call: from the host (OpenGridder, a
+// restored session) and from the plugin's own editor (IComponentHandler::performEdit). The
+// audio thread only try-locks it, so a busy writer delays a change by a block, never blocks.
+struct ParamInbox {
+    std::mutex mutex;
+    std::vector<std::pair<uint32_t, double>> items;
+    void push(uint32_t id, double value) {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (auto& item : items) {
+            if (item.first == id) {
+                item.second = value;
+                return;
+            }
+        }
+        items.emplace_back(id, value);
+    }
+};
+
 class HostApp : public Steinberg::Vst::IHostApplication, public Steinberg::Vst::IComponentHandler {
 public:
     HostApp() { FUNKNOWN_CTOR }
@@ -632,9 +653,13 @@ public:
     }
 
     Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID) override { return Steinberg::kResultOk; }
-    Steinberg::tresult PLUGIN_API performEdit(Steinberg::Vst::ParamID, Steinberg::Vst::ParamValue) override {
+    // The plugin's editor changed a parameter: the processor must hear it too (VST3 hosts
+    // pass controller edits to the processor as parameter changes in process()).
+    Steinberg::tresult PLUGIN_API performEdit(Steinberg::Vst::ParamID id, Steinberg::Vst::ParamValue value) override {
+        if (inbox != nullptr) inbox->push(id, value);
         return Steinberg::kResultOk;
     }
+    ParamInbox* inbox = nullptr;
     Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID) override { return Steinberg::kResultOk; }
     Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32) override { return Steinberg::kResultOk; }
 };
@@ -704,6 +729,113 @@ Steinberg::tresult PLUGIN_API PlugFrame::queryInterface(const Steinberg::TUID ii
     return Steinberg::kNoInterface;
 }
 
+// A growable in-memory IBStream for IComponent/IEditController getState and setState.
+class MemoryStream : public Steinberg::IBStream {
+public:
+    MemoryStream() { FUNKNOWN_CTOR }
+    MemoryStream(const uint8_t* data, size_t len) : bytes_(data, data + len) { FUNKNOWN_CTOR }
+    virtual ~MemoryStream() { FUNKNOWN_DTOR }
+    DECLARE_FUNKNOWN_METHODS
+
+    Steinberg::tresult PLUGIN_API read(void* buffer, Steinberg::int32 count, Steinberg::int32* done) override {
+        const int64_t n = std::max<int64_t>(0, std::min<int64_t>(count, static_cast<int64_t>(bytes_.size()) - pos_));
+        if (n > 0) std::memcpy(buffer, bytes_.data() + pos_, static_cast<size_t>(n));
+        pos_ += n;
+        if (done) *done = static_cast<Steinberg::int32>(n);
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API write(void* buffer, Steinberg::int32 count, Steinberg::int32* done) override {
+        if (count < 0) return Steinberg::kInvalidArgument;
+        if (pos_ + count > static_cast<int64_t>(bytes_.size())) bytes_.resize(static_cast<size_t>(pos_ + count));
+        std::memcpy(bytes_.data() + pos_, buffer, static_cast<size_t>(count));
+        pos_ += count;
+        if (done) *done = count;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API seek(Steinberg::int64 position, Steinberg::int32 mode, Steinberg::int64* result) override {
+        int64_t next = mode == kIBSeekSet ? position : mode == kIBSeekCur ? pos_ + position : static_cast<int64_t>(bytes_.size()) + position;
+        if (next < 0) return Steinberg::kResultFalse;
+        pos_ = next;
+        if (result) *result = pos_;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API tell(Steinberg::int64* position) override {
+        if (position) *position = pos_;
+        return Steinberg::kResultOk;
+    }
+    const std::vector<uint8_t>& bytes() const { return bytes_; }
+    void rewind() { pos_ = 0; }
+
+private:
+    std::vector<uint8_t> bytes_;
+    int64_t pos_ = 0;
+};
+AG_FUNKNOWN_REFCOUNT(MemoryStream)
+Steinberg::tresult PLUGIN_API MemoryStream::queryInterface(const Steinberg::TUID iid, void** obj) {
+    QUERY_INTERFACE(iid, obj, Steinberg::FUnknown::iid, Steinberg::IBStream)
+    QUERY_INTERFACE(iid, obj, Steinberg::IBStream::iid, Steinberg::IBStream)
+    if (obj != nullptr) *obj = nullptr;
+    return Steinberg::kNoInterface;
+}
+
+// IParameterChanges for one process() call: one point per parameter at sample offset 0.
+// Storage is preallocated, so building it on the audio thread does not allocate.
+class Vst3ParamQueue : public Steinberg::Vst::IParamValueQueue {
+public:
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID, void** obj) override {
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1; }
+    Steinberg::Vst::ParamID PLUGIN_API getParameterId() override { return id; }
+    Steinberg::int32 PLUGIN_API getPointCount() override { return 1; }
+    Steinberg::tresult PLUGIN_API getPoint(Steinberg::int32 index, Steinberg::int32& offset, Steinberg::Vst::ParamValue& out) override {
+        if (index != 0) return Steinberg::kResultFalse;
+        offset = 0;
+        out = value;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API addPoint(Steinberg::int32, Steinberg::Vst::ParamValue, Steinberg::int32&) override {
+        return Steinberg::kResultFalse;
+    }
+    Steinberg::Vst::ParamID id = 0;
+    double value = 0.0;
+};
+
+class Vst3ParamChanges : public Steinberg::Vst::IParameterChanges {
+public:
+    Vst3ParamChanges() { queues.resize(256); }
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID, void** obj) override {
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1; }
+    Steinberg::int32 PLUGIN_API getParameterCount() override { return count; }
+    Steinberg::Vst::IParamValueQueue* PLUGIN_API getParameterData(Steinberg::int32 index) override {
+        return index >= 0 && index < count ? &queues[static_cast<size_t>(index)] : nullptr;
+    }
+    Steinberg::Vst::IParamValueQueue* PLUGIN_API addParameterData(const Steinberg::Vst::ParamID&, Steinberg::int32&) override {
+        return nullptr;
+    }
+    // Move what is waiting in the inbox into this block's changes (try-lock: never blocks).
+    void take(ParamInbox& inbox) {
+        count = 0;
+        if (!inbox.mutex.try_lock()) return;
+        for (const auto& item : inbox.items) {
+            if (count >= static_cast<Steinberg::int32>(queues.size())) break;
+            queues[static_cast<size_t>(count)].id = item.first;
+            queues[static_cast<size_t>(count)].value = item.second;
+            ++count;
+        }
+        inbox.items.clear();
+        inbox.mutex.unlock();
+    }
+    std::vector<Vst3ParamQueue> queues;
+    Steinberg::int32 count = 0;
+};
+
 struct Vst3Param {
     Steinberg::Vst::ParamID id = 0;
     std::string name;
@@ -722,6 +854,8 @@ struct Vst3Plugin {
     Steinberg::Vst::IConnectionPoint* controller_point = nullptr;
     bool separate_controller = false;
     Steinberg::IPlugView* view = nullptr;   // open editor, main thread only
+    ParamInbox inbox;
+    Vst3ParamChanges changes;
     PlugFrame* frame = nullptr;
     int max_block = 256;
     int channels = 2;
@@ -985,6 +1119,7 @@ Vst3Plugin* open_vst3(const char* id, float sample_rate, int max_block, int chan
     }
     auto* self = new Vst3Plugin();
     self->host = new HostApp();
+    self->host->inbox = &self->inbox;
     LoadedFactory loaded = load_factory(binary);
     self->library = loaded.library;
     self->factory = loaded.factory;
@@ -1142,6 +1277,8 @@ void process_vst3(Vst3Plugin* self, float** audio, int channels, int frames) {
     data.numOutputs = 1;
     data.inputs = input_buses > 0 ? &input : nullptr;
     data.outputs = &output;
+    self->changes.take(self->inbox);
+    data.inputParameterChanges = self->changes.count > 0 ? &self->changes : nullptr;
     self->processor->process(data);
     for (int channel = 0; channel < count; ++channel) {
         std::memcpy(audio[channel], outputs[channel], static_cast<size_t>(frames) * sizeof(float));
@@ -1168,6 +1305,9 @@ struct ClapPlugin {
     const clap_plugin_params* params = nullptr;
     const clap_plugin_gui* gui = nullptr;
     clap_host* host = nullptr;          // per instance, so host callbacks know the plugin
+    ParamInbox inbox;                   // host-set values, delivered as events in process()
+    std::vector<clap_event_param_value> events = std::vector<clap_event_param_value>(256);
+    uint32_t event_count = 0;
     void* editor_parent = nullptr;      // NSView of the open editor, main thread only
     int latency = 0;
     std::vector<ClapParam> param_list;
@@ -1241,8 +1381,15 @@ static clap_host g_ag_clap_host = {
     clap_host_cb_request_callback,
 };
 
-static uint32_t clap_in_ev_size(const clap_input_events*) { return 0; }
-static const clap_event_header* clap_in_ev_get(const clap_input_events*, uint32_t) { return nullptr; }
+static uint32_t clap_in_ev_size(const clap_input_events* list) {
+    auto* self = list != nullptr ? static_cast<const ClapPlugin*>(list->ctx) : nullptr;
+    return self != nullptr ? self->event_count : 0;
+}
+static const clap_event_header* clap_in_ev_get(const clap_input_events* list, uint32_t index) {
+    auto* self = list != nullptr ? static_cast<const ClapPlugin*>(list->ctx) : nullptr;
+    if (self == nullptr || index >= self->event_count) return nullptr;
+    return &self->events[index].header;
+}
 static bool clap_out_ev_push(const clap_output_events*, const clap_event_header*) { return true; }
 
 std::string clap_binary(const std::filesystem::path& bundle) {
@@ -1410,7 +1557,30 @@ void process_clap(ClapPlugin* self, float** audio, int channels, int frames) {
     clap_audio_buffer in_buf = { channel_ptrs, nullptr, static_cast<uint32_t>(channels), 0, 0 };
     clap_audio_buffer out_buf = { channel_ptrs, nullptr, static_cast<uint32_t>(channels), 0, 0 };
 
-    clap_input_events in_ev = { nullptr, clap_in_ev_size, clap_in_ev_get };
+    // Values set by the host since the last block, as parameter events at sample 0.
+    self->event_count = 0;
+    if (self->inbox.mutex.try_lock()) {
+        for (const auto& item : self->inbox.items) {
+            if (self->event_count >= self->events.size()) break;
+            clap_event_param_value& event = self->events[self->event_count++];
+            event = {};
+            event.header.size = sizeof(clap_event_param_value);
+            event.header.time = 0;
+            event.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+            event.header.type = CLAP_EVENT_PARAM_VALUE;
+            event.header.flags = 0;
+            event.param_id = item.first;
+            event.cookie = nullptr;
+            event.note_id = -1;
+            event.port_index = -1;
+            event.channel = -1;
+            event.key = -1;
+            event.value = item.second;
+        }
+        self->inbox.items.clear();
+        self->inbox.mutex.unlock();
+    }
+    clap_input_events in_ev = { self, clap_in_ev_size, clap_in_ev_get };
     clap_output_events out_ev = { nullptr, clap_out_ev_push };
 
     clap_process process_data{};
@@ -1627,6 +1797,7 @@ int ag_native_set_param(AgNative* raw, int index, float normalized) {
             return 0;
         }
         param.current = instance->vst3->controller->getParamNormalized(param.id);
+        instance->vst3->inbox.push(param.id, param.current);  // the processor hears it next block
         return 1;
     }
     if (instance->kind == Kind::Clap) {
@@ -1635,6 +1806,7 @@ int ag_native_set_param(AgNative* raw, int index, float normalized) {
         }
         ClapParam& param = instance->clap->param_list[static_cast<size_t>(index)];
         param.current = param.minimum + normalized * (param.maximum - param.minimum);
+        instance->clap->inbox.push(param.id, param.current);  // delivered as an event next block
         return 1;
     }
     return 0;
@@ -1657,13 +1829,23 @@ float ag_native_get_param(AgNative* raw, int index) {
         if (index >= static_cast<int>(instance->vst3->params.size())) {
             return 0.0f;
         }
-        return static_cast<float>(instance->vst3->params[static_cast<size_t>(index)].current);
+        Vst3Param& param = instance->vst3->params[static_cast<size_t>(index)];
+        // Live: the plugin's editor and restored state change values behind our back.
+        if (instance->vst3->controller != nullptr) {
+            param.current = instance->vst3->controller->getParamNormalized(param.id);
+        }
+        return static_cast<float>(param.current);
     }
     if (instance->kind == Kind::Clap) {
         if (index >= static_cast<int>(instance->clap->param_list.size())) {
             return 0.0f;
         }
-        const ClapParam& param = instance->clap->param_list[static_cast<size_t>(index)];
+        ClapParam& param = instance->clap->param_list[static_cast<size_t>(index)];
+        // Live: the plugin's own editor and a loaded state change values behind our back.
+        double live = 0.0;
+        if (instance->clap->params != nullptr && instance->clap->params->get_value(instance->clap->plugin, param.id, &live)) {
+            param.current = static_cast<float>(live);
+        }
         const float span = param.maximum - param.minimum;
         return span != 0.0f ? (param.current - param.minimum) / span : 0.0f;
     }
@@ -1787,6 +1969,116 @@ int ag_native_scan_bundle(const char* path, AgCatalogItem* out, int cap) {
     }
     return count;
 }
+
+
+// The plugin's own state (what a DAW saves): VST3 component and controller state, CLAP state
+// extension. Returns a malloc'd buffer (free with ag_native_free) or NULL when the plugin has
+// none (LV2: its parameters are the state). Main thread.
+static void append_u32(std::vector<uint8_t>& out, uint32_t v) {
+    for (int i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(v >> (8 * i)));
+}
+static bool read_u32(const uint8_t*& p, const uint8_t* end, uint32_t& v) {
+    if (end - p < 4) return false;
+    v = static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) | (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+    p += 4;
+    return true;
+}
+static int64_t clap_write(const clap_ostream* stream, const void* buffer, uint64_t size) {
+    auto* out = static_cast<std::vector<uint8_t>*>(stream->ctx);
+    const auto* bytes = static_cast<const uint8_t*>(buffer);
+    out->insert(out->end(), bytes, bytes + size);
+    return static_cast<int64_t>(size);
+}
+struct ClapReader { const uint8_t* data; size_t len; size_t pos; };
+static int64_t clap_read(const clap_istream* stream, void* buffer, uint64_t size) {
+    auto* in = static_cast<ClapReader*>(stream->ctx);
+    const size_t n = std::min<size_t>(static_cast<size_t>(size), in->len - in->pos);
+    std::memcpy(buffer, in->data + in->pos, n);
+    in->pos += n;
+    return static_cast<int64_t>(n);
+}
+
+uint8_t* ag_native_get_state(AgNative* raw, size_t* out_len) {
+    *out_len = 0;
+    auto* instance = reinterpret_cast<Instance*>(raw);
+    if (instance == nullptr) return nullptr;
+    std::vector<uint8_t> out;
+    if (instance->kind == Kind::Vst3 && instance->vst3 != nullptr && instance->vst3->component != nullptr) {
+        // "AGS3" | component length | component state | controller length | controller state
+        auto* component = new MemoryStream();
+        if (instance->vst3->component->getState(component) != Steinberg::kResultOk) {
+            component->release();
+            return nullptr;
+        }
+        auto* controller = new MemoryStream();
+        if (instance->vst3->controller == nullptr || instance->vst3->controller->getState(controller) != Steinberg::kResultOk) {
+            controller->release();
+            controller = new MemoryStream();
+        }
+        out = {'A', 'G', 'S', '3'};
+        append_u32(out, static_cast<uint32_t>(component->bytes().size()));
+        out.insert(out.end(), component->bytes().begin(), component->bytes().end());
+        append_u32(out, static_cast<uint32_t>(controller->bytes().size()));
+        out.insert(out.end(), controller->bytes().begin(), controller->bytes().end());
+        component->release();
+        controller->release();
+    } else if (instance->kind == Kind::Clap && instance->clap != nullptr) {
+        auto* state = static_cast<const clap_plugin_state*>(instance->clap->plugin->get_extension(instance->clap->plugin, CLAP_EXT_STATE));
+        if (state == nullptr) return nullptr;
+        clap_ostream stream{&out, clap_write};
+        if (!state->save(instance->clap->plugin, &stream)) return nullptr;
+    } else {
+        return nullptr;
+    }
+    auto* buffer = static_cast<uint8_t*>(std::malloc(out.size() ? out.size() : 1));
+    if (buffer == nullptr) return nullptr;
+    std::memcpy(buffer, out.data(), out.size());
+    *out_len = out.size();
+    return buffer;
+}
+
+int ag_native_set_state(AgNative* raw, const uint8_t* data, size_t len) {
+    auto* instance = reinterpret_cast<Instance*>(raw);
+    if (instance == nullptr || data == nullptr || len == 0) return 0;
+    if (instance->kind == Kind::Vst3 && instance->vst3 != nullptr && instance->vst3->component != nullptr) {
+        if (len < 4 || std::memcmp(data, "AGS3", 4) != 0) return 0;
+        const uint8_t* p = data + 4;
+        const uint8_t* end = data + len;
+        uint32_t component_len = 0, controller_len = 0;
+        if (!read_u32(p, end, component_len) || static_cast<size_t>(end - p) < component_len) return 0;
+        const uint8_t* component_data = p;
+        p += component_len;
+        if (!read_u32(p, end, controller_len) || static_cast<size_t>(end - p) < controller_len) return 0;
+        const uint8_t* controller_data = p;
+        Vst3Plugin* self = instance->vst3;
+        auto* component = new MemoryStream(component_data, component_len);
+        const bool ok = self->component->setState(component) == Steinberg::kResultOk;
+        if (self->controller != nullptr) {
+            component->rewind();
+            self->controller->setComponentState(component);
+            if (controller_len > 0) {
+                auto* controller = new MemoryStream(controller_data, controller_len);
+                self->controller->setState(controller);
+                controller->release();
+            }
+            for (auto& param : self->params) {
+                param.current = self->controller->getParamNormalized(param.id);
+            }
+        }
+        component->release();
+        return ok ? 1 : 0;
+    }
+    if (instance->kind == Kind::Clap && instance->clap != nullptr) {
+        auto* state = static_cast<const clap_plugin_state*>(instance->clap->plugin->get_extension(instance->clap->plugin, CLAP_EXT_STATE));
+        if (state == nullptr) return 0;
+        ClapReader reader{data, len, 0};
+        clap_istream stream{&reader, clap_read};
+        return state->load(instance->clap->plugin, &stream) ? 1 : 0;
+    }
+    return 0;
+}
+
+void ag_native_free(void* p) { std::free(p); }
 
 }  // extern "C"
 

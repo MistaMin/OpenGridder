@@ -1024,9 +1024,14 @@ fn handle_unlocked_inner(chain: &Arc<Mutex<PluginChain>>, message_type: i32, bod
             let instances = request.as_ref().map(PluginChain::instantiate_for);
             let mut chain = chain.lock().expect("chain");
             if let Some(instances) = instances {
-                chain.preload(instances);
+                chain.preload(instances, true);
             }
             chain.handle(message_type, body)
+        }
+        command::GET_PLUGIN_SETTINGS => {
+            let target = chain.lock().expect("chain").settings_target(body);
+            let state = target.and_then(crate::ui::get_state);
+            chain.lock().expect("chain").settings_reply(body, state)
         }
         _ => chain.lock().expect("chain").handle(message_type, body),
     }

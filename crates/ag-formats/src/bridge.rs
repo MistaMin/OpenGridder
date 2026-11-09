@@ -379,8 +379,14 @@ pub unsafe extern "C" fn ag_insert_save(p: *mut c_void, out: *mut u8, capacity: 
             f32::from_bits(n.values[i].load(Ordering::Relaxed)),
         );
     }
-    // The remote chain lives in the network worker. Save what it last saw (settings are
-    // refreshed every few seconds); with no session yet, keep the chain restored by load.
+    // The remote chain lives in the network worker. Read every slot's current settings and
+    // plugin state now (at most 3 s); with no session yet, keep the chain restored by load.
+    // The control lock is released meanwhile so the worker is never blocked by it.
+    drop(control);
+    n.live_ctrl.sync_settings(std::time::Duration::from_secs(3));
+    let Ok(mut control) = n.control.lock() else {
+        return 0;
+    };
     let (connected, slots) = n.live_ctrl.with_info(|info| (info.connected, info.slots.clone()));
     if connected || !slots.is_empty() {
         control.set_loaded_plugins(slots.iter().map(slot_to_chain).collect());
