@@ -1,0 +1,49 @@
+OpenGridder 0.1.1-alpha
+=======================
+
+OpenGridder runs plug-ins on this Mac, or on another Mac on your studio
+network, and brings their audio and their windows back into the DAW.
+
+WHAT THIS DISK INSTALLS
+------------------------
+The installer package on this disk is for a current Mac. It installs:
+
+  OpenGridder Server          /Applications
+  OpenGridderTray             /Applications
+  Audio Unit                  /Library/Audio/Plug-Ins/Components
+  VST3                        /Library/Audio/Plug-Ins/VST3
+  CLAP                        /Library/Audio/Plug-Ins/CLAP
+  LV2                         /Library/Audio/Plug-Ins/LV2
+  AAX (64-bit)                /Library/Application Support/Avid/Audio/Plug-Ins
+
+Quit your DAW, open the package, and install. Then open OpenGridder Server
+before you insert the plug-in. The server uses port 55056 on the local network.
+Use it on a network you trust. It does not ask for a password.
+
+AAX is 64-bit. This is an alpha. It is not a qualification from Avid or from
+any DAW maker.
+
+THE PLUG-IN
+-----------
+Insert OpenGridder on a track. The buffer it asks the DAW to compensate is
+one of four sizes: 128, 256, 512, or 1024 samples. The default is 256.
+
+Input gain, output gain, wet/dry, drive, and bypass sit in the plug-in.
+Drive can be clean, tube, or transformer. Drive quality is ADAA, 2x, or 4x.
+Oversampling on a hosted plug-in adds a few samples, not a long delay.
+
+OLDER PRO TOOLS
+---------------
+OG-RTAS (beta) and OG-TDM (alpha) are a separate disk image, shipped next
+to this one, not inside it. Apple will not notarize a disk that contains
+those plug-ins, because they are built for Mac OS X 10.6.
+
+Open OpenGridder-Legacy-0.1.1-alpha.dmg and follow its own Read Me.
+OG-RTAS is a beta for Pro Tools 8, 9, and 10. OG-TDM is an alpha and has
+not been run on a real HD Accel card. Do not use OG-TDM on a session you
+need to keep.
+
+WINDOWS AND LINUX
+-----------------
+The files on this disk are for Mac. Windows and Linux builds can be made
+when you ask.

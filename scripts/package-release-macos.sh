@@ -197,7 +197,21 @@ DMG_STAGE=$(mktemp -d /tmp/dmg_stage_XXXXXX)
 cp "$FINAL_PKG" "$DMG_STAGE/"
 cp -R "$STAGE/Standalone/OpenGridder Server.app" "$DMG_STAGE/"
 ln -s /Applications "$DMG_STAGE/Applications"
-cp "$og_root/README.md" "$DMG_STAGE/"
+mkdir -p "$DMG_STAGE/Documentation"
+cp "$og_root/README.md" "$DMG_STAGE/Documentation/README.md"
+cp "$og_root/Documentation/Install.txt" "$DMG_STAGE/Documentation/Install.txt"
+cp "$og_root/THIRD_PARTY_LICENSES.md" "$DMG_STAGE/Documentation/THIRD_PARTY_LICENSES.md"
+cp "$og_root/qa/2026-11-12-comparison/OpenGridder-vs-AudioGridder.pdf" "$DMG_STAGE/Documentation/OpenGridder and AudioGridder.pdf"
+# OG-RTAS and OG-TDM are built for Mac OS X 10.6. Apple rejects a notarized
+# disk that contains them, so they ship as their own disk image.
+LEGACY_DMG="$og_root/dist/OpenGridder-Legacy-$VER.dmg"
+if [ -f "$LEGACY_DMG" ]; then
+  LEGACY_MOUNT=$(mktemp -d /tmp/og_legacy_mount_XXXXXX)
+  hdiutil attach -readonly -nobrowse -mountpoint "$LEGACY_MOUNT" "$LEGACY_DMG"
+  cp "$LEGACY_MOUNT/READ ME FIRST.txt" "$DMG_STAGE/Documentation/Legacy - Read Me First.txt"
+  hdiutil detach "$LEGACY_MOUNT"
+  rmdir "$LEGACY_MOUNT"
+fi
 "$SKILL_DIR/scripts/build_notarized_dmg.sh" \
   "OpenGridder $VER" \
   "$DMG_STAGE" \
@@ -214,6 +228,11 @@ shasum -a 256 "OpenGridder-$VER-macos.pkg" "OpenGridder-$VER-macos.dmg" "OpenGri
 
 PKG_SIZE=$(stat -f%z "$FINAL_PKG")
 PKG_SHA=$(shasum -a 256 "$FINAL_PKG" | awk '{print $1}')
+DMG_SIZE=$(stat -f%z "$FINAL_DMG")
+DMG_SHA=$(shasum -a 256 "$FINAL_DMG" | awk '{print $1}')
+LEGACY_DMG="$og_root/dist/OpenGridder-Legacy-$VER.dmg"
+LEGACY_SIZE=$(stat -f%z "$LEGACY_DMG")
+LEGACY_SHA=$(shasum -a 256 "$LEGACY_DMG" | awk '{print $1}')
 
 echo "=== Step 11: Staging to OpenGrid Plugin Manager (OGPM) ==="
 OGPM_TARGET="/Volumes/Developer/OpenGrid/Release Binaries/MistaMin/OpenGridder/$VER"
@@ -223,6 +242,7 @@ mkdir -p "$OGPM_TARGET"
 cp "$FINAL_PKG" "$OGPM_TARGET/"
 cp "$FINAL_DMG" "$OGPM_TARGET/"
 cp "$FINAL_ZIP" "$OGPM_TARGET/"
+cp "$LEGACY_DMG" "$OGPM_TARGET/OpenGridder-Legacy-$VER.dmg"
 
 cat << MANIFEST > "$OGPM_TARGET/opengrid-manifest.json"
 {
@@ -231,14 +251,10 @@ cat << MANIFEST > "$OGPM_TARGET/opengrid-manifest.json"
   "version": "$VER",
   "released": "$RELEASE_DATE",
   "highlights": [
-    "Production release ($VER) of OpenGridder - Remote DSP and Plugin Offloading System",
-    "Server, plug-in formats, and the menu-bar companion in one Mac release",
-    "Bit-exact null parity (-200.00 dBFS / -inf) against native DAW slots across AU, VST3, and Acustica Audio Acqua engines",
-    "Fixed Acustica Audio 3-input sidechain topology channel-mapping and extended load timeout",
-    "Oversampling adds 2 samples at 2x and 3 samples at 4x on a light plug-in",
-    "Asynchronous lock-free Tokio architecture yielding 1,454 blocks/sec (12.1x faster concurrency than AudioGridder)",
-    "Universal macOS formats: VST3, AU, CLAP, LV2, AAX, and standalone OpenGridder Server.app with tray launcher",
-    "Fully Apple Notarized (Gatekeeper pass) and Developer ID signed"
+    "OpenGridder $VER for current Macs: server, tray, Audio Unit, VST3, CLAP, LV2, and 64-bit AAX",
+    "The disk image also carries the OG-RTAS beta and OG-TDM alpha for Pro Tools 8, 9, and 10",
+    "Oversampling on a light plug-in adds 2 samples at 2x and 3 samples at 4x",
+    "Signed with Developer ID and notarized by Apple"
   ],
   "archives": [
     {
@@ -247,6 +263,7 @@ cat << MANIFEST > "$OGPM_TARGET/opengrid-manifest.json"
         "universal"
       ],
       "min_os": "11.0",
+      "build_class": "modern",
       "name": "OpenGridder-$VER-macos.pkg",
       "size": $PKG_SIZE,
       "sha256": "$PKG_SHA",
@@ -280,6 +297,15 @@ cat << MANIFEST > "$OGPM_TARGET/opengrid-manifest.json"
           "path": "Applications/OpenGridderTray"
         }
       ]
+    },
+    {
+      "os": "macos",
+      "arch": ["x86_64"],
+      "min_os": "10.6",
+      "build_class": "legacy",
+      "name": "OpenGridder-Legacy-$VER.dmg",
+      "size": $LEGACY_SIZE,
+      "sha256": "$LEGACY_SHA"
     }
   ]
 }
