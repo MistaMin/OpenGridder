@@ -5,9 +5,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 og_root="$(cd "$script_dir/.." && pwd)"
 source "$script_dir/build-info.sh"
 
-echo "=== 1. Building ag-formats dylib & server ==="
+echo "=== 1. Building og-formats dylib & server ==="
 cd "$og_root"
-cargo build --release -p ag-formats -p ag-server -p ag-tray
+cargo build --release -p og-formats -p og-server -p og-tray
 
 "$og_root/scripts/build-server-app-macos.sh"
 
@@ -15,18 +15,18 @@ STAGE="$og_root/build/release/OpenGridder_artefacts/Release"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/VST3" "$STAGE/AU" "$STAGE/CLAP" "$STAGE/LV2" "$STAGE/AAX" "$STAGE/Standalone"
 
-DYLIB="$og_root/target/release/libag_formats.dylib"
+DYLIB="$og_root/target/release/libog_formats.dylib"
 
 echo "=== 2. Assembling Plugin Formats ==="
 
 # VST3
-cp -R "$og_root/crates/ag-formats/bundle/AudioGridder.vst3" "$STAGE/VST3/OpenGridder.vst3"
+cp -R "$og_root/crates/og-formats/bundle/AudioGridder.vst3" "$STAGE/VST3/OpenGridder.vst3"
 mkdir -p "$STAGE/VST3/OpenGridder.vst3/Contents/MacOS"
 cp "$DYLIB" "$STAGE/VST3/OpenGridder.vst3/Contents/MacOS/OpenGridder"
 ln -sf "OpenGridder" "$STAGE/VST3/OpenGridder.vst3/Contents/MacOS/AudioGridder"
 
 # AU
-cp -R "$og_root/crates/ag-formats/bundle/AudioGridder.component" "$STAGE/AU/OpenGridder.component"
+cp -R "$og_root/crates/og-formats/bundle/AudioGridder.component" "$STAGE/AU/OpenGridder.component"
 mkdir -p "$STAGE/AU/OpenGridder.component/Contents/MacOS"
 cp "$DYLIB" "$STAGE/AU/OpenGridder.component/Contents/MacOS/OpenGridder"
 ln -sf "OpenGridder" "$STAGE/AU/OpenGridder.component/Contents/MacOS/AudioGridder"
@@ -35,12 +35,12 @@ ln -sf "OpenGridder" "$STAGE/AU/OpenGridder.component/Contents/MacOS/AudioGridde
 cp "$DYLIB" "$STAGE/CLAP/OpenGridder.clap"
 
 # LV2
-cp -R "$og_root/crates/ag-formats/bundle/AudioGridder.lv2" "$STAGE/LV2/OpenGridder.lv2"
+cp -R "$og_root/crates/og-formats/bundle/AudioGridder.lv2" "$STAGE/LV2/OpenGridder.lv2"
 cp "$DYLIB" "$STAGE/LV2/OpenGridder.lv2/OpenGridder.dylib"
 ln -sf "OpenGridder.dylib" "$STAGE/LV2/OpenGridder.lv2/AudioGridder.dylib"
 
 # AAX
-cp -R "$og_root/crates/ag-formats/bundle/AudioGridder.aaxplugin" "$STAGE/AAX/OpenGridder.aaxplugin"
+cp -R "$og_root/crates/og-formats/bundle/AudioGridder.aaxplugin" "$STAGE/AAX/OpenGridder.aaxplugin"
 mkdir -p "$STAGE/AAX/OpenGridder.aaxplugin/Contents/MacOS"
 cp "$DYLIB" "$STAGE/AAX/OpenGridder.aaxplugin/Contents/MacOS/OpenGridder"
 ln -sf "OpenGridder" "$STAGE/AAX/OpenGridder.aaxplugin/Contents/MacOS/AudioGridder"
@@ -99,7 +99,7 @@ done
 
 # Standalone Server App
 cp -R "$og_root/build/OpenGridder Server.app" "$STAGE/Standalone/OpenGridder Server.app"
-cp "$og_root/target/release/ag-tray" "$STAGE/Standalone/OpenGridderTray"
+cp "$og_root/target/release/og-tray" "$STAGE/Standalone/OpenGridderTray"
 
 echo "=== 3. PACE Eden AAX Signing via physical iLok ==="
 if /Users/marcosdeida/.gemini/config/skills/Make-Plugin-Release/scripts/sign_aax.sh \

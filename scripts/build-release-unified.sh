@@ -15,10 +15,10 @@ echo "== Build server, server app and AU/VST3/AAX/CLAP/LV2 bundles"
 bash "$og_root/scripts/build-all-bundles.sh"
 
 echo "== Test the modern workspace (format test checks the staged bundles)"
-# The ag-server sandbox integration tests use lsof, which is pathologically slow on
+# The og-server sandbox integration tests use lsof, which is pathologically slow on
 # this Mac's stale CCC snapshot; they are host-environment failures, not code failures.
 cargo test --workspace --locked --lib
-cargo test -p ag-plugin --test formats --locked
+cargo test -p og-plugin --test formats --locked
 
 if [ -n "${OPENGRIDDER_LEGACY_ROOT:-}" ]; then
   legacy="$OPENGRIDDER_LEGACY_ROOT"

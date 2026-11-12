@@ -232,10 +232,10 @@ cat << MANIFEST > "$OGPM_TARGET/opengrid-manifest.json"
   "released": "$RELEASE_DATE",
   "highlights": [
     "Production release ($VER) of OpenGridder - Remote DSP and Plugin Offloading System",
-    "Complete zero-JUCE re-architecture using OpenPluginSDK, Rust networking, and native Apple C++",
+    "Server, plug-in formats, and the menu-bar companion in one Mac release",
     "Bit-exact null parity (-200.00 dBFS / -inf) against native DAW slots across AU, VST3, and Acustica Audio Acqua engines",
     "Fixed Acustica Audio 3-input sidechain topology channel-mapping and extended load timeout",
-    "Custom polyphase oversampling filter bank delivering 24.5x lower latency (2-3 samples) than legacy JUCE (49-60 samples)",
+    "Oversampling adds 2 samples at 2x and 3 samples at 4x on a light plug-in",
     "Asynchronous lock-free Tokio architecture yielding 1,454 blocks/sec (12.1x faster concurrency than AudioGridder)",
     "Universal macOS formats: VST3, AU, CLAP, LV2, AAX, and standalone OpenGridder Server.app with tray launcher",
     "Fully Apple Notarized (Gatekeeper pass) and Developer ID signed"

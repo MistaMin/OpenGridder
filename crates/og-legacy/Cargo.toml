@@ -1,0 +1,12 @@
+[package]
+name = "og-legacy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[[bin]]
+name = "og-legacy"
+path = "src/main.rs"

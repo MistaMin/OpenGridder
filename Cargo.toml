@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/ag-protocol", "crates/ag-plugin", "crates/ag-server", "crates/ag-legacy", "crates/ag-formats", "crates/ag-tray"]
+members = ["crates/og-protocol", "crates/og-plugin", "crates/og-server", "crates/og-legacy", "crates/og-formats", "crates/og-tray"]
 resolver = "2"
 
 [workspace.package]
@@ -10,7 +10,7 @@ publish = false
 
 [workspace.dependencies]
 openplugin = { path = "/Volumes/Developer 2/Dependencies/OpenPluginSDK/crates/openplugin" }
-ag-protocol = { path = "crates/ag-protocol" }
-ag-plugin = { path = "crates/ag-plugin" }
-ag-legacy = { path = "crates/ag-legacy" }
-ag-tray = { path = "crates/ag-tray" }
+og-protocol = { path = "crates/og-protocol" }
+og-plugin = { path = "crates/og-plugin" }
+og-legacy = { path = "crates/og-legacy" }
+og-tray = { path = "crates/og-tray" }

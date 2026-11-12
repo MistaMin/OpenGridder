@@ -2,15 +2,15 @@
 
 The client now rejects a malformed console state without partly applying its earlier fields. Both AG1 tokens and JSON console fields are validated before any parameter changes. AG1 NaN and infinities are rejected instead of being accepted as ignored parameter writes.
 
-This tree has uncommitted changes and no Git repository. The parent owns native formats and the new live transport. This task changed only `apply_console_json` and the AG1 branch of `load_state` in `crates/ag-plugin/src/lib.rs`, plus `crates/ag-plugin/tests/client_contract.rs` and this evidence folder.
+This tree has uncommitted changes and no Git repository. The parent owns native formats and the new live transport. This task changed only `apply_console_json` and the AG1 branch of `load_state` in `crates/og-plugin/src/lib.rs`, plus `crates/og-plugin/tests/client_contract.rs` and this evidence folder.
 
 ## Reproduction and result
 
-`cargo test -p ag-plugin --test client_contract --offline` before the fix: 3 passed, 1 failed. Loading `AG1 input=12 unknown=3` returned false but changed input gain from −7 dB to +12 dB. See `client-contract-before.log`.
+`cargo test -p og-plugin --test client_contract --offline` before the fix: 3 passed, 1 failed. Loading `AG1 input=12 unknown=3` returned false but changed input gain from −7 dB to +12 dB. See `client-contract-before.log`.
 
 The same command after the fix: 4 passed, 0 failed. See `client-contract-after.log`. No assertion was removed, ignored, or loosened.
 
-`cargo test -p ag-plugin --lib --offline`: 51 passed, 0 failed. See `client-lib-after.log`. This includes the parent's in-flight SPSC changes present at test time; it is a working-tree test, not a frozen release binary.
+`cargo test -p og-plugin --lib --offline`: 51 passed, 0 failed. See `client-lib-after.log`. This includes the parent's in-flight SPSC changes present at test time; it is a working-tree test, not a frozen release binary.
 
 ## Evidence mapping
 

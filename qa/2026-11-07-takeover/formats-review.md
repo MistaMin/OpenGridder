@@ -7,7 +7,7 @@
 - VST3 now advertises one MIDI input bus. Note-on and note-off events are passed through the audio-owned bridge, with offsets adjusted for each rendered automation segment.
 - VST3 reads every parameter-queue point, splits audio at its sample offset, and applies it at that boundary. Previously only the last point was applied to the whole block.
 - Per-segment VST3 ProcessContext is converted into `Audio.position`: valid tempo/signature/PPQ and playing/recording/cycle bits, with timeline samples and derived seconds advanced for the segment. It is retained for root's live-transport attachment. Current ordinary local DSP does not consume tempo, and this alone does not prove transport reaches a remote hosted plugin.
-- Bridge adds `ag_insert_midi` and `ag_insert_position`; ag-formats depends on the existing ag-protocol crate.
+- Bridge adds `ag_insert_midi` and `ag_insert_position`; og-formats depends on the existing og-protocol crate.
 - New native harness assertions exercise the built public COM interfaces, not direct implementation calls. At +6 dB, the queue changes gain at frame 256, then again at 384. With 128-sample delay, output before frame 384 stays unchanged, frame 400 reflects the first point, and the final controller value is the second point's 0.75.
 - `vst3-review-host.log`: all twelve combinations passed (mono/stereo, f32/f64, 44.1/48/96 kHz), retaining the original gain, latency and partial-stream state tests.
 - `formats-review-test.log`: two Rust format tests passed. The added bridge test confirms note offset 7/channel 2 and full position values including signature 7/8, seconds 1.5, recording and looping reach audio-owned storage.
@@ -15,10 +15,10 @@
 Commands:
 
 ```
-cargo build -p ag-formats --offline
-c++ -std=c++17 -DINIT_CLASS_IID -I '/Volumes/Developer 2/Dependencies/clap-wrapper/build/cpm/vst3sdk' crates/ag-formats/tests/vst3_host.cpp -o /tmp/ag-open-takeover/vst3-review-host
-/tmp/ag-open-takeover/vst3-review-host "$PWD/target/debug/libag_formats.dylib"
-cargo test -p ag-formats --offline
+cargo build -p og-formats --offline
+c++ -std=c++17 -DINIT_CLASS_IID -I '/Volumes/Developer 2/Dependencies/clap-wrapper/build/cpm/vst3sdk' crates/og-formats/tests/vst3_host.cpp -o /tmp/ag-open-takeover/vst3-review-host
+/tmp/ag-open-takeover/vst3-review-host "$PWD/target/debug/libog_formats.dylib"
+cargo test -p og-formats --offline
 ```
 
 These are debug harness checks, not DAW qualification, listening acceptance, or release checks.

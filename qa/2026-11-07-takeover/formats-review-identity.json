@@ -1,6 +1,6 @@
 {
-  "crates/ag-formats/native/vst3.cpp": "d777e8df32dc138cd77a734772fb6f0a644258d4bc72b18da97d56d13876d93d",
-  "crates/ag-formats/src/bridge.rs": "65b48564a12f82d933d52eb3810fc67622c1f70c63b72fbf73ea6424c21cc0e1",
-  "crates/ag-formats/tests/vst3_host.cpp": "728c45db7deaf9d45d678b9bbd90d8b7ce110682722707c0a188dad44a57cd05",
-  "target/debug/libag_formats.dylib": "a0a39f259c4a26ab3fd3db64b53d725dcb3a28dc6b1a4c189a2475ad1ea9fc17"
+  "crates/og-formats/native/vst3.cpp": "d777e8df32dc138cd77a734772fb6f0a644258d4bc72b18da97d56d13876d93d",
+  "crates/og-formats/src/bridge.rs": "65b48564a12f82d933d52eb3810fc67622c1f70c63b72fbf73ea6424c21cc0e1",
+  "crates/og-formats/tests/vst3_host.cpp": "728c45db7deaf9d45d678b9bbd90d8b7ce110682722707c0a188dad44a57cd05",
+  "target/debug/libog_formats.dylib": "a0a39f259c4a26ab3fd3db64b53d725dcb3a28dc6b1a4c189a2475ad1ea9fc17"
 }

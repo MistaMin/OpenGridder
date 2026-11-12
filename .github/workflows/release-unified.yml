@@ -59,10 +59,10 @@ jobs:
           test -n "$OG_BUILD_NUMBER"
 
           # Export only non-empty SDK locations. An empty AAX_SDK_ROOT would shadow the
-          # SDK paths that crates/ag-formats/build.rs falls back to on this runner.
+          # SDK paths that crates/og-formats/build.rs falls back to on this runner.
           if [ -n "${OPENGRIDDER_VST3_SDK:-}" ]; then
             test -d "$OPENGRIDDER_VST3_SDK/pluginterfaces"
-            # crates/ag-formats/build.rs compiles the VST3 interface against VST3_SDK_ROOT.
+            # crates/og-formats/build.rs compiles the VST3 interface against VST3_SDK_ROOT.
             echo "VST3_SDK_ROOT=$OPENGRIDDER_VST3_SDK" >> "$GITHUB_ENV"
           else
             echo "OPENGRIDDER_VST3_SDK is not configured; using the local VST3 SDK." >> "$GITHUB_STEP_SUMMARY"
@@ -95,7 +95,7 @@ jobs:
 
       - name: Test staged plugin formats
         shell: bash
-        run: cargo test -p ag-plugin --test formats --locked
+        run: cargo test -p og-plugin --test formats --locked
 
       # Upload only the staged release images: plug-in bundles and Server.app. The SDKs,
       # the build tree, application source and any RTAS/TDM output stay on the runner.

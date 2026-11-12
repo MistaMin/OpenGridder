@@ -1,10 +1,8 @@
 # OpenGridder
 
 OpenGridder offloads audio plug-ins to another Mac on the network and carries
-their audio and editors back into the DAW. This is the no-JUCE Rust rewrite;
-the current pre-release is **0.1.1-alpha**. The previous 1.2.1-era project is
-archived as **Old OpenGridder** (branch `old-opengridder` in this repository and
-the local `old-opengridder` tree).
+their audio and editors back into the DAW. The current pre-release is
+**0.1.1-alpha**.
 
 Server, plug-in formats and the legacy RTAS/TDM bundles are stamped with the
 same product version and build number so a release is identifiable across every
@@ -14,19 +12,19 @@ format.
 
 | Crate | Role |
 | --- | --- |
-| `ag-plugin` | Plug-in instance: gains, drive, wet/dry, bypass, latency profiles, state, editor model |
-| `ag-protocol` | Wire protocol v13 as explicit little-endian bytes |
-| `ag-server` | Plugin host, network server, isolated chains and AU/VST3 hosting |
-| `ag-formats` | AU, VST3, AAX, CLAP and LV2 entry points |
-| `ag-tray` | Menu bar companion for the server |
-| `ag-legacy` | TDM transport contract (Q1.23 PCM, timeslots, schedule). Not a `.dpm`; no Avid SDK |
+| `og-plugin` | Plug-in instance: gains, drive, wet/dry, bypass, latency profiles, state, editor model |
+| `og-protocol` | Wire protocol v13 as explicit little-endian bytes |
+| `og-server` | Plugin host, network server, isolated chains and AU/VST3 hosting |
+| `og-formats` | AU, VST3, AAX, CLAP and LV2 entry points |
+| `og-tray` | Menu bar companion for the server |
+| `og-legacy` | TDM transport contract (Q1.23 PCM, timeslots, schedule). Not a `.dpm`; no Avid SDK |
 
 ```sh
 cargo test --workspace
-cargo build --release -p ag-server -p ag-formats -p ag-tray
+cargo build --release -p og-server -p og-formats -p og-tray
 ```
 
-`ag-server` does not depend on the Avid SDK and does not link `ag-legacy`.
+`og-server` does not depend on the Avid SDK and does not link `og-legacy`.
 
 ## Bundles and release scripts
 

@@ -9,9 +9,9 @@ echo "Build: v$OG_VERSION build $OG_BUILD_NUMBER ($OG_GIT_COMMIT) $OG_BUILD_DATE
 
 echo "=== 1. Building Server Binaries ==="
 cd "$og_root"
-cargo build --release --locked -p ag-server -p ag-tray
+cargo build --release --locked -p og-server -p og-tray
 
-og_server_bin="$og_root/target/release/ag-server"
+og_server_bin="$og_root/target/release/og-server"
 og_app_dest="$og_root/build/OpenGridder Server.app"
 
 echo "=== 2. Compiling Cocoa Launcher Slice ==="

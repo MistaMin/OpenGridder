@@ -1,6 +1,6 @@
 # Legacy RTAS/TDM is separate and not open source
 
-The OpenGridder RTAS BETA and TDM BETA adapters no longer live in this
+The OpenGridder RTAS beta and TDM alpha adapters are not built from this
 repository. They are in the private, closed-source repository:
 
     https://github.com/MistaMin/OpenGridder-Legacy-Wrappers
@@ -19,14 +19,13 @@ source**.
   object code from the separately licensed SDK; that does not redistribute the SDK.
 - No RTAS/TDM adapter source is published here. The compiled `.dpm` bundles may
   be distributed free of charge with their notices; the source stays private.
-- The MIT `crates/ag-legacy` crate in this repository is only the TDM transport
+- The MIT `crates/og-legacy` crate in this repository is only the TDM transport
   contract (Q1.23 PCM, timeslots, schedules). It does not link the Avid SDK and
   is not a `.dpm` plug-in.
 - The licensed SDKs and the DSP assembler remain external build inputs on the
   private self-hosted build machine.
-- `legacy/native/README.md`, the source and the Leopard workflow now live in the
-  private wrappers repository. The pre-split state is preserved in this
-  repository's tag `pre-opengridder-restructure`.
+- The RTAS and TDM adapter source, the Leopard workflow, and the DSP firmware
+  live in the private wrappers repository.
 
 ## Release identity
 
@@ -45,11 +44,4 @@ in the private tree are documented in the wrappers repository's `LICENSE` and
 trademarks of Avid Technology, Inc.; this project is not affiliated with or
 endorsed by Avid.
 
-## Before this repository becomes public
 
-This repository is private. Its history predates the split and still contains the
-RTAS/TDM source in old commits (`legacy/`), even though the current tree and all
-new commits do not. Before changing visibility or adding collaborators, either
-keep the repository private, or rewrite the history to purge `legacy/` (for
-example `git filter-repo --path legacy --invert-paths`) and re-stamp the release
-build. The private wrappers repository keeps the full legacy history.

@@ -1,6 +1,6 @@
 # Historical path: this file used to build Windows and Linux on GitHub-hosted
 # runners and carried the RTAS/TDM job. Only the self-hosted macOS runner can
-# build this workspace: Cargo.toml and crates/ag-formats/Cargo.toml link
+# build this workspace: Cargo.toml and crates/og-formats/Cargo.toml link
 # OpenPluginSDK and GoodLookinDri by absolute macOS path
 # ("/Volumes/Developer 2/..."), and the licensed Avid SDK / RTAS/TDM build moved
 # to the private OpenGridder-Legacy-Wrappers repository (see LEGACY.md). The
@@ -55,7 +55,7 @@ jobs:
       # keychain. CI only compiles and uploads the outputs; run the bundle and
       # packaging scripts on the release machine when signing material is ready.
       - name: Build release outputs
-        run: cargo build --release --locked -p ag-server -p ag-formats -p ag-tray
+        run: cargo build --release --locked -p og-server -p og-formats -p og-tray
 
       - name: Record build identity
         run: |
@@ -76,9 +76,9 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: |
-            target/release/ag-server
-            target/release/ag-tray
-            target/release/libag_formats.dylib
+            target/release/og-server
+            target/release/og-tray
+            target/release/libog_formats.dylib
             dist/BUILD-INFO.txt
             COPYING
             LICENSE

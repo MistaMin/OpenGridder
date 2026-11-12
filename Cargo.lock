@@ -3,55 +3,6 @@
 version = 4
 
 [[package]]
-name = "ag-formats"
-version = "0.1.1-alpha"
-dependencies = [
- "ag-plugin",
- "ag-protocol",
- "goodlookindri-shell",
- "openplugin",
-]
-
-[[package]]
-name = "ag-legacy"
-version = "0.1.1-alpha"
-
-[[package]]
-name = "ag-plugin"
-version = "0.1.1-alpha"
-dependencies = [
- "ag-protocol",
- "ag-server",
- "openplugin",
- "serde_json",
-]
-
-[[package]]
-name = "ag-protocol"
-version = "0.1.1-alpha"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
-name = "ag-server"
-version = "0.1.1-alpha"
-dependencies = [
- "ag-protocol",
- "openplugin",
- "serde_json",
-]
-
-[[package]]
-name = "ag-tray"
-version = "0.1.1-alpha"
-dependencies = [
- "ag-protocol",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -610,6 +561,55 @@ dependencies = [
 ]
 
 [[package]]
+name = "og-formats"
+version = "0.1.1-alpha"
+dependencies = [
+ "goodlookindri-shell",
+ "og-plugin",
+ "og-protocol",
+ "openplugin",
+]
+
+[[package]]
+name = "og-legacy"
+version = "0.1.1-alpha"
+
+[[package]]
+name = "og-plugin"
+version = "0.1.1-alpha"
+dependencies = [
+ "og-protocol",
+ "og-server",
+ "openplugin",
+ "serde_json",
+]
+
+[[package]]
+name = "og-protocol"
+version = "0.1.1-alpha"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "og-server"
+version = "0.1.1-alpha"
+dependencies = [
+ "og-protocol",
+ "openplugin",
+ "serde_json",
+]
+
+[[package]]
+name = "og-tray"
+version = "0.1.1-alpha"
+dependencies = [
+ "og-protocol",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -617,17 +617,18 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "openplugin"
-version = "0.1.0-beta.1"
+version = "0.2.0-beta"
 dependencies = [
  "openplugin-core",
  "openplugin-dri",
  "openplugin-dsp",
+ "openplugin-ffi",
  "openplugin-targets",
 ]
 
 [[package]]
 name = "openplugin-core"
-version = "0.1.0-beta.1"
+version = "0.2.0-beta"
 dependencies = [
  "log",
  "serde",
@@ -635,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "openplugin-dri"
-version = "0.1.0-beta.1"
+version = "0.2.0-beta"
 dependencies = [
  "goodlookindri",
  "log",
@@ -646,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "openplugin-dsp"
-version = "0.1.0-beta.1"
+version = "0.2.0-beta"
 dependencies = [
  "log",
  "openplugin-core",
@@ -655,13 +656,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "openplugin-ffi"
+version = "0.2.0-beta"
+dependencies = [
+ "openplugin-core",
+]
+
+[[package]]
 name = "openplugin-targets"
-version = "0.1.0-beta.1"
+version = "0.2.0-beta"
 dependencies = [
  "cpal",
  "log",
  "openplugin-core",
  "openplugin-dri",
+ "openplugin-ffi",
  "raw-window-handle",
 ]
 
