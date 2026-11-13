@@ -406,7 +406,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
 @"  screen compression, and dynamic delay compensation across modern macOS,\n"
 @"  Windows, and vintage studio systems.\n\n"
 @"================================================================================\n"
-@"                   (c) 2026 Marcos Deida • studio.opengrid                     \n"
+@"                (c) 2026 Marcos Quirino Deida • studio.opengrid                \n"
 @"================================================================================\n";
 
     // Centre the build line in the 80-column banner.
