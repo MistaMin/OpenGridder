@@ -194,7 +194,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
         footer.backgroundColor = [NSColor clearColor];
         footer.font = [NSFont systemFontOfSize:11 weight:NSFontWeightLight];
         footer.textColor = [NSColor colorWithCalibratedRed:0.45 green:0.48 blue:0.52 alpha:0.8];
-        footer.stringValue = @"OpenGrid Network Architecture • GoodLookin Hardware UI by Marcos Deida";
+        footer.stringValue = @"OpenGrid Network Architecture • GoodLookin Hardware UI by Marcos Quirino Deida";
         [plate addSubview:footer];
     }
     return self;
@@ -396,7 +396,7 @@ static void DrawGoodLookinPlate(CGContextRef ctx, CGRect bounds) {
 @"================================================================================\n"
 @"                            CREDITS & ATTRIBUTION                              \n"
 @"================================================================================\n\n"
-@"• Marcos Deida (@MistaMin)\n"
+@"• Marcos Quirino Deida (@MistaMin)\n"
 @"  Lead Architect & Developer: Core network streaming architecture, distributed\n"
 @"  DSP processing engine, and creator of\n"
 @"  GoodLookinUI, used for hardware-inspired analog console panels, precision\n"
