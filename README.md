@@ -8,6 +8,13 @@ Server, plug-in formats and the legacy RTAS/TDM bundles are stamped with the
 same product version and build number so a release is identifiable across every
 format.
 
+## Screenshots
+
+The AU, VST3, AAX and CLAP plug-ins share one editor: console input, wet/dry,
+drive and output controls, remote plug-in slots, and VU meters.
+
+![OpenGridder editor (AU, VST3, AAX, CLAP)](Documentation/images/editor.png)
+
 ## Crates
 
 | Crate | Role |
@@ -33,10 +40,14 @@ bash scripts/build-all-bundles.sh       # AU, VST3, AAX, CLAP, LV2, Server.app
 bash scripts/package-release-macos.sh   # signed installer, manifest, notices
 ```
 
-AAX is 64-bit only. No 32-bit AAX is built for Pro Tools 10. AAX, AU and VST3
+AAX is 64-bit only. No 32-bit AAX is built for Pro Tools 10; Pro Tools 10 uses
+the RTAS beta described below. AAX, AU and VST3
 loading in real hosts is still being qualified; this is a BETA.
 
 ## Legacy RTAS/TDM
+
+Pro Tools 10 (32-bit) is supported through the RTAS beta, a freeware binary
+distributed separately.
 
 The RTAS and TDM plug-ins are not built from this repository. They live in the
 private, closed-source integration layer
