@@ -41,13 +41,14 @@ bash scripts/package-release-macos.sh   # signed installer, manifest, notices
 ```
 
 AAX is 64-bit only. No 32-bit AAX is built for Pro Tools 10; Pro Tools 10 uses
-the RTAS beta described below. AAX, AU and VST3
+the experimental RTAS beta described below. AAX, AU and VST3
 loading in real hosts is still being qualified; this is a BETA.
 
 ## Legacy RTAS/TDM
 
-Pro Tools 10 (32-bit) is supported through the RTAS beta, a freeware binary
-distributed separately.
+For Pro Tools 10 (32-bit) there is an experimental RTAS beta, a freeware binary
+distributed separately. It builds and passes tests against a modern host, but it
+has not yet been tested inside Pro Tools, so it is not a qualified release.
 
 The RTAS and TDM plug-ins are not built from this repository. They live in the
 private, closed-source integration layer
