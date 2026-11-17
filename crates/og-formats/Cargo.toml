@@ -12,6 +12,6 @@ crate-type = ["cdylib"]
 [dependencies]
 og-plugin = { workspace = true }
 openplugin = { workspace = true }
-goodlookindri-shell = { path = "/Volumes/Developer 2/Dependencies/GoodLookinDri/shell" }
+goodlookindri-shell = { git = "https://github.com/MistaMin/GoodLookinDri", tag = "v0.2.1" }
 
 og-protocol = { workspace = true }
