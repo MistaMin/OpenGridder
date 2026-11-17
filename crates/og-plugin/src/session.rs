@@ -663,7 +663,7 @@ impl RemoteSession {
 }
 
 fn read_response_midi(socket: &mut TcpStream, count: i32) -> std::io::Result<Vec<crate::QueuedMidi>> {
-    if count < 0 {
+    if !(0..=og_protocol::MAX_MIDI_EVENTS).contains(&count) {
         return Err(invalid("midi size"));
     }
     let mut events = Vec::with_capacity(count as usize);
@@ -938,7 +938,7 @@ fn parse_screen(body: &[u8]) -> Option<ScreenFrame> {
     let width = i32::from_le_bytes(body[0..4].try_into().ok()?);
     let height = i32::from_le_bytes(body[4..8].try_into().ok()?);
     let size = u64::from_le_bytes(body[24..32].try_into().ok()?) as usize;
-    if width <= 0 || height <= 0 || size == 0 || body.len() < 32 + size {
+    if width <= 0 || height <= 0 || size == 0 || size > body.len() - 32 {
         return None;
     }
     // OpenGridder's "OGRC" trailer: x, y, w, h of the rectangle this image updates.

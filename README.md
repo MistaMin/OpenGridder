@@ -33,6 +33,15 @@ cargo build --release -p og-server -p og-formats -p og-tray
 
 `og-server` does not depend on the Avid SDK and does not link `og-legacy`.
 
+## Access token
+
+The server only answers clients that send its token. It creates the token on
+first start in `~/Library/Application Support/OpenGridder/token` (mode 0600).
+Plug-ins on the same Mac read that file. For a plug-in on another Mac, copy the
+file to the same place there, or set `OG_TOKEN` to its contents. A client with
+no token is dropped without an answer. OpenGridder is not wire-compatible with
+AudioGridder clients.
+
 ## Bundles and release scripts
 
 ```sh

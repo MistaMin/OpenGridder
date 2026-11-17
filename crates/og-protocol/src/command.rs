@@ -173,7 +173,7 @@ pub fn length_prefixed(data: &[u8]) -> Vec<u8> {
 
 pub fn read_length_prefixed(body: &[u8]) -> Option<&[u8]> {
     let size = read_number(body)? as usize;
-    body.get(4..4 + size)
+    body.get(4..size.checked_add(4)?)
 }
 
 pub fn result(rc: i32, text: &str) -> Vec<u8> {

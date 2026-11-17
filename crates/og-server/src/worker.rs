@@ -20,7 +20,7 @@
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -50,11 +50,11 @@ struct AcceptedClient {
     request: HandshakeRequest,
 }
 
-/// Read one handshake on `listener`, bind that client's worker port, and
+/// Read one handshake from `handshake`, bind that client's worker port, and
 /// answer. `Ok(None)` is a client that left or sent a rejected handshake.
-/// The server port stays open for the next client.
-fn accept_client(listener: &TcpListener) -> std::io::Result<Option<AcceptedClient>> {
-    let (mut handshake, _) = listener.accept()?;
+/// This runs on the client's own thread, so a client that never sends its
+/// handshake cannot hold up the accept loop.
+fn handshake_client(mut handshake: TcpStream) -> std::io::Result<Option<AcceptedClient>> {
     handshake.set_read_timeout(Some(IO_TIMEOUT))?;
     handshake.set_write_timeout(Some(IO_TIMEOUT))?;
     let mut raw = [0u8; HandshakeRequest::WIRE_SIZE];
@@ -84,52 +84,89 @@ fn accept_client(listener: &TcpListener) -> std::io::Result<Option<AcceptedClien
     Ok(Some(AcceptedClient { worker, request: req }))
 }
 
+/// Connections that have not finished their handshake. Past the cap a new
+/// connection is dropped, so idle sockets cannot pile up threads.
+static HANDSHAKES: AtomicUsize = AtomicUsize::new(0);
+const MAX_HANDSHAKES: usize = 64;
+
+/// Accept clients forever. Each one handshakes and runs `session` on its own thread.
+fn serve_loop(listener: TcpListener, session: fn(AcceptedClient) -> std::io::Result<()>) -> std::io::Result<()> {
+    listener.set_nonblocking(false)?;
+    loop {
+        let (stream, _) = listener.accept()?;
+        if HANDSHAKES.fetch_add(1, Ordering::AcqRel) >= MAX_HANDSHAKES {
+            HANDSHAKES.fetch_sub(1, Ordering::AcqRel);
+            continue;
+        }
+        thread::spawn(move || {
+            let accepted = handshake_client(stream);
+            HANDSHAKES.fetch_sub(1, Ordering::AcqRel);
+            match accepted {
+                Ok(Some(accepted)) => {
+                    if let Err(err) = session(accepted) {
+                        if restart_requested(&err) {
+                            eprintln!("og-server: {err}");
+                            std::process::exit(1);
+                        }
+                        eprintln!("og-server: {err}");
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => eprintln!("og-server: {err}"),
+            }
+        });
+    }
+}
+
 /// Chain sandbox. Each handshake spawns this executable as `--sandbox-chain-child`.
 /// The handshake answer's port is the child's listener, and `SANDBOX_ENABLED` is set.
 /// Disabled mode stays `serve_clients`: flags 0, and the worker is a thread.
 pub fn serve_chain(listener: TcpListener) -> std::io::Result<()> {
     crate::cpu::start();
     listener.set_nonblocking(false)?;
-    let mut children = Vec::new();
+    let children = Arc::new(Mutex::new(Vec::new()));
     loop {
-        let (mut handshake, _) = match listener.accept() {
-            Ok(accepted) => accepted,
-            Err(err) => return Err(err),
-        };
-        handshake.set_read_timeout(Some(IO_TIMEOUT))?;
-        handshake.set_write_timeout(Some(IO_TIMEOUT))?;
-        let mut raw = [0u8; HandshakeRequest::WIRE_SIZE];
-        if handshake.read_exact(&mut raw).is_err() {
-            continue;
-        }
-        let Some(req) = HandshakeRequest::from_bytes(&raw) else {
-            continue;
-        };
-        if validate_handshake(&req).is_err() {
-            continue;
-        }
-        let mut child = match spawn_chain_child(&req) {
-            Ok(child) => child,
-            Err(err) => {
+        let (handshake, _) = listener.accept()?;
+        let children = Arc::clone(&children);
+        thread::spawn(move || {
+            if let Err(err) = chain_handshake(handshake, &children) {
                 eprintln!("og-server: {err}");
-                continue;
             }
-        };
-        let port = match read_child_port(&mut child) {
-            Ok(port) => port,
-            Err(err) => {
-                eprintln!("og-server: {err}");
-                drop(child);
-                continue;
-            }
-        };
-        let answer = HandshakeResponse { version: PROTOCOL_VERSION, flags: RESP_SANDBOX, port };
-        if handshake.write_all(&answer.to_bytes()).is_err() {
-            drop(child);
-            continue;
-        }
-        children.push(child);
+        });
     }
+}
+
+/// Most chain children alive at once. shortcut: the check and the spawn are not one step,
+/// so a burst of handshakes can pass the cap by a few. Lock across the spawn if that matters.
+const MAX_CHAIN_CHILDREN: usize = 16;
+
+fn chain_handshake(mut handshake: TcpStream, children: &Mutex<Vec<SandboxChild>>) -> std::io::Result<()> {
+    handshake.set_read_timeout(Some(IO_TIMEOUT))?;
+    handshake.set_write_timeout(Some(IO_TIMEOUT))?;
+    let mut raw = [0u8; HandshakeRequest::WIRE_SIZE];
+    if handshake.read_exact(&mut raw).is_err() {
+        return Ok(());
+    }
+    let Some(req) = HandshakeRequest::from_bytes(&raw) else {
+        return Ok(());
+    };
+    if validate_handshake(&req).is_err() {
+        return Ok(());
+    }
+    {
+        let mut live = children.lock().expect("children");
+        // A child whose client left has exited. Reap it here so it is not left a zombie.
+        live.retain_mut(|child| child.0.as_mut().is_some_and(|proc| matches!(proc.try_wait(), Ok(None))));
+        if live.len() >= MAX_CHAIN_CHILDREN {
+            return Err(invalid("too many sandbox children"));
+        }
+    }
+    let mut child = spawn_chain_child(&req)?;
+    let port = read_child_port(&mut child)?;
+    let answer = HandshakeResponse { version: PROTOCOL_VERSION, flags: RESP_SANDBOX, port };
+    handshake.write_all(&answer.to_bytes())?;
+    children.lock().expect("children").push(child);
+    Ok(())
 }
 
 /// Entry point for `--sandbox-chain-child`. The parent writes one handshake on
@@ -207,24 +244,7 @@ fn read_child_port(child: &mut SandboxChild) -> std::io::Result<i32> {
 /// that memory first, so the plugin is not brought back.
 pub fn serve_plugin(listener: TcpListener) -> std::io::Result<()> {
     crate::cpu::start();
-    listener.set_nonblocking(false)?;
-    loop {
-        match accept_client(&listener) {
-            Ok(Some(accepted)) => {
-                thread::spawn(move || {
-                    if let Err(err) = run_session_isolated(accepted) {
-                        if restart_requested(&err) {
-                            eprintln!("og-server: {err}");
-                            std::process::exit(1);
-                        }
-                        eprintln!("og-server: {err}");
-                    }
-                });
-            }
-            Ok(None) => continue,
-            Err(err) => return Err(err),
-        }
-    }
+    serve_loop(listener, run_session_isolated)
 }
 
 /// Entry point for `--sandbox-plugin-child`. The parent writes one handshake
@@ -660,6 +680,9 @@ fn write_burst(socket: &mut TcpStream, messages: &[(i32, Vec<u8>)]) -> std::io::
 
 fn read_burst(socket: &mut TcpStream) -> std::io::Result<Vec<(i32, Vec<u8>)>> {
     let count = read_i32(socket)?;
+    if !(0..=1024).contains(&count) {
+        return Err(invalid("burst count"));
+    }
     let mut messages = Vec::with_capacity(count as usize);
     for _ in 0..count {
         messages.push(read_cmd(socket)?);
@@ -730,7 +753,8 @@ fn read_midi_events(socket: &mut TcpStream, count: i32) -> std::io::Result<Vec<u
 pub fn serve_worker(listener: TcpListener) -> std::io::Result<()> {
     crate::cpu::start();
     listener.set_nonblocking(false)?;
-    let Some(accepted) = accept_client(&listener)? else {
+    let (stream, _) = listener.accept()?;
+    let Some(accepted) = handshake_client(stream)? else {
         return Err(invalid("handshake rejected"));
     };
     run_session(accepted)
@@ -740,24 +764,7 @@ pub fn serve_worker(listener: TcpListener) -> std::io::Result<()> {
 /// then the loop accepts the next client without waiting for that worker.
 pub fn serve_clients(listener: TcpListener) -> std::io::Result<()> {
     crate::cpu::start();
-    listener.set_nonblocking(false)?;
-    loop {
-        match accept_client(&listener) {
-            Ok(Some(accepted)) => {
-                thread::spawn(move || {
-                    if let Err(err) = run_session(accepted) {
-                        if restart_requested(&err) {
-                            eprintln!("og-server: {err}");
-                            std::process::exit(1);
-                        }
-                        eprintln!("og-server: {err}");
-                    }
-                });
-            }
-            Ok(None) => continue,
-            Err(err) => return Err(err),
-        }
-    }
+    serve_loop(listener, run_session)
 }
 
 fn run_session(accepted: AcceptedClient) -> std::io::Result<()> {

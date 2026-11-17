@@ -39,10 +39,11 @@ fn build_info(manifest: &std::path::Path) {
 fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     build_info(&manifest);
-    let sdk = PathBuf::from("/Volumes/Developer 2/Dependencies/clap-wrapper/build/cpm/vst3sdk");
+    println!("cargo:rerun-if-env-changed=VST3_SDK_DIR");
+    let sdk = PathBuf::from(env::var("VST3_SDK_DIR").unwrap_or_else(|_| "/Volumes/Developer 2/Dependencies/clap-wrapper/build/cpm/vst3sdk".into()));
     let header = sdk.join("pluginterfaces/vst/ivstaudioprocessor.h");
     if !header.is_file() {
-        panic!("VST3 SDK header missing at {}", header.display());
+        panic!("VST3 SDK header missing at {} (set VST3_SDK_DIR to the vst3sdk folder)", header.display());
     }
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let object = out.join("ag_native_host.o");

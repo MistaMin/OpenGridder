@@ -5,6 +5,7 @@
 
 pub mod command;
 pub mod realtime;
+pub mod token;
 
 pub const PROTOCOL_VERSION: i32 = 13;
 pub const SERVER_PORT: u16 = 55056;
@@ -22,6 +23,8 @@ pub struct HandshakeRequest {
     pub client_id: u64,
     pub flags: u8,
     pub active_channels: u64,
+    /// Server secret, see [`token`]. Bytes 56..64.
+    pub token: u64,
 }
 
 impl Default for HandshakeRequest {
@@ -37,6 +40,7 @@ impl Default for HandshakeRequest {
             client_id: 0,
             flags: 0,
             active_channels: u64::MAX,
+            token: token::load(),
         }
     }
 }
@@ -56,6 +60,7 @@ impl HandshakeRequest {
         buf[32..40].copy_from_slice(&self.client_id.to_le_bytes());
         buf[40] = self.flags;
         buf[48..56].copy_from_slice(&self.active_channels.to_le_bytes());
+        buf[56..64].copy_from_slice(&self.token.to_le_bytes());
         buf
     }
 
@@ -74,6 +79,7 @@ impl HandshakeRequest {
             client_id: u64::from_le_bytes(buf[32..40].try_into().ok()?),
             flags: buf[40],
             active_channels: u64::from_le_bytes(buf[48..56].try_into().ok()?),
+            token: u64::from_le_bytes(buf[56..64].try_into().ok()?),
         })
     }
 }
@@ -251,8 +257,11 @@ impl PositionInfo {
 
 /// Mono or stereo, 1 to 8192 frames. Double precision and MIDI are legal shapes.
 /// The f32 helpers still refuse them because they read 4-byte samples.
+/// Most MIDI events one audio block may carry. The server reads them into memory, so this bounds that.
+pub const MAX_MIDI_EVENTS: i32 = 4096;
+
 pub fn audio_shape_ok(channels: i32, samples: i32, midi_events: i32, _is_double: bool) -> bool {
-    (channels == 1 || channels == 2) && (1..=8192).contains(&samples) && midi_events >= 0
+    (channels == 1 || channels == 2) && (1..=8192).contains(&samples) && (0..=MAX_MIDI_EVENTS).contains(&midi_events)
 }
 
 fn f32_audio_shape(channels: i32, samples: i32, midi_events: i32, is_double: bool) -> bool {
@@ -395,13 +404,14 @@ mod tests {
             client_id: 0x1234_5678_9ABC_DEF0,
             flags: 0x01,
             active_channels: 0x03,
+            token: 0xA1B2_C3D4_E5F6_0718,
         };
         let req_bytes = req.to_bytes();
         assert_eq!(req_bytes.len(), 64);
         // unused1 at byte 41..48
         assert_eq!(&req_bytes[41..48], &[0u8; 7], "P49: unused1 at byte 41..48 must stay zero");
-        // unused2 at byte 56..64
-        assert_eq!(&req_bytes[56..64], &[0u8; 8], "P51: unused2 at byte 56..64 must stay zero");
+        // OpenGridder's token takes the old unused2 slot at byte 56..64
+        assert_eq!(&req_bytes[56..64], &req.token.to_le_bytes(), "token at byte 56..64");
 
         // P53, P55, P57: HandshakeResponse wire structure
         // flags at byte 4, port at byte 8, 6 unused u32s at bytes 12..36
@@ -480,5 +490,7 @@ mod tests {
         assert!(!audio_shape_ok(8, 64, 0, false));
         assert!(!audio_shape_ok(2, 0, 0, false));
         assert!(!audio_shape_ok(2, 64, -1, false));
+        assert!(audio_shape_ok(2, 64, MAX_MIDI_EVENTS, false));
+        assert!(!audio_shape_ok(2, 64, MAX_MIDI_EVENTS + 1, false));
     }
 }

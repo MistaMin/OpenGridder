@@ -160,6 +160,7 @@ pub enum RejectReason {
     Block,
     Double,
     AudioShape,
+    Token,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -168,7 +169,18 @@ pub enum SessionKind {
     Processed { latency: i32, first_sample: f32, playing: bool, tempo: f64 },
 }
 
+static REQUIRED_TOKEN: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+/// Make every handshake carry `token`. `main` calls this; tests and sandbox children do not,
+/// because the parent already checked the client.
+pub fn require_token(token: u64) {
+    let _ = REQUIRED_TOKEN.set(token);
+}
+
 pub fn validate_handshake(req: &HandshakeRequest) -> Result<(), RejectReason> {
+    if REQUIRED_TOKEN.get().is_some_and(|token| *token != req.token) {
+        return Err(RejectReason::Token);
+    }
     if req.version != PROTOCOL_VERSION {
         return Err(RejectReason::Version);
     }
@@ -377,6 +389,21 @@ mod tests {
             assert!(answer.port > 0 && answer.port <= i32::from(u16::MAX));
             drop(stream);
         }
+    }
+
+    #[test]
+    fn an_idle_connection_does_not_block_the_next_client() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let _server = thread::spawn(move || serve_clients(listener));
+        // Sends nothing. The old accept loop waited out IO_TIMEOUT (2 s) on this socket.
+        let _idle = TcpStream::connect(("127.0.0.1", port)).unwrap();
+
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+        stream.write_all(&handshake(2, 0).to_bytes()).unwrap();
+        let mut raw = [0u8; HandshakeResponse::WIRE_SIZE];
+        stream.read_exact(&mut raw).expect("answered while another client sat idle");
     }
 
     #[test]

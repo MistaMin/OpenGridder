@@ -11,6 +11,18 @@ use std::net::TcpListener;
 use og_protocol::SERVER_PORT;
 use og_server::{sandbox_chain_child, sandbox_plugin_child, serve_chain, serve_clients, serve_plugin};
 
+/// Clients must send the server's token (see `og_protocol::token`). Without one the server would
+/// accept any machine on the network, so a token that cannot be read or created is fatal.
+fn require_token() {
+    match og_protocol::token::load_or_create() {
+        Ok(token) => og_server::require_token(token),
+        Err(err) => {
+            eprintln!("og-server: could not read or create the access token: {err}");
+            std::process::exit(1);
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|arg| arg == "--scan-worker") {
@@ -44,7 +56,8 @@ fn main() {
         }
         return;
     }
-    if args.windows(2).any(|pair| pair[0] == "--sandbox" && pair[1] == "chain") {
+    let sandbox = args.windows(2).find(|pair| pair[0] == "--sandbox").map(|pair| pair[1].as_str());
+    if let Some(mode @ ("chain" | "plugin")) = sandbox {
         let requested = args.windows(2).find(|pair| pair[0] == "--port").and_then(|pair| pair[1].parse::<u16>().ok());
         let listener = if requested == Some(0) {
             TcpListener::bind(("127.0.0.1", 0)).unwrap_or_else(|err| {
@@ -52,6 +65,7 @@ fn main() {
                 std::process::exit(1);
             })
         } else {
+            require_token();
             let port = requested.unwrap_or(SERVER_PORT);
             TcpListener::bind(("0.0.0.0", port)).unwrap_or_else(|err| {
                 eprintln!("og-server: could not bind port {port}: {err}");
@@ -63,34 +77,9 @@ fn main() {
             println!("master {port}");
             let _ = std::io::stdout().flush();
         }
-        eprintln!("OpenGridder Server {} chain sandbox on port {port}.", og_server::build_label());
-        if let Err(err) = serve_chain(listener) {
-            eprintln!("og-server: {err}");
-            std::process::exit(1);
-        }
-        return;
-    }
-    if args.windows(2).any(|pair| pair[0] == "--sandbox" && pair[1] == "plugin") {
-        let requested = args.windows(2).find(|pair| pair[0] == "--port").and_then(|pair| pair[1].parse::<u16>().ok());
-        let listener = if requested == Some(0) {
-            TcpListener::bind(("127.0.0.1", 0)).unwrap_or_else(|err| {
-                eprintln!("og-server: could not bind an ephemeral port: {err}");
-                std::process::exit(1);
-            })
-        } else {
-            let port = requested.unwrap_or(SERVER_PORT);
-            TcpListener::bind(("0.0.0.0", port)).unwrap_or_else(|err| {
-                eprintln!("og-server: could not bind port {port}: {err}");
-                std::process::exit(1);
-            })
-        };
-        let port = listener.local_addr().map(|addr| addr.port()).unwrap_or(0);
-        if requested == Some(0) {
-            println!("master {port}");
-            let _ = std::io::stdout().flush();
-        }
-        eprintln!("OpenGridder Server {} plugin sandbox on port {port}.", og_server::build_label());
-        if let Err(err) = serve_plugin(listener) {
+        eprintln!("OpenGridder Server {} {mode} sandbox on port {port}.", og_server::build_label());
+        let served = if mode == "chain" { serve_chain(listener) } else { serve_plugin(listener) };
+        if let Err(err) = served {
             eprintln!("og-server: {err}");
             std::process::exit(1);
         }
@@ -104,6 +93,7 @@ fn main() {
         None => 0,
     };
     let port = SERVER_PORT.saturating_add(id);
+    require_token();
     let listener = TcpListener::bind(("0.0.0.0", port)).unwrap_or_else(|err| {
         eprintln!("og-server: could not bind port {port}: {err}");
         // Tell the server app, which otherwise keeps showing its scan screen.
