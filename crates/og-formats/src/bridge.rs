@@ -277,6 +277,9 @@ pub unsafe extern "C" fn ag_insert_get(p: *mut c_void, i: u32) -> f64 {
     };
     param.to_normalized(f32::from_bits(n.values[i as usize].load(Ordering::Relaxed))) as f64
 }
+/// Index of the latency-profile parameter in `params()`.
+const LATENCY_PARAM: u32 = 2;
+
 #[no_mangle]
 pub unsafe extern "C" fn ag_insert_set(p: *mut c_void, i: u32, normalized: f64) -> bool {
     let Some(n) = native(p) else {
@@ -288,9 +291,15 @@ pub unsafe extern "C" fn ag_insert_set(p: *mut c_void, i: u32, normalized: f64) 
     if !normalized.is_finite() {
         return false;
     }
-    let value = param.from_normalized(normalized as f32).to_bits();
+    let plain = param.from_normalized(normalized as f32);
+    let value = plain.to_bits();
     if n.values[i as usize].swap(value, Ordering::Relaxed) != value {
         n.revision.fetch_add(1, Ordering::Relaxed);
+    }
+    if i == LATENCY_PARAM {
+        let profile = og_plugin::profile_samples(plain.round() as i32);
+        n.latency
+            .store(profile.max(n.live_ctrl.latency()) as u32, Ordering::Relaxed);
     }
     true
 }
@@ -1071,6 +1080,19 @@ mod review_tests {
                     data: [0x92, 60, 100]
                 }]
             );
+            ag_insert_destroy(raw);
+        }
+    }
+
+    #[test]
+    fn latency_profile_change_is_visible_before_the_next_audio_block() {
+        unsafe {
+            let raw = ag_insert_create();
+            assert_eq!(ag_insert_latency(raw), 256);
+            assert!(ag_insert_set(raw, LATENCY_PARAM, 0.0));
+            assert_eq!(ag_insert_latency(raw), 128);
+            assert!(ag_insert_set(raw, LATENCY_PARAM, 1.0));
+            assert_eq!(ag_insert_latency(raw), 1024);
             ag_insert_destroy(raw);
         }
     }
